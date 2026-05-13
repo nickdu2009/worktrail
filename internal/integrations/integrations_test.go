@@ -133,10 +133,10 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 	}
 	for _, path := range []string{
 		filepath.Join(env.Home, ".codex", "AGENTS.md"),
-		filepath.Join(env.Home, ".agents", "skills", "worktrail-context", "SKILL.md"),
-		filepath.Join(env.Home, ".agents", "skills", "worktrail-handoff", "SKILL.md"),
-		filepath.Join(env.Home, ".agents", "skills", "worktrail-import", "SKILL.md"),
-		filepath.Join(env.Home, ".agents", "skills", "worktrail-review", "SKILL.md"),
+		filepath.Join(env.Home, ".codex", "skills", "worktrail-context", "SKILL.md"),
+		filepath.Join(env.Home, ".codex", "skills", "worktrail-handoff", "SKILL.md"),
+		filepath.Join(env.Home, ".codex", "skills", "worktrail-import", "SKILL.md"),
+		filepath.Join(env.Home, ".codex", "skills", "worktrail-review", "SKILL.md"),
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {

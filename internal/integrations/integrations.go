@@ -140,7 +140,7 @@ func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
 			tool:             tool,
 			rootTemplate:     "root/AGENTS.md",
 			userRootFile:     filepath.Join(env.Home, ".codex", "AGENTS.md"),
-			userSkillRoot:    filepath.Join(env.Home, ".agents", "skills"),
+			userSkillRoot:    filepath.Join(env.Home, ".codex", "skills"),
 			projectSkillRoot: filepath.Join(env.ProjectRoot, ".agents", "skills"),
 			userSkills:       []string{"worktrail-context", "worktrail-handoff", "worktrail-import", "worktrail-review"},
 			projectJSONPath:  filepath.Join(env.ProjectRoot, ".codex", "hooks.json"),
