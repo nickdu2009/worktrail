@@ -8,6 +8,8 @@ const (
 	SchemaState     = "worktrail.state.v1"
 )
 
+const CandidateTypeTranscriptNotes = "transcript_notes"
+
 type Knowledge struct {
 	Schema         string    `json:"schema"`
 	ID             string    `json:"id"`

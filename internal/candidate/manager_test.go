@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/redact"
 )
@@ -170,6 +171,27 @@ func TestMergeBacksUpAndAppendsCandidateBody(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "Existing.\n\nNew note.") {
 		t.Fatalf("merged body = %q", body)
+	}
+}
+
+func TestTranscriptNotesCannotBePromotedOrMerged(t *testing.T) {
+	m := testManager(t)
+	_, err := m.Create(CreateRequest{
+		ID:            "transcript-note",
+		Scope:         "project",
+		CandidateType: model.CandidateTypeTranscriptNotes,
+		TargetPath:    "imports/transcripts/transcript-note.md",
+		Title:         "Transcript Notes",
+		Body:          "Evidence only.\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Promote("project", "transcript-note"); !errors.Is(err, ErrTranscriptNotesApply) {
+		t.Fatalf("Promote error = %v, want ErrTranscriptNotesApply", err)
+	}
+	if _, err := m.Merge("project", "transcript-note"); !errors.Is(err, ErrTranscriptNotesApply) {
+		t.Fatalf("Merge error = %v, want ErrTranscriptNotesApply", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
 	"github.com/nickdu2009/worktrail/internal/paths"
@@ -51,6 +52,7 @@ func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) er
 		if err != nil {
 			return err
 		}
+		records = filterCandidateRecords(records, flagValue(flags, "type", ""), flagValue(flags, "status", ""))
 		if flagValue(flags, "format", "text") == "json" {
 			return json.NewEncoder(ioctx.Out).Encode(records)
 		}
@@ -74,6 +76,25 @@ func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) er
 	default:
 		return fmt.Errorf("unknown candidates subcommand %q", cmd)
 	}
+}
+
+func filterCandidateRecords(records []candidate.Record, typ, status string) []candidate.Record {
+	typ = strings.TrimSpace(typ)
+	status = strings.TrimSpace(status)
+	if typ == "" && status == "" {
+		return records
+	}
+	filtered := records[:0]
+	for _, rec := range records {
+		if typ != "" && rec.Meta.CandidateType != typ {
+			continue
+		}
+		if status != "" && rec.Meta.Status != status {
+			continue
+		}
+		filtered = append(filtered, rec)
+	}
+	return filtered
 }
 
 func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error {

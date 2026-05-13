@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nickdu2009/worktrail/internal/model"
 )
 
 func TestManualProviderCreatesStructuredCandidates(t *testing.T) {
@@ -44,12 +46,24 @@ func TestManualProviderCreatesTranscriptNotesCandidate(t *testing.T) {
 		t.Fatalf("candidates = %d, want 1", len(out.Candidates))
 	}
 	candidate := out.Candidates[0]
-	if candidate.ID != "" || candidate.CandidateType != "lesson" || candidate.Title != "Transcript notes" {
+	if candidate.ID != "" || candidate.CandidateType != model.CandidateTypeTranscriptNotes || candidate.Title != "Transcript notes" {
 		t.Fatalf("unexpected transcript candidate: %+v", candidate)
+	}
+	if !contains(candidate.Tags, "transcript") || !contains(candidate.Tags, "import") || !contains(candidate.Tags, "evidence") {
+		t.Fatalf("candidate tags = %#v, want transcript/import/evidence", candidate.Tags)
 	}
 	if !strings.Contains(candidate.Summary, "Add integration coverage") {
 		t.Fatalf("candidate summary did not include transcript content: %s", candidate.Summary)
 	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestUnavailableProvidersReturnExplicitErrors(t *testing.T) {

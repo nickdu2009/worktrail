@@ -323,6 +323,8 @@ func defaultCandidateTarget(cand model.Candidate) string {
 		return filepath.ToSlash(filepath.Join("prompts", cand.ID+".md"))
 	case "rule":
 		return filepath.ToSlash(filepath.Join("rules", cand.ID+".md"))
+	case model.CandidateTypeTranscriptNotes:
+		return filepath.ToSlash(filepath.Join("imports", "transcripts", cand.ID+".md"))
 	default:
 		return filepath.ToSlash(filepath.Join("lessons", typ+"-"+cand.ID+".md"))
 	}
@@ -330,6 +332,13 @@ func defaultCandidateTarget(cand model.Candidate) string {
 
 func candidateBody(cand model.Candidate) string {
 	var b strings.Builder
+	if cand.CandidateType == model.CandidateTypeTranscriptNotes {
+		fmt.Fprintf(&b, "# Transcript Evidence: %s\n\n", cand.Title)
+		if cand.Summary != "" {
+			fmt.Fprintf(&b, "## Evidence\n\n%s\n", cand.Summary)
+		}
+		return b.String()
+	}
 	fmt.Fprintf(&b, "# Candidate: %s\n\n", cand.Title)
 	if cand.Summary != "" {
 		fmt.Fprintf(&b, "## Summary\n\n%s\n\n", cand.Summary)

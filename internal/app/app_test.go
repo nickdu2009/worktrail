@@ -6,7 +6,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/nickdu2009/worktrail/internal/candidate"
+	"github.com/nickdu2009/worktrail/internal/model"
 )
 
 func TestInitCreatesUserAndProjectRoots(t *testing.T) {
@@ -110,5 +114,67 @@ func TestImportCodexDiscoversAndExtractsProjectSessions(t *testing.T) {
 	}
 	if len(candidates) != 1 {
 		t.Fatalf("candidate files = %d, want 1", len(candidates))
+	}
+	candidateBody, err := os.ReadFile(candidates[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(candidateBody, []byte(`"candidate_type": "transcript_notes"`)) {
+		t.Fatalf("candidate is not transcript notes:\n%s", candidateBody)
+	}
+	if !bytes.Contains(candidateBody, []byte(`"target_path": "imports/transcripts/codex-01-session.md"`)) {
+		t.Fatalf("candidate target is not transcript import path:\n%s", candidateBody)
+	}
+}
+
+func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"init"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run init: %v stderr=%s", err, errb.String())
+	}
+	if err := Run(context.Background(), []string{"candidates", "create", "--id", "note-1", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/note-1.md", "--title", "Transcript Notes", "Evidence body."}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates create transcript: %v stderr=%s", err, errb.String())
+	}
+	if err := Run(context.Background(), []string{"candidates", "create", "--id", "rule-1", "--type", "rule", "--target", "rules/rule-1.md", "--title", "Rule", "Rule body."}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates create rule: %v stderr=%s", err, errb.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"candidates", "list", "--type", model.CandidateTypeTranscriptNotes, "--status", candidate.StatusPending, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates list: %v stderr=%s", err, errb.String())
+	}
+	var records []candidate.Record
+	if err := json.Unmarshal(out.Bytes(), &records); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Meta.ID != "note-1" {
+		t.Fatalf("filtered records = %#v", records)
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "--pending", "--limit", "1"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill pending: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "Evidence Candidate `note-1`") {
+		t.Fatalf("distill pending output missing note-1:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "note-1"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill: %v stderr=%s", err, errb.String())
+	}
+	text := out.String()
+	for _, want := range []string{"Worktrail Distillation Pack", "Evidence body.", model.CandidateTypeTranscriptNotes, "Do not promote"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("distill output missing %q:\n%s", want, text)
+		}
 	}
 }

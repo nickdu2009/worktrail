@@ -11,8 +11,10 @@ For all current-project Codex conversations:
 
 1. Run `worktrail import codex` first and show the dry-run count.
 2. If the user asked to proceed or already asked for all conversations, run `worktrail import codex --all`.
-3. Summarize matched sessions, synced transcripts, extracted pending candidates, and skipped duplicates.
-4. Hand off review to `/worktrail-review`.
+3. Summarize matched sessions, synced transcripts, extracted pending transcript evidence candidates, and skipped duplicates.
+4. Run `worktrail distill --pending --limit 5` to prepare the first small distillation pack.
+5. As the current AI agent, summarize the evidence into semantic pending candidates with `worktrail candidates create`.
+6. Hand off review to `/worktrail-review`.
 
 For one explicit transcript file:
 
@@ -22,4 +24,4 @@ For one explicit transcript file:
 4. Summarize created pending candidates and their target paths.
 5. Hand off review to `/worktrail-review`.
 
-Do not promote, merge, discard, or write formal knowledge from this skill. Import and extract create pending candidates only.
+Do not promote, merge, discard, or write formal knowledge from this skill. Import, extract, distill, and candidate creation produce pending candidates only. Transcript notes are evidence and must be distilled into semantic candidates before review or promotion.

@@ -30,8 +30,9 @@ const (
 )
 
 var (
-	ErrBlocked  = errors.New("candidate content contains blocked sensitive material")
-	ErrNotFound = errors.New("candidate not found")
+	ErrBlocked              = errors.New("candidate content contains blocked sensitive material")
+	ErrNotFound             = errors.New("candidate not found")
+	ErrTranscriptNotesApply = errors.New("transcript notes are evidence and must be distilled before promote or merge")
 )
 
 type Manager struct {
@@ -247,6 +248,9 @@ func (m Manager) apply(scope, id, op string) (ApplyResult, error) {
 	}
 	if terminalStatus(rec.Meta.Status) {
 		return ApplyResult{}, fmt.Errorf("candidate %q is already %s", rec.Meta.ID, rec.Meta.Status)
+	}
+	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+		return ApplyResult{}, ErrTranscriptNotesApply
 	}
 	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
 	if err != nil {

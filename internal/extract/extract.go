@@ -117,12 +117,12 @@ func transcriptCandidate(input Input, now time.Time, text string) *model.Candida
 	}
 	excerpt := compactText(text, 6000)
 	candidate := newCandidate(input, now, manualCandidate{
-		CandidateType: "lesson",
+		CandidateType: model.CandidateTypeTranscriptNotes,
 		Title:         "Transcript notes",
-		Summary:       "Reviewable notes extracted from an imported AI coding transcript.\n\n" + excerpt,
+		Summary:       "Evidence extracted from an imported AI coding transcript. Distill this into semantic knowledge candidates before review or promotion.\n\n" + excerpt,
 		Operation:     "create",
 		Status:        "pending",
-		Tags:          []string{"transcript", "import"},
+		Tags:          []string{"transcript", "import", "evidence"},
 	})
 	candidate.ID = ""
 	return &candidate
