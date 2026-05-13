@@ -1,0 +1,14 @@
+{
+  "worktrail": {
+    "mcp": {
+      "command": "worktrail",
+      "args": ["mcp", "serve", "--stdio"]
+    },
+    "hooks": {
+      "session-start": "worktrail hook codex session-start",
+      "user-prompt": "worktrail hook codex user-prompt",
+      "post-tool-use": "worktrail hook codex post-tool-use",
+      "stop": "worktrail hook codex stop"
+    }
+  }
+}

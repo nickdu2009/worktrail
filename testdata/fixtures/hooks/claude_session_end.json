@@ -1,0 +1,5 @@
+{
+  "session_id": "claude:test-session",
+  "prompt": "Prepare compact-safe Worktrail state",
+  "transcript_summary": "The session updated integration hooks and needs a checkpoint."
+}

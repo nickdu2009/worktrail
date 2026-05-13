@@ -1,0 +1,2 @@
+{"type":"message","role":"user","content":[{"type":"input_text","text":"Please do the task."}],"created_at":"2026-05-03T00:00:00Z"}
+{"type":"message","role":"assistant","content":"Done.","created_at":"2026-05-03T00:01:00Z"}
