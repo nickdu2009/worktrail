@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	wlog "github.com/nickdu2009/worktrail/internal/log"
@@ -81,10 +82,54 @@ func InitProject(env paths.Env) error {
 	if err := writeDefaults(env.ProjectWT, defaults); err != nil {
 		return err
 	}
+	if err := EnsureProjectGitignore(env); err != nil {
+		return err
+	}
 	if err := mergeProjectCodexHooks(filepath.Join(env.ProjectRoot, ".codex", "hooks.json")); err != nil {
 		return err
 	}
 	return wlog.Append(env.ProjectWT, "init", "", "cli:init-project", nil)
+}
+
+const ProjectGitignoreBody = `# Worktrail local integration installs. These are generated per developer.
+.agents/
+.codex/
+.claude/
+
+# Worktrail runtime/local state. Formal project knowledge files under
+# .worktrail/ remain trackable by default.
+.worktrail/state/
+.worktrail/candidates/
+.worktrail/raw/
+.worktrail/index/
+.worktrail/logs/
+.worktrail/exports/`
+
+const legacyProjectGitignoreBody = `# Worktrail local integration installs. These are generated per developer by
+# ` + "`" + `worktrail install codex` + "`" + ` / future local integrations.
+.agents/
+.codex/
+.claude/
+
+# Worktrail runtime/local state. Formal project knowledge files under
+# ` + "`" + `.worktrail/` + "`" + ` remain trackable by default.
+.worktrail/state/
+.worktrail/candidates/
+.worktrail/raw/
+.worktrail/index/
+.worktrail/logs/
+.worktrail/exports/`
+
+func EnsureProjectGitignore(env paths.Env) error {
+	path := filepath.Join(env.ProjectRoot, ".gitignore")
+	existing := ""
+	if data, err := os.ReadFile(path); err == nil {
+		existing = string(data)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	existing = strings.Replace(existing, legacyProjectGitignoreBody, "", 1)
+	return util.AtomicWrite(path, []byte(util.ApplyHashManagedBlock(existing, ProjectGitignoreBody)), 0o644)
 }
 
 func makeTree(root string, dirs []string) error {

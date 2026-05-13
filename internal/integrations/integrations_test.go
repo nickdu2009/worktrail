@@ -26,7 +26,7 @@ func testEnv(t *testing.T) paths.Env {
 	}
 }
 
-func TestInstallCodexProjectManagesHooksOnly(t *testing.T) {
+func TestInstallCodexProjectManagesHooksAndGitignoreOnly(t *testing.T) {
 	env := testEnv(t)
 	agents := filepath.Join(env.ProjectRoot, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# Local rules\n\nKeep this.\n"), 0o644); err != nil {
@@ -73,6 +73,14 @@ func TestInstallCodexProjectManagesHooksOnly(t *testing.T) {
 	if _, ok := cfg["worktrail"]; !ok {
 		t.Fatalf("worktrail JSON key missing: %s", raw)
 	}
+	gitignore := filepath.Join(env.ProjectRoot, ".gitignore")
+	raw, err = os.ReadFile(gitignore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), util.HashManagedBegin) || !strings.Contains(string(raw), ".codex/") {
+		t.Fatalf("project .gitignore missing worktrail managed entries: %s", raw)
+	}
 
 	doctor, err := Doctor(env, ToolCodex, Options{Project: true})
 	if err != nil {
@@ -109,6 +117,13 @@ func TestInstallCodexProjectManagesHooksOnly(t *testing.T) {
 	if _, ok := cfg["existing"]; !ok {
 		t.Fatalf("existing JSON key was removed: %s", raw)
 	}
+	raw, err = os.ReadFile(gitignore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), util.HashManagedBegin) {
+		t.Fatalf("project .gitignore should remain after codex uninstall: %s", raw)
+	}
 }
 
 func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
@@ -133,6 +148,7 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(env.ProjectRoot, "AGENTS.md"),
 		filepath.Join(env.ProjectRoot, ".agents", "skills", "worktrail-state", "SKILL.md"),
+		filepath.Join(env.ProjectRoot, ".gitignore"),
 		filepath.Join(env.ProjectRoot, ".codex", "hooks.json"),
 	} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -151,6 +167,7 @@ func TestInstallClaudeUserAndProject(t *testing.T) {
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-review", "SKILL.md"),
 		filepath.Join(env.ProjectRoot, "CLAUDE.md"),
 		filepath.Join(env.ProjectRoot, ".claude", "skills", "worktrail-state", "SKILL.md"),
+		filepath.Join(env.ProjectRoot, ".gitignore"),
 		filepath.Join(env.ProjectRoot, ".claude", "settings.json"),
 	} {
 		data, err := os.ReadFile(path)

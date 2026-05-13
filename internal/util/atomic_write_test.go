@@ -28,3 +28,14 @@ func TestManagedBlock(t *testing.T) {
 		t.Fatalf("missing %q in %q", want, got)
 	}
 }
+
+func TestHashManagedBlock(t *testing.T) {
+	got := ApplyHashManagedBlock("*.test\n", ".codex/")
+	got = ApplyHashManagedBlock(got, ".agents/")
+	if strings.Contains(got, "<!--") {
+		t.Fatalf("hash managed block should not use markdown comments: %q", got)
+	}
+	if !strings.Contains(got, HashManagedBegin) || !strings.Contains(got, ".agents/") || strings.Contains(got, ".codex/") {
+		t.Fatalf("unexpected hash managed block: %q", got)
+	}
+}

@@ -5,14 +5,25 @@ import "strings"
 const (
 	ManagedBegin = "<!-- BEGIN WORKTRAIL MANAGED BLOCK -->"
 	ManagedEnd   = "<!-- END WORKTRAIL MANAGED BLOCK -->"
+
+	HashManagedBegin = "# BEGIN WORKTRAIL MANAGED BLOCK"
+	HashManagedEnd   = "# END WORKTRAIL MANAGED BLOCK"
 )
 
 func ApplyManagedBlock(existing, body string) string {
-	block := ManagedBegin + "\n" + strings.TrimSpace(body) + "\n" + ManagedEnd
-	start := strings.Index(existing, ManagedBegin)
-	end := strings.Index(existing, ManagedEnd)
+	return ApplyManagedBlockWithMarkers(existing, body, ManagedBegin, ManagedEnd)
+}
+
+func ApplyHashManagedBlock(existing, body string) string {
+	return ApplyManagedBlockWithMarkers(existing, body, HashManagedBegin, HashManagedEnd)
+}
+
+func ApplyManagedBlockWithMarkers(existing, body, begin, endMarker string) string {
+	block := begin + "\n" + strings.TrimSpace(body) + "\n" + endMarker
+	start := strings.Index(existing, begin)
+	end := strings.Index(existing, endMarker)
 	if start >= 0 && end >= start {
-		end += len(ManagedEnd)
+		end += len(endMarker)
 		next := strings.TrimSpace(existing[:start] + block + existing[end:])
 		return next + "\n"
 	}
@@ -23,11 +34,15 @@ func ApplyManagedBlock(existing, body string) string {
 }
 
 func RemoveManagedBlock(existing string) string {
-	start := strings.Index(existing, ManagedBegin)
-	end := strings.Index(existing, ManagedEnd)
+	return RemoveManagedBlockWithMarkers(existing, ManagedBegin, ManagedEnd)
+}
+
+func RemoveManagedBlockWithMarkers(existing, begin, endMarker string) string {
+	start := strings.Index(existing, begin)
+	end := strings.Index(existing, endMarker)
 	if start < 0 || end < start {
 		return existing
 	}
-	end += len(ManagedEnd)
+	end += len(endMarker)
 	return strings.TrimSpace(existing[:start]+existing[end:]) + "\n"
 }

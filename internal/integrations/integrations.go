@@ -11,6 +11,7 @@ import (
 
 	wlog "github.com/nickdu2009/worktrail/internal/log"
 	"github.com/nickdu2009/worktrail/internal/paths"
+	"github.com/nickdu2009/worktrail/internal/store"
 	"github.com/nickdu2009/worktrail/internal/util"
 	wtmpl "github.com/nickdu2009/worktrail/templates"
 )
@@ -194,6 +195,11 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 		report.Actions = append(report.Actions, Action{Path: path, Action: "managed-block-installed"})
 	}
 	if scope == "project" && cfg.projectJSONPath != "" {
+		env := paths.Env{ProjectRoot: filepath.Dir(filepath.Dir(cfg.projectJSONPath))}
+		if err := store.EnsureProjectGitignore(env); err != nil {
+			return err
+		}
+		report.Actions = append(report.Actions, Action{Path: filepath.Join(env.ProjectRoot, ".gitignore"), Action: "gitignore-managed-block-installed"})
 		if err := mergeJSONTemplate(cfg.projectJSONPath, cfg.projectJSONTmpl); err != nil {
 			return err
 		}
@@ -250,6 +256,8 @@ func doctorScope(cfg integrationConfig, scope string, report *Report) {
 		report.Checks = append(report.Checks, managedCheck(scope+" skill "+skill, path))
 	}
 	if scope == "project" && cfg.projectJSONPath != "" {
+		projectRoot := filepath.Dir(filepath.Dir(cfg.projectJSONPath))
+		report.Checks = append(report.Checks, hashManagedCheck(scope+" gitignore", filepath.Join(projectRoot, ".gitignore")))
 		ok, note := jsonHasWorktrail(cfg.projectJSONPath)
 		report.Checks = append(report.Checks, Check{Name: scope + " hooks/settings", Path: cfg.projectJSONPath, OK: ok, Note: note})
 	}
@@ -341,6 +349,19 @@ func managedCheck(name, path string) Check {
 		return Check{Name: name, Path: path, OK: false, Note: err.Error()}
 	}
 	ok := strings.Contains(string(data), util.ManagedBegin) && strings.Contains(string(data), util.ManagedEnd)
+	note := "managed block present"
+	if !ok {
+		note = "missing managed block"
+	}
+	return Check{Name: name, Path: path, OK: ok, Note: note}
+}
+
+func hashManagedCheck(name, path string) Check {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Check{Name: name, Path: path, OK: false, Note: err.Error()}
+	}
+	ok := strings.Contains(string(data), util.HashManagedBegin) && strings.Contains(string(data), util.HashManagedEnd)
 	note := "managed block present"
 	if !ok {
 		note = "missing managed block"

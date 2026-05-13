@@ -25,11 +25,15 @@ func TestInitCreatesUserAndProjectRoots(t *testing.T) {
 		filepath.Join(home, "logs", "events.jsonl"),
 		filepath.Join(project, ".worktrail", "config.json"),
 		filepath.Join(project, ".worktrail", "logs", "events.jsonl"),
+		filepath.Join(project, ".gitignore"),
 		filepath.Join(project, ".codex", "hooks.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
 		}
+	}
+	if data, err := os.ReadFile(filepath.Join(project, ".gitignore")); err != nil || !bytes.Contains(data, []byte(".codex/")) {
+		t.Fatalf("expected project .gitignore to contain worktrail entries: %v %s", err, data)
 	}
 	for _, path := range []string{
 		filepath.Join(project, "AGENTS.md"),
