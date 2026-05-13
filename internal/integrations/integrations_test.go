@@ -135,6 +135,7 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		filepath.Join(env.Home, ".codex", "AGENTS.md"),
 		filepath.Join(env.Home, ".agents", "skills", "worktrail-context", "SKILL.md"),
 		filepath.Join(env.Home, ".agents", "skills", "worktrail-handoff", "SKILL.md"),
+		filepath.Join(env.Home, ".agents", "skills", "worktrail-import", "SKILL.md"),
 		filepath.Join(env.Home, ".agents", "skills", "worktrail-review", "SKILL.md"),
 	} {
 		data, err := os.ReadFile(path)
@@ -164,6 +165,7 @@ func TestInstallClaudeUserAndProject(t *testing.T) {
 	}
 	for _, path := range []string{
 		filepath.Join(env.Home, ".claude", "CLAUDE.md"),
+		filepath.Join(env.Home, ".claude", "skills", "worktrail-import", "SKILL.md"),
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-review", "SKILL.md"),
 		filepath.Join(env.ProjectRoot, "CLAUDE.md"),
 		filepath.Join(env.ProjectRoot, ".claude", "skills", "worktrail-state", "SKILL.md"),
