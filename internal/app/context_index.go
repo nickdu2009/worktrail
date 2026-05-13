@@ -178,7 +178,8 @@ func runExtract(_ context.Context, env paths.Env, ioctx IO, args []string) error
 	}
 	manager := candidate.Manager{Env: env, Actor: "cli:extract"}
 	var records []candidate.Record
-	for _, cand := range out.Candidates {
+	for i, cand := range out.Candidates {
+		cand.ID = extractionCandidateID(source, path, i, cand.ID)
 		target := cand.TargetPath
 		if strings.TrimSpace(target) == "" {
 			target = defaultCandidateTarget(cand)
@@ -281,6 +282,18 @@ func sessionID(source, path string) string {
 		source = "manual"
 	}
 	return source + ":" + filepath.Base(path)
+}
+
+func extractionCandidateID(source, path string, index int, id string) string {
+	prefix := source
+	if prefix == "" {
+		prefix = "manual"
+	}
+	base := strings.TrimSpace(id)
+	if base == "" {
+		base = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	}
+	return fmt.Sprintf("%s-%02d-%s", prefix, index+1, base)
 }
 
 func defaultCandidateTarget(cand model.Candidate) string {

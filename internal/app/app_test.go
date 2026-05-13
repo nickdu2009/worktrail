@@ -33,3 +33,14 @@ func TestInitCreatesUserAndProjectRoots(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractionCandidateIDIncludesSourceAndOrdinal(t *testing.T) {
+	got := extractionCandidateID("codex", "/tmp/session.jsonl", 1, "user")
+	if got != "codex-02-user" {
+		t.Fatalf("id = %s", got)
+	}
+	got = extractionCandidateID("", "/tmp/session.jsonl", 0, "")
+	if got != "manual-01-session" {
+		t.Fatalf("fallback id = %s", got)
+	}
+}

@@ -15,14 +15,13 @@ type Env struct {
 }
 
 func Discover() (Env, error) {
-	home := os.Getenv("WORKTRAIL_HOME")
-	if home == "" {
-		var err error
-		home, err = os.UserHomeDir()
-		if err != nil {
-			return Env{}, err
-		}
-		home = filepath.Join(home, ".worktrail")
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return Env{}, err
+	}
+	userRoot := os.Getenv("WORKTRAIL_HOME")
+	if userRoot == "" {
+		userRoot = filepath.Join(userHome, ".worktrail")
 	}
 	project := os.Getenv("WORKTRAIL_PROJECT_ROOT")
 	if project == "" {
@@ -32,11 +31,12 @@ func Discover() (Env, error) {
 		}
 		project = cwd
 	}
-	home, _ = filepath.Abs(home)
+	userHome, _ = filepath.Abs(userHome)
+	userRoot, _ = filepath.Abs(userRoot)
 	project, _ = filepath.Abs(project)
 	return Env{
-		Home:        filepath.Dir(home),
-		UserRoot:    home,
+		Home:        userHome,
+		UserRoot:    userRoot,
 		ProjectRoot: project,
 		ProjectWT:   filepath.Join(project, ".worktrail"),
 	}, nil
