@@ -164,17 +164,31 @@ func runExtract(_ context.Context, env paths.Env, ioctx IO, args []string) error
 	if path == "" {
 		return errors.New("extract requires a session file")
 	}
-	text, err := transcriptText(source, path)
+	records, err := extractSession(env, scope, source, providerName, path)
 	if err != nil {
 		return err
+	}
+	if flagValue(flags, "format", "text") == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(records)
+	}
+	for _, rec := range records {
+		fmt.Fprintf(ioctx.Out, "%s\t%s\t%s\n", rec.Meta.ID, rec.Meta.Status, rec.Meta.TargetPath)
+	}
+	return nil
+}
+
+func extractSession(env paths.Env, scope, source, providerName, path string) ([]candidate.Record, error) {
+	text, err := transcriptText(source, path)
+	if err != nil {
+		return nil, err
 	}
 	provider, err := extract.ProviderByName(providerName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	out, err := provider.Extract(extract.Input{Scope: scope, Text: text, SourceSessions: []string{sessionID(source, path)}}, extract.Schema{Name: "worktrail.candidate.v1"})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	manager := candidate.Manager{Env: env, Actor: "cli:extract"}
 	var records []candidate.Record
@@ -197,17 +211,11 @@ func runExtract(_ context.Context, env paths.Env, ioctx IO, args []string) error
 			Body:           candidateBody(cand),
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		records = append(records, rec)
 	}
-	if flagValue(flags, "format", "text") == "json" {
-		return json.NewEncoder(ioctx.Out).Encode(records)
-	}
-	for _, rec := range records {
-		fmt.Fprintf(ioctx.Out, "%s\t%s\t%s\n", rec.Meta.ID, rec.Meta.Status, rec.Meta.TargetPath)
-	}
-	return nil
+	return records, nil
 }
 
 func transcriptText(source, path string) (string, error) {

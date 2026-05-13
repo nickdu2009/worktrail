@@ -68,6 +68,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 		return runSync(ctx, env, ioctx, args[1:])
 	case "extract":
 		return runExtract(ctx, env, ioctx, args[1:])
+	case "import":
+		return runImport(ctx, env, ioctx, args[1:])
 	case "install":
 		return runInstall(ctx, env, ioctx, args[1:])
 	case "uninstall":
