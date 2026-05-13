@@ -189,7 +189,7 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 			return err
 		}
 		path := filepath.Join(skillRoot, skill, "SKILL.md")
-		if err := applyManaged(path, body); err != nil {
+		if err := applySkillManaged(path, body); err != nil {
 			return err
 		}
 		report.Actions = append(report.Actions, Action{Path: path, Action: "managed-block-installed"})
@@ -225,7 +225,7 @@ func uninstallScope(cfg integrationConfig, scope string, report *Report) error {
 	}
 	for _, skill := range skills {
 		path := filepath.Join(skillRoot, skill, "SKILL.md")
-		if err := removeManaged(path); err != nil {
+		if err := removeSkillManaged(path); err != nil {
 			return err
 		}
 		report.Actions = append(report.Actions, Action{Path: path, Action: "managed-block-removed"})
@@ -253,7 +253,7 @@ func doctorScope(cfg integrationConfig, scope string, report *Report) {
 	}
 	for _, skill := range skills {
 		path := filepath.Join(skillRoot, skill, "SKILL.md")
-		report.Checks = append(report.Checks, managedCheck(scope+" skill "+skill, path))
+		report.Checks = append(report.Checks, skillCheck(scope+" skill "+skill, path))
 	}
 	if scope == "project" && cfg.projectJSONPath != "" {
 		projectRoot := filepath.Dir(filepath.Dir(cfg.projectJSONPath))
@@ -273,6 +273,15 @@ func applyManaged(path, body string) error {
 	return util.AtomicWrite(path, []byte(util.ApplyManagedBlock(existing, body)), 0o644)
 }
 
+func applySkillManaged(path, body string) error {
+	frontmatter, content, ok := splitSkillDocument(body)
+	if !ok {
+		return applyManaged(path, body)
+	}
+	next := strings.TrimSpace(frontmatter) + "\n\n" + util.ApplyManagedBlock("", content)
+	return util.AtomicWrite(path, []byte(next), 0o644)
+}
+
 func removeManaged(path string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -282,6 +291,42 @@ func removeManaged(path string) error {
 		return err
 	}
 	return util.AtomicWrite(path, []byte(util.RemoveManagedBlock(string(data))), 0o644)
+}
+
+func removeSkillManaged(path string) error {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	next := util.RemoveManagedBlock(string(data))
+	_, rest, ok := splitSkillDocument(next)
+	if ok && strings.TrimSpace(rest) == "" {
+		return os.Remove(path)
+	}
+	return util.AtomicWrite(path, []byte(next), 0o644)
+}
+
+func splitSkillDocument(body string) (frontmatter string, content string, ok bool) {
+	body = strings.TrimLeft(body, "\ufeff")
+	if !strings.HasPrefix(body, "---\n") {
+		return "", "", false
+	}
+	end := strings.Index(body[len("---\n"):], "\n---")
+	if end < 0 {
+		return "", "", false
+	}
+	end += len("---\n")
+	closeEnd := end + len("\n---")
+	if len(body) > closeEnd && body[closeEnd] == '\r' {
+		closeEnd++
+	}
+	if len(body) > closeEnd && body[closeEnd] == '\n' {
+		closeEnd++
+	}
+	return strings.TrimSpace(body[:closeEnd]), strings.TrimSpace(body[closeEnd:]), true
 }
 
 func mergeJSONTemplate(path, templatePath string) error {
@@ -351,6 +396,24 @@ func managedCheck(name, path string) Check {
 	ok := strings.Contains(string(data), util.ManagedBegin) && strings.Contains(string(data), util.ManagedEnd)
 	note := "managed block present"
 	if !ok {
+		note = "missing managed block"
+	}
+	return Check{Name: name, Path: path, OK: ok, Note: note}
+}
+
+func skillCheck(name, path string) Check {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Check{Name: name, Path: path, OK: false, Note: err.Error()}
+	}
+	text := string(data)
+	_, _, hasFrontmatter := splitSkillDocument(text)
+	hasManaged := strings.Contains(text, util.ManagedBegin) && strings.Contains(text, util.ManagedEnd)
+	ok := hasFrontmatter && hasManaged
+	note := "frontmatter and managed block present"
+	if !hasFrontmatter {
+		note = "missing skill frontmatter"
+	} else if !hasManaged {
 		note = "missing managed block"
 	}
 	return Check{Name: name, Path: path, OK: ok, Note: note}

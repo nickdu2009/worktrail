@@ -133,6 +133,16 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 	}
 	for _, path := range []string{
 		filepath.Join(env.Home, ".codex", "AGENTS.md"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+		if !strings.Contains(string(data), util.ManagedBegin) {
+			t.Fatalf("expected managed block in %s", path)
+		}
+	}
+	for _, path := range []string{
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-context", "SKILL.md"),
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-handoff", "SKILL.md"),
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-import", "SKILL.md"),
@@ -141,6 +151,9 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("expected %s: %v", path, err)
+		}
+		if !strings.HasPrefix(string(data), "---\n") {
+			t.Fatalf("skill frontmatter must be first in %s:\n%s", path, data)
 		}
 		if !strings.Contains(string(data), util.ManagedBegin) {
 			t.Fatalf("expected managed block in %s", path)
@@ -165,10 +178,33 @@ func TestInstallClaudeUserAndProject(t *testing.T) {
 	}
 	for _, path := range []string{
 		filepath.Join(env.Home, ".claude", "CLAUDE.md"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+		if !strings.Contains(string(data), util.ManagedBegin) {
+			t.Fatalf("expected managed block in %s", path)
+		}
+	}
+	for _, path := range []string{
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-import", "SKILL.md"),
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-review", "SKILL.md"),
-		filepath.Join(env.ProjectRoot, "CLAUDE.md"),
 		filepath.Join(env.ProjectRoot, ".claude", "skills", "worktrail-state", "SKILL.md"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+		if !strings.HasPrefix(string(data), "---\n") {
+			t.Fatalf("skill frontmatter must be first in %s:\n%s", path, data)
+		}
+		if !strings.Contains(string(data), util.ManagedBegin) {
+			t.Fatalf("expected managed block in %s", path)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(env.ProjectRoot, "CLAUDE.md"),
 		filepath.Join(env.ProjectRoot, ".gitignore"),
 		filepath.Join(env.ProjectRoot, ".claude", "settings.json"),
 	} {
