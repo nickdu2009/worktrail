@@ -1,3 +1,17 @@
 worktrail
 *.test
 .DS_Store
+# Worktrail local integration installs. These are generated per developer by
+# `worktrail install codex` / future local integrations.
+.agents/
+.codex/
+.claude/
+
+# Worktrail runtime/local state. Formal project knowledge files under
+# `.worktrail/` remain trackable by default.
+.worktrail/state/
+.worktrail/candidates/
+.worktrail/raw/
+.worktrail/index/
+.worktrail/logs/
+.worktrail/exports/

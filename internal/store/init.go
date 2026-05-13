@@ -81,10 +81,7 @@ func InitProject(env paths.Env) error {
 	if err := writeDefaults(env.ProjectWT, defaults); err != nil {
 		return err
 	}
-	if err := applyRootManaged(filepath.Join(env.ProjectRoot, "AGENTS.md"), "Use `worktrail context \"<task>\"` at task start and `/worktrail-review` for candidate review."); err != nil {
-		return err
-	}
-	if err := applyRootManaged(filepath.Join(env.ProjectRoot, "CLAUDE.md"), "Use `worktrail context \"<task>\"` at task start and `/worktrail-review` for candidate review."); err != nil {
+	if err := mergeProjectCodexHooks(filepath.Join(env.ProjectRoot, ".codex", "hooks.json")); err != nil {
 		return err
 	}
 	return wlog.Append(env.ProjectWT, "init", "", "cli:init-project", nil)
@@ -128,10 +125,30 @@ func writeDefaults(root string, files map[string]string) error {
 	return nil
 }
 
-func applyRootManaged(path, body string) error {
-	var existing []byte
-	if b, err := os.ReadFile(path); err == nil {
-		existing = b
+func mergeProjectCodexHooks(path string) error {
+	existing := map[string]any{}
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, &existing); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
 	}
-	return util.AtomicWrite(path, []byte(util.ApplyManagedBlock(string(existing), body)), 0o644)
+	existing["worktrail"] = map[string]any{
+		"mcp": map[string]any{
+			"command": "worktrail",
+			"args":    []string{"mcp", "serve", "--stdio"},
+		},
+		"hooks": map[string]any{
+			"session-start": "worktrail hook codex session-start",
+			"user-prompt":   "worktrail hook codex user-prompt",
+			"post-tool-use": "worktrail hook codex post-tool-use",
+			"stop":          "worktrail hook codex stop",
+		},
+	}
+	data, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return err
+	}
+	return util.AtomicWrite(path, append(data, '\n'), 0o644)
 }

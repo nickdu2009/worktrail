@@ -25,11 +25,19 @@ func TestInitCreatesUserAndProjectRoots(t *testing.T) {
 		filepath.Join(home, "logs", "events.jsonl"),
 		filepath.Join(project, ".worktrail", "config.json"),
 		filepath.Join(project, ".worktrail", "logs", "events.jsonl"),
-		filepath.Join(project, "AGENTS.md"),
-		filepath.Join(project, "CLAUDE.md"),
+		filepath.Join(project, ".codex", "hooks.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(project, "AGENTS.md"),
+		filepath.Join(project, "CLAUDE.md"),
+		filepath.Join(project, ".agents", "skills", "worktrail-state", "SKILL.md"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("did not expect init to create %s, err=%v", path, err)
 		}
 	}
 }

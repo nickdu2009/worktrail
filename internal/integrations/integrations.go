@@ -139,11 +139,9 @@ func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
 			tool:             tool,
 			rootTemplate:     "root/AGENTS.md",
 			userRootFile:     filepath.Join(env.Home, ".codex", "AGENTS.md"),
-			projectRootFile:  filepath.Join(env.ProjectRoot, "AGENTS.md"),
 			userSkillRoot:    filepath.Join(env.Home, ".agents", "skills"),
 			projectSkillRoot: filepath.Join(env.ProjectRoot, ".agents", "skills"),
 			userSkills:       []string{"worktrail-context", "worktrail-handoff", "worktrail-review"},
-			projectSkills:    []string{"worktrail-context", "worktrail-state", "worktrail-handoff"},
 			projectJSONPath:  filepath.Join(env.ProjectRoot, ".codex", "hooks.json"),
 			projectJSONTmpl:  "config/codex-hooks.json",
 		}, nil
@@ -166,22 +164,24 @@ func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
 }
 
 func installScope(cfg integrationConfig, scope string, report *Report) error {
-	rootFile := cfg.userRootFile
 	skillRoot := cfg.userSkillRoot
 	skills := cfg.userSkills
+	rootFile := cfg.userRootFile
 	if scope == "project" {
 		rootFile = cfg.projectRootFile
 		skillRoot = cfg.projectSkillRoot
 		skills = cfg.projectSkills
 	}
-	rootBody, err := wtmpl.Read(cfg.rootTemplate)
-	if err != nil {
-		return err
+	if rootFile != "" {
+		rootBody, err := wtmpl.Read(cfg.rootTemplate)
+		if err != nil {
+			return err
+		}
+		if err := applyManaged(rootFile, rootBody); err != nil {
+			return err
+		}
+		report.Actions = append(report.Actions, Action{Path: rootFile, Action: "managed-block-installed"})
 	}
-	if err := applyManaged(rootFile, rootBody); err != nil {
-		return err
-	}
-	report.Actions = append(report.Actions, Action{Path: rootFile, Action: "managed-block-installed"})
 	for _, skill := range skills {
 		body, err := wtmpl.Read("skills/" + skill + "/SKILL.md")
 		if err != nil {
@@ -203,18 +203,20 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 }
 
 func uninstallScope(cfg integrationConfig, scope string, report *Report) error {
-	rootFile := cfg.userRootFile
 	skillRoot := cfg.userSkillRoot
 	skills := cfg.userSkills
+	rootFile := cfg.userRootFile
 	if scope == "project" {
 		rootFile = cfg.projectRootFile
 		skillRoot = cfg.projectSkillRoot
 		skills = cfg.projectSkills
 	}
-	if err := removeManaged(rootFile); err != nil {
-		return err
+	if rootFile != "" {
+		if err := removeManaged(rootFile); err != nil {
+			return err
+		}
+		report.Actions = append(report.Actions, Action{Path: rootFile, Action: "managed-block-removed"})
 	}
-	report.Actions = append(report.Actions, Action{Path: rootFile, Action: "managed-block-removed"})
 	for _, skill := range skills {
 		path := filepath.Join(skillRoot, skill, "SKILL.md")
 		if err := removeManaged(path); err != nil {
@@ -232,15 +234,17 @@ func uninstallScope(cfg integrationConfig, scope string, report *Report) error {
 }
 
 func doctorScope(cfg integrationConfig, scope string, report *Report) {
-	rootFile := cfg.userRootFile
 	skillRoot := cfg.userSkillRoot
 	skills := cfg.userSkills
+	rootFile := cfg.userRootFile
 	if scope == "project" {
 		rootFile = cfg.projectRootFile
 		skillRoot = cfg.projectSkillRoot
 		skills = cfg.projectSkills
 	}
-	report.Checks = append(report.Checks, managedCheck(scope+" root instructions", rootFile))
+	if rootFile != "" {
+		report.Checks = append(report.Checks, managedCheck(scope+" root instructions", rootFile))
+	}
 	for _, skill := range skills {
 		path := filepath.Join(skillRoot, skill, "SKILL.md")
 		report.Checks = append(report.Checks, managedCheck(scope+" skill "+skill, path))
@@ -361,7 +365,7 @@ func jsonHasWorktrail(path string) (bool, string) {
 
 func normalizeOptions(opts Options) Options {
 	if !opts.User && !opts.Project {
-		return Options{User: true, Project: true}
+		return Options{User: true}
 	}
 	return opts
 }

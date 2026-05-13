@@ -82,7 +82,7 @@ func integrationOptions(flags map[string]string) integrations.Options {
 	user := flags["user"] == "true"
 	project := flags["project"] == "true"
 	if !user && !project {
-		return integrations.Options{User: true, Project: true}
+		return integrations.Options{User: true}
 	}
 	return integrations.Options{User: user, Project: project}
 }

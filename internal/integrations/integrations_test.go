@@ -26,7 +26,7 @@ func testEnv(t *testing.T) paths.Env {
 	}
 }
 
-func TestInstallCodexPreservesUserContentAndUninstallRemovesOnlyManaged(t *testing.T) {
+func TestInstallCodexProjectManagesHooksOnly(t *testing.T) {
 	env := testEnv(t)
 	agents := filepath.Join(env.ProjectRoot, "AGENTS.md")
 	if err := os.WriteFile(agents, []byte("# Local rules\n\nKeep this.\n"), 0o644); err != nil {
@@ -52,12 +52,12 @@ func TestInstallCodexPreservesUserContentAndUninstallRemovesOnlyManaged(t *testi
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "Keep this.") || !strings.Contains(text, util.ManagedBegin) {
-		t.Fatalf("expected user content and managed block, got:\n%s", text)
+	if text != "# Local rules\n\nKeep this.\n" {
+		t.Fatalf("project AGENTS.md should not be modified, got:\n%s", text)
 	}
 	skill := filepath.Join(env.ProjectRoot, ".agents", "skills", "worktrail-state", "SKILL.md")
-	if data, err := os.ReadFile(skill); err != nil || !strings.Contains(string(data), "worktrail state") {
-		t.Fatalf("expected state skill: %v %s", err, data)
+	if _, err := os.Stat(skill); !os.IsNotExist(err) {
+		t.Fatalf("project skills should not be installed by default project integration, err=%v", err)
 	}
 	cfg := map[string]any{}
 	raw, err := os.ReadFile(hooks)
@@ -95,9 +95,6 @@ func TestInstallCodexPreservesUserContentAndUninstallRemovesOnlyManaged(t *testi
 	if !strings.Contains(text, "Keep this.") {
 		t.Fatalf("uninstall removed user content: %s", text)
 	}
-	if strings.Contains(text, util.ManagedBegin) {
-		t.Fatalf("managed block still present: %s", text)
-	}
 	raw, err = os.ReadFile(hooks)
 	if err != nil {
 		t.Fatal(err)
@@ -114,9 +111,39 @@ func TestInstallCodexPreservesUserContentAndUninstallRemovesOnlyManaged(t *testi
 	}
 }
 
+func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
+	env := testEnv(t)
+	if _, err := InstallCodex(env, Options{}); err != nil {
+		t.Fatalf("InstallCodex: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(env.Home, ".codex", "AGENTS.md"),
+		filepath.Join(env.Home, ".agents", "skills", "worktrail-context", "SKILL.md"),
+		filepath.Join(env.Home, ".agents", "skills", "worktrail-handoff", "SKILL.md"),
+		filepath.Join(env.Home, ".agents", "skills", "worktrail-review", "SKILL.md"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+		if !strings.Contains(string(data), util.ManagedBegin) {
+			t.Fatalf("expected managed block in %s", path)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(env.ProjectRoot, "AGENTS.md"),
+		filepath.Join(env.ProjectRoot, ".agents", "skills", "worktrail-state", "SKILL.md"),
+		filepath.Join(env.ProjectRoot, ".codex", "hooks.json"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("default codex install should not create project file %s, err=%v", path, err)
+		}
+	}
+}
+
 func TestInstallClaudeUserAndProject(t *testing.T) {
 	env := testEnv(t)
-	if _, err := InstallClaude(env, Options{}); err != nil {
+	if _, err := InstallClaude(env, Options{User: true, Project: true}); err != nil {
 		t.Fatalf("InstallClaude: %v", err)
 	}
 	for _, path := range []string{
