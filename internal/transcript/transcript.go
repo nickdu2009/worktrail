@@ -160,6 +160,11 @@ func parseJSONL(source string, r io.Reader) (Transcript, error) {
 }
 
 func messageFromRaw(raw map[string]any) Message {
+	if payload, ok := raw["payload"].(map[string]any); ok {
+		if msg := messageFromPayload(raw, payload); msg.Content != "" || msg.Role != "" {
+			return msg
+		}
+	}
 	msg := Message{
 		Role:    firstString(raw, "role", "speaker", "author"),
 		Content: contentFromRaw(raw),
@@ -174,6 +179,39 @@ func messageFromRaw(raw map[string]any) Message {
 		}
 	}
 	if ts := firstString(raw, "created_at", "timestamp", "time"); ts != "" {
+		if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
+			msg.CreatedAt = parsed
+		}
+	}
+	return msg
+}
+
+func messageFromPayload(raw, payload map[string]any) Message {
+	msg := Message{
+		Role:    firstString(payload, "role", "speaker", "author"),
+		Content: contentFromRaw(payload),
+		RawType: firstString(payload, "type", "event", "kind"),
+	}
+	if msg.RawType == "" {
+		msg.RawType = firstString(raw, "type", "event", "kind")
+	}
+	switch msg.RawType {
+	case "user_message":
+		msg.Role = "user"
+		msg.Content = firstString(payload, "message", "text", "content")
+	case "agent_message":
+		msg.Role = "assistant"
+		msg.Content = firstString(payload, "message", "text", "content")
+	}
+	if msg.Role == "" {
+		msg.Role = roleFromNested(payload["message"])
+	}
+	if msg.Content == "" {
+		if nested, ok := payload["message"].(map[string]any); ok {
+			msg.Content = contentFromRaw(nested)
+		}
+	}
+	if ts := firstString(raw, "timestamp", "created_at", "time"); ts != "" {
 		if parsed, err := time.Parse(time.RFC3339, ts); err == nil {
 			msg.CreatedAt = parsed
 		}

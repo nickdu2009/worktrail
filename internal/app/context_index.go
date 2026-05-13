@@ -231,6 +231,11 @@ func transcriptText(source, path string) (string, error) {
 	}
 	var b strings.Builder
 	for _, msg := range tr.Messages {
+		switch strings.ToLower(msg.Role) {
+		case "user", "assistant":
+		default:
+			continue
+		}
 		fmt.Fprintf(&b, "- %s: %s\n", msg.Role, msg.Content)
 	}
 	return b.String(), nil

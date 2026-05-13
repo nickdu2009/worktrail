@@ -94,6 +94,9 @@ func parseManualCandidates(input Input, now time.Time) ([]model.Candidate, error
 	if json.Unmarshal([]byte(text), &raw) == nil && len(raw.Candidates) > 0 {
 		return raw.toModel(input, now), nil
 	}
+	if transcript := transcriptCandidate(input, now, text); transcript != nil {
+		return []model.Candidate{*transcript}, nil
+	}
 	lines := splitManualItems(text)
 	candidates := make([]model.Candidate, 0, len(lines))
 	for _, line := range lines {
@@ -106,6 +109,42 @@ func parseManualCandidates(input Input, now time.Time) ([]model.Candidate, error
 		}))
 	}
 	return candidates, nil
+}
+
+func transcriptCandidate(input Input, now time.Time, text string) *model.Candidate {
+	if !looksLikeTranscript(text) {
+		return nil
+	}
+	excerpt := compactText(text, 6000)
+	candidate := newCandidate(input, now, manualCandidate{
+		CandidateType: "lesson",
+		Title:         "Transcript notes",
+		Summary:       "Reviewable notes extracted from an imported AI coding transcript.\n\n" + excerpt,
+		Operation:     "create",
+		Status:        "pending",
+		Tags:          []string{"transcript", "import"},
+	})
+	candidate.ID = ""
+	return &candidate
+}
+
+func looksLikeTranscript(text string) bool {
+	count := 0
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(strings.ToLower(line))
+		if strings.HasPrefix(line, "- user:") || strings.HasPrefix(line, "- assistant:") {
+			count++
+		}
+	}
+	return count > 0
+}
+
+func compactText(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= limit {
+		return text
+	}
+	return strings.TrimSpace(text[:limit]) + "\n\n[truncated]"
 }
 
 type manualCandidate struct {

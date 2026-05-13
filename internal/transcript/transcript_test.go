@@ -47,6 +47,27 @@ func TestParseCodexClaudeJSONLAndMarkdown(t *testing.T) {
 	}
 }
 
+func TestParseCodexDesktopPayloadJSONL(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"timestamp":"2026-04-12T00:48:18Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What remains for codexlite?"}]}}`,
+		`{"timestamp":"2026-04-12T00:48:19Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Add integration coverage."}]}}`,
+		`{"timestamp":"2026-04-12T00:48:20Z","type":"event_msg","payload":{"type":"agent_message","message":"I will inspect the repo."}}`,
+	}, "\n")
+	tr, err := ParseCodexJSONL(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("ParseCodexJSONL() error = %v", err)
+	}
+	if len(tr.Messages) != 3 {
+		t.Fatalf("messages = %d, want 3: %+v", len(tr.Messages), tr.Messages)
+	}
+	if tr.Messages[0].Role != "user" || tr.Messages[0].Content != "What remains for codexlite?" {
+		t.Fatalf("unexpected first message: %+v", tr.Messages[0])
+	}
+	if tr.Messages[1].Role != "assistant" || tr.Messages[1].Content != "Add integration coverage." {
+		t.Fatalf("unexpected second message: %+v", tr.Messages[1])
+	}
+}
+
 func TestSyncMetadataOnlyDoesNotCopyRawTranscript(t *testing.T) {
 	tmp := t.TempDir()
 	source := filepath.Join(tmp, "codex-session.jsonl")
