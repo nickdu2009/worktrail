@@ -121,7 +121,7 @@ func renderDistillPack(out io.Writer, records []candidate.Record) error {
 	fmt.Fprintln(out, "You are the current AI coding agent. Distill the transcript evidence below into semantic Worktrail candidates.")
 	fmt.Fprintln(out, "Do not promote, merge, discard, restore, retire, or write formal knowledge from this pack.")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Create only useful pending candidates with normal knowledge types: `rule`, `decision`, `lesson`, `prompt`, or `workflow`.")
+	fmt.Fprintln(out, "Create only useful pending candidates with semantic knowledge types such as `rule`, `decision`, `architecture`, `integration`, `validation`, `glossary`, `lesson`, `prompt`, or `workflow`.")
 	fmt.Fprintln(out, "Prefer a small number of durable, reusable items over transcript summaries.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "For each distilled item, run `worktrail candidates create` with the chosen type, target path, title, summary, and body.")
@@ -129,7 +129,7 @@ func renderDistillPack(out io.Writer, records []candidate.Record) error {
 	fmt.Fprintln(out, "Candidate JSON shape for reasoning:")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "```json")
-	fmt.Fprintln(out, `{"candidates":[{"candidate_type":"rule|decision|lesson|prompt|workflow","title":"Durable knowledge title","summary":"Short semantic summary","target_path":"rules/name.md|decisions/ADR-name.md|lessons/name.md|prompts/name.md|workflows/name.md","operation":"create|merge","tags":["tag"],"body":"Markdown content to create as a pending candidate"}]}`)
+	fmt.Fprintln(out, `{"candidates":[{"candidate_type":"rule|decision|architecture|integration|validation|glossary|lesson|prompt|workflow","title":"Durable knowledge title","summary":"Short semantic summary","target_path":"rules/name.md|decisions/ADR-name.md|architecture/name.md|integrations/name.md|validation/name.md|glossary/name.md|lessons/name.md|prompts/name.md|workflows/name.md","operation":"replace|merge","tags":["tag"],"body":"Markdown content to create as a pending candidate"}]}`)
 	fmt.Fprintln(out, "```")
 	for _, rec := range records {
 		fmt.Fprintln(out)

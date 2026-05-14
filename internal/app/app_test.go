@@ -134,6 +134,115 @@ func TestImportCodexDiscoversAndExtractsProjectSessions(t *testing.T) {
 	}
 }
 
+func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	root := filepath.Join(project, "docs", "knowledge-driven-development")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTextFile(t, filepath.Join(root, "README.md"), "# KDD Root\n\nSkipped root overview.")
+	writeTextFile(t, filepath.Join(root, "project", "README.md"), "# Project KB\n\nShared overview.")
+	writeTextFile(t, filepath.Join(root, "project", "active-knowledge-log.md"), "# Active Log\n\nUnverified finding.")
+	writeTextFile(t, filepath.Join(root, "project", "architecture", "system.md"), "# System Architecture\n\nArchitecture body.")
+	writeTextFile(t, filepath.Join(root, "project", "decisions", "choice.md"), "# Choice\n\nDecision body.")
+	writeTextFile(t, filepath.Join(root, "project", "runbooks", "release.md"), "# Release\n\nRunbook body.")
+	writeTextFile(t, filepath.Join(root, "project", "integrations", "api.md"), "# API\n\nIntegration body.")
+	writeTextFile(t, filepath.Join(root, "project", "validation", "smoke.md"), "# Smoke\n\nValidation body.")
+	writeTextFile(t, filepath.Join(root, "project", "glossary", "terms.md"), "# Terms\n\nGlossary body.")
+	writeTextFile(t, filepath.Join(root, "project", "notes", "misc.md"), "# Misc\n\nMisc body.")
+	writeTextFile(t, filepath.Join(root, "local", "active-knowledge-log.md"), "# Local\n\n/Users/example/private fixture.")
+	writeTextFile(t, filepath.Join(root, "project", "validation", "blocked.md"), "# Blocked\n\n-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----\n")
+
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"init"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run init: %v stderr=%s", err, errb.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"import", "kdd", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run import kdd dry-run: %v stderr=%s", err, errb.String())
+	}
+	var dry kddImportReport
+	if err := json.Unmarshal(out.Bytes(), &dry); err != nil {
+		t.Fatal(err)
+	}
+	if !dry.DryRun || dry.Matched != 9 || dry.Blocked != 1 || dry.LocalSkipped != 1 {
+		t.Fatalf("unexpected dry-run report: %+v", dry)
+	}
+
+	missingRoot := filepath.Join(project, "missing-kdd")
+	out.Reset()
+	if err := Run(context.Background(), []string{"import", "kdd", "--root", missingRoot, "--format", "json"}, nil, &out, &errb); err == nil || !strings.Contains(err.Error(), "kdd root does not exist") {
+		t.Fatalf("missing root error = %v", err)
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"import", "kdd", "--all", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run import kdd --all: %v stderr=%s", err, errb.String())
+	}
+	var report kddImportReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.DryRun || report.Created != 9 || report.Blocked != 1 || report.LocalSkipped != 1 {
+		t.Fatalf("unexpected import report: %+v", report)
+	}
+
+	archCandidate := filepath.Join(project, ".worktrail", "candidates", "project", "kdd-project-architecture-system.md")
+	body, err := os.ReadFile(archCandidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"candidate_type": "architecture"`, `"target_path": "architecture/system.md"`, "Imported from KDD relative path: `project/architecture/system.md`"} {
+		if !bytes.Contains(body, []byte(want)) {
+			t.Fatalf("architecture candidate missing %q:\n%s", want, body)
+		}
+	}
+	if bytes.Contains(body, []byte(".worktrail/architecture")) || bytes.Contains(body, []byte(root)) {
+		t.Fatalf("candidate leaked disallowed path:\n%s", body)
+	}
+	activeLog, err := os.ReadFile(filepath.Join(project, ".worktrail", "candidates", "project", "kdd-project-active-knowledge-log.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(activeLog, []byte(`"candidate_type": "lesson"`)) || !bytes.Contains(activeLog, []byte("Pending Verification")) {
+		t.Fatalf("active log candidate unexpected:\n%s", activeLog)
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"import", "kdd", "--all", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run duplicate import kdd --all: %v stderr=%s", err, errb.String())
+	}
+	var duplicate kddImportReport
+	if err := json.Unmarshal(out.Bytes(), &duplicate); err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.Created != 0 || duplicate.Skipped < 9 {
+		t.Fatalf("duplicate import report unexpected: %+v", duplicate)
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"candidates", "list", "--semantic", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run semantic list: %v stderr=%s", err, errb.String())
+	}
+	var records []candidate.Record
+	if err := json.Unmarshal(out.Bytes(), &records); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCandidateType(records, "architecture") || !hasCandidateType(records, "integration") || !hasCandidateType(records, "validation") || !hasCandidateType(records, "glossary") || !hasCandidateType(records, "project") {
+		t.Fatalf("semantic candidates missing new KDD types: %#v", records)
+	}
+
+	runApp(t, &out, &errb, "promote", "kdd-project-architecture-system")
+	text := runApp(t, &out, &errb, "context", "architecture")
+	if !strings.Contains(text, "Architecture") || !strings.Contains(text, "Architecture body.") {
+		t.Fatalf("context missing promoted architecture:\n%s", text)
+	}
+}
+
 func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
@@ -293,6 +402,15 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 			t.Fatalf("distill output missing %q:\n%s", want, text)
 		}
 	}
+}
+
+func hasCandidateType(records []candidate.Record, typ string) bool {
+	for _, rec := range records {
+		if rec.Meta.CandidateType == typ {
+			return true
+		}
+	}
+	return false
 }
 
 func TestReviewWarnsWhenAppliedCandidateTargetMissing(t *testing.T) {
@@ -542,4 +660,14 @@ func runApp(t *testing.T, out, errb *bytes.Buffer, args ...string) string {
 		t.Fatalf("Run %v: %v stderr=%s", args, err, errb.String())
 	}
 	return out.String()
+}
+
+func writeTextFile(t *testing.T, path string, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

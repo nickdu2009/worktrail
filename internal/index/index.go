@@ -326,12 +326,20 @@ func inferType(rel string, meta map[string]any) string {
 		return "candidate"
 	case strings.HasPrefix(rel, "state/"):
 		return "state"
+	case strings.HasPrefix(rel, "architecture/"):
+		return "architecture"
 	case strings.HasPrefix(rel, "decisions/"):
 		return "decision"
+	case strings.HasPrefix(rel, "glossary/"):
+		return "glossary"
 	case strings.HasPrefix(rel, "handoffs/"):
 		return "handoff"
+	case strings.HasPrefix(rel, "integrations/"):
+		return "integration"
 	case strings.HasPrefix(rel, "rules/"):
 		return "rule"
+	case strings.HasPrefix(rel, "validation/"):
+		return "validation"
 	case strings.HasPrefix(rel, "prompts/"):
 		return "prompt"
 	case strings.HasPrefix(rel, "profile/"):

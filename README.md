@@ -31,6 +31,20 @@ worktrail context "current task"
 
 `worktrail context <task>` hides pending transcript evidence by default and reports how many evidence candidates are hidden. Use `worktrail context --evidence <task>` when the raw transcript notes themselves need to be included in the Pending Candidates section.
 
+## KDD import
+
+Existing `docs/knowledge-driven-development/` project knowledge can be migrated into Worktrail as pending candidates:
+
+```bash
+worktrail import kdd
+worktrail import kdd --all
+worktrail review
+```
+
+`worktrail import kdd` is a dry-run by default. `--all` creates pending semantic candidates only; it does not promote or merge formal knowledge. Candidate `target_path` values are relative to `.worktrail/`, for example `architecture/system.md`.
+
+`docs/knowledge-driven-development/local/**` is skipped by default because it may contain current-developer paths, temporary IDs, or private environment context.
+
 ## Restore vs retire
 
 `worktrail review` warns when an applied candidate says a formal target exists but the target file is missing.

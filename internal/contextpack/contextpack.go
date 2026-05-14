@@ -83,6 +83,10 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 	}{
 		{"User Knowledge", func(e index.Entry) bool { return e.Scope == "user" && isKnowledge(e.Type) }},
 		{"Project Knowledge", func(e index.Entry) bool { return e.Scope == "project" && isProjectKnowledge(e.Type) }},
+		{"Architecture", func(e index.Entry) bool { return e.Type == "architecture" }},
+		{"Integrations", func(e index.Entry) bool { return e.Type == "integration" }},
+		{"Validation", func(e index.Entry) bool { return e.Type == "validation" }},
+		{"Glossary", func(e index.Entry) bool { return e.Type == "glossary" }},
 		{"Workflows", func(e index.Entry) bool { return e.Type == "workflow" }},
 		{"Active State", func(e index.Entry) bool { return e.Type == "state" && (e.Active || e.Status == "active") }},
 		{"Decisions", func(e index.Entry) bool { return e.Type == "decision" }},
@@ -223,7 +227,7 @@ func pendingCandidateVisible(entry index.Entry, includeEvidence bool) bool {
 
 func isSemanticCandidateType(typ string) bool {
 	switch typ {
-	case "rule", "decision", "lesson", "prompt", "workflow":
+	case "architecture", "decision", "glossary", "integration", "lesson", "project", "prompt", "rule", "validation", "workflow":
 		return true
 	default:
 		return false

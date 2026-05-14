@@ -326,7 +326,7 @@ func printApplyResult(ioctx IO, result candidate.ApplyResult, format string) err
 
 func isSemanticCandidateType(typ string) bool {
 	switch typ {
-	case "rule", "decision", "lesson", "prompt", "workflow":
+	case "architecture", "decision", "glossary", "integration", "lesson", "project", "prompt", "rule", "validation", "workflow":
 		return true
 	default:
 		return false
@@ -341,7 +341,7 @@ func printCandidatesHelp(out io.Writer, subcommand string) {
 		fmt.Fprintln(out, "options:")
 		fmt.Fprintln(out, "  --id <id>              optional stable candidate id")
 		fmt.Fprintln(out, "  --scope <scope>        project or user (default project)")
-		fmt.Fprintln(out, "  --type <type>          rule, decision, lesson, prompt, workflow, or transcript_notes")
+		fmt.Fprintln(out, "  --type <type>          semantic type such as rule, decision, architecture, validation, or transcript_notes")
 		fmt.Fprintln(out, "  --target <path>        target knowledge path, for example rules/testing.md")
 		fmt.Fprintln(out, "  --title <title>        candidate title")
 		fmt.Fprintln(out, "  --summary <text>       short review summary")

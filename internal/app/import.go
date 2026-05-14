@@ -40,6 +40,9 @@ func runImport(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	source := args[0]
 	flags, _ := splitFlags(args[1:])
 	scope := flagValue(flags, "scope", "project")
+	if source == "kdd" {
+		return runImportKDD(env, ioctx, flags, scope)
+	}
 	if source != "codex" {
 		return fmt.Errorf("unsupported import source %q", source)
 	}
@@ -145,7 +148,9 @@ func printImportGuidance(ioctx IO, report importReport) {
 
 func printImportHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail import codex [--all] [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "       worktrail import kdd [--root path] [--all] [--scope project] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Default mode is a dry-run that discovers current-project Codex transcripts.")
 	fmt.Fprintln(out, "`--all` syncs discovered transcripts and creates pending transcript_notes evidence candidates.")
+	fmt.Fprintln(out, "`import kdd` converts docs/knowledge-driven-development project knowledge into pending semantic candidates.")
 }

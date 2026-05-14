@@ -7,6 +7,14 @@ description: Discover, sync, and extract pending Worktrail candidates from exist
 
 Use this skill when the user wants to extract reusable knowledge from existing AI coding conversations.
 
+For an existing `docs/knowledge-driven-development/` project knowledge base:
+
+1. Run `worktrail import kdd` first and show the dry-run matched, blocked, skipped, and local-skipped counts.
+2. If the user asked to proceed, run `worktrail import kdd --all`.
+3. Summarize created pending semantic candidates and their target paths.
+4. Explain that `local/**` is skipped by default and requires a separate user-scope migration workflow if needed.
+5. Hand off review to `/worktrail-review`.
+
 For all current-project Codex conversations:
 
 1. Run `worktrail import codex` first and show the dry-run count.
