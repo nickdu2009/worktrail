@@ -54,6 +54,13 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 		"title":          "Candidate Rule",
 		"status":         "pending",
 	}, "Candidate content.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "candidates", "project", "promoted.md"), map[string]any{
+		"id":             "promoted",
+		"scope":          "project",
+		"candidate_type": "rule",
+		"title":          "Promoted Rule",
+		"status":         "promoted",
+	}, "Already promoted candidate content.")
 
 	pack, err := Build(env, Options{Task: "ship packages"})
 	if err != nil {
@@ -67,6 +74,9 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	pending := section(pack, "Pending Candidates")
 	if len(pending.Items) != 1 || !pending.Items[0].Unapproved {
 		t.Fatalf("pending candidate not marked unapproved: %+v", pending.Items)
+	}
+	if pending.Items[0].Title != "Candidate Rule" {
+		t.Fatalf("pending section included non-pending candidate: %+v", pending.Items)
 	}
 	rendered := RenderMarkdown(pack)
 	if rendered == "" || !strings.Contains(rendered, "unapproved") {

@@ -81,7 +81,7 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 		{"Decisions", func(e index.Entry) bool { return e.Type == "decision" }},
 		{"Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }},
 		{"Rules", func(e index.Entry) bool { return e.Type == "rule" }},
-		{"Pending Candidates", func(e index.Entry) bool { return e.Type == "candidate" && e.Status != "approved" }},
+		{"Pending Candidates", func(e index.Entry) bool { return e.Type == "candidate" && e.Status == "pending" }},
 	}
 	for _, spec := range sectionSpecs {
 		var items []Item
@@ -178,7 +178,7 @@ func itemFromEntry(entry index.Entry) Item {
 		Tags:       entry.Tags,
 		Content:    trimContent(entry.Content),
 		UpdatedAt:  entry.UpdatedAt,
-		Unapproved: entry.Type == "candidate" && entry.Status != "approved",
+		Unapproved: entry.Type == "candidate" && entry.Status == "pending",
 	}
 }
 
