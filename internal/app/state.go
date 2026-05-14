@@ -187,6 +187,10 @@ func defaultStateBody(title string) string {
 }
 
 func splitFlags(args []string) (map[string]string, []string) {
+	return splitFlagsWithBooleans(args, nil)
+}
+
+func splitFlagsWithBooleans(args []string, booleanFlags map[string]bool) (map[string]string, []string) {
 	flags := map[string]string{}
 	var positional []string
 	for i := 0; i < len(args); i++ {
@@ -199,6 +203,10 @@ func splitFlags(args []string) (map[string]string, []string) {
 		if strings.Contains(key, "=") {
 			parts := strings.SplitN(key, "=", 2)
 			flags[parts[0]] = parts[1]
+			continue
+		}
+		if booleanFlags[key] {
+			flags[key] = "true"
 			continue
 		}
 		if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {

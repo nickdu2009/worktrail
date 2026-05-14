@@ -10,13 +10,15 @@ import (
 	"time"
 
 	"github.com/nickdu2009/worktrail/internal/index"
+	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 )
 
 type Options struct {
-	Task  string
-	Limit int
-	Now   time.Time
+	Task            string
+	Limit           int
+	Now             time.Time
+	IncludeEvidence bool
 }
 
 type Item struct {
@@ -37,10 +39,12 @@ type Section struct {
 }
 
 type Pack struct {
-	Schema    string    `json:"schema"`
-	Task      string    `json:"task,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	Sections  []Section `json:"sections"`
+	Schema                   string    `json:"schema"`
+	Task                     string    `json:"task,omitempty"`
+	CreatedAt                time.Time `json:"created_at"`
+	HiddenEvidenceCandidates int       `json:"hidden_evidence_candidates"`
+	Sections                 []Section `json:"sections"`
+	EvidenceIncluded         bool      `json:"-"`
 }
 
 func Build(env paths.Env, opts Options) (Pack, error) {
@@ -67,9 +71,11 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 		entries = append(entries, es...)
 	}
 	pack := Pack{
-		Schema:    "worktrail.context_pack.v1",
-		Task:      opts.Task,
-		CreatedAt: now,
+		Schema:                   "worktrail.context_pack.v1",
+		Task:                     opts.Task,
+		CreatedAt:                now,
+		HiddenEvidenceCandidates: countPendingTranscriptEvidence(entries),
+		EvidenceIncluded:         opts.IncludeEvidence,
 	}
 	sectionSpecs := []struct {
 		title string
@@ -82,7 +88,7 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 		{"Decisions", func(e index.Entry) bool { return e.Type == "decision" }},
 		{"Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }},
 		{"Rules", func(e index.Entry) bool { return e.Type == "rule" }},
-		{"Pending Candidates", func(e index.Entry) bool { return e.Type == "candidate" && e.Status == "pending" }},
+		{"Pending Candidates", func(e index.Entry) bool { return pendingCandidateVisible(e, opts.IncludeEvidence) }},
 	}
 	for _, spec := range sectionSpecs {
 		var items []Item
@@ -144,6 +150,10 @@ func RenderMarkdown(pack Pack) string {
 		}
 		b.WriteString("\n")
 	}
+	if pack.HiddenEvidenceCandidates > 0 && !pack.EvidenceIncluded {
+		b.WriteString("## Hidden Evidence\n\n")
+		fmt.Fprintf(&b, "Hidden transcript evidence candidates: %d. Use `worktrail context --evidence <task>` to include them.\n\n", pack.HiddenEvidenceCandidates)
+	}
 	return strings.TrimSpace(b.String()) + "\n"
 }
 
@@ -199,6 +209,35 @@ func isProjectKnowledge(typ string) bool {
 	default:
 		return false
 	}
+}
+
+func pendingCandidateVisible(entry index.Entry, includeEvidence bool) bool {
+	if entry.Type != "candidate" || entry.Status != "pending" {
+		return false
+	}
+	if entry.CandidateType == model.CandidateTypeTranscriptNotes {
+		return includeEvidence
+	}
+	return isSemanticCandidateType(entry.CandidateType)
+}
+
+func isSemanticCandidateType(typ string) bool {
+	switch typ {
+	case "rule", "decision", "lesson", "prompt", "workflow":
+		return true
+	default:
+		return false
+	}
+}
+
+func countPendingTranscriptEvidence(entries []index.Entry) int {
+	count := 0
+	for _, entry := range entries {
+		if entry.Type == "candidate" && entry.Status == "pending" && entry.CandidateType == model.CandidateTypeTranscriptNotes {
+			count++
+		}
+	}
+	return count
 }
 
 func trimContent(s string) string {

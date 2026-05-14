@@ -105,8 +105,11 @@ func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 }
 
 func runContextPack(_ context.Context, env paths.Env, ioctx IO, args []string) error {
-	flags, positional := splitFlags(args)
-	pack, err := contextpack.Build(env, contextpack.Options{Task: joinArgs(positional)})
+	flags, positional := splitFlagsWithBooleans(args, map[string]bool{"evidence": true})
+	pack, err := contextpack.Build(env, contextpack.Options{
+		Task:            joinArgs(positional),
+		IncludeEvidence: flagValue(flags, "evidence", "") == "true",
+	})
 	if err != nil {
 		return err
 	}

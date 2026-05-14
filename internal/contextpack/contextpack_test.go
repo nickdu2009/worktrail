@@ -60,6 +60,20 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 		"title":          "Candidate Rule",
 		"status":         "pending",
 	}, "Candidate content.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "candidates", "project", "transcript.md"), map[string]any{
+		"id":             "transcript",
+		"scope":          "project",
+		"candidate_type": "transcript_notes",
+		"title":          "Transcript Evidence",
+		"status":         "pending",
+	}, "Raw transcript evidence content.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "candidates", "project", "handoff-candidate.md"), map[string]any{
+		"id":             "handoff-candidate",
+		"scope":          "project",
+		"candidate_type": "handoff",
+		"title":          "Handoff Candidate",
+		"status":         "pending",
+	}, "Pending non-semantic candidate content.")
 	writePackDoc(t, filepath.Join(env.ProjectWT, "candidates", "project", "promoted.md"), map[string]any{
 		"id":             "promoted",
 		"scope":          "project",
@@ -71,6 +85,9 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	pack, err := Build(env, Options{Task: "ship packages"})
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
+	}
+	if pack.HiddenEvidenceCandidates != 1 {
+		t.Fatalf("HiddenEvidenceCandidates = %d, want 1", pack.HiddenEvidenceCandidates)
 	}
 	for _, title := range []string{"User Knowledge", "Workflows", "Active State", "Decisions", "Handoffs", "Rules", "Pending Candidates"} {
 		if !hasSection(pack, title) {
@@ -91,6 +108,28 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	rendered := RenderMarkdown(pack)
 	if rendered == "" || !strings.Contains(rendered, "unapproved") {
 		t.Fatalf("rendered pack missing unapproved marker:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Hidden transcript evidence candidates: 1") || !strings.Contains(rendered, "worktrail context --evidence <task>") {
+		t.Fatalf("rendered pack missing hidden evidence guidance:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Raw transcript evidence content.") || strings.Contains(rendered, "Pending non-semantic candidate content.") {
+		t.Fatalf("default rendered pack leaked hidden candidates:\n%s", rendered)
+	}
+
+	withEvidence, err := Build(env, Options{Task: "ship packages", IncludeEvidence: true})
+	if err != nil {
+		t.Fatalf("Build(IncludeEvidence) error = %v", err)
+	}
+	if withEvidence.HiddenEvidenceCandidates != 1 {
+		t.Fatalf("IncludeEvidence HiddenEvidenceCandidates = %d, want 1", withEvidence.HiddenEvidenceCandidates)
+	}
+	pending = section(withEvidence, "Pending Candidates")
+	if len(pending.Items) != 2 || !hasItem(pending, "Transcript Evidence") || !hasItem(pending, "Candidate Rule") {
+		t.Fatalf("IncludeEvidence pending section unexpected: %+v", pending.Items)
+	}
+	rendered = RenderMarkdown(withEvidence)
+	if !strings.Contains(rendered, "Raw transcript evidence content.") || strings.Contains(rendered, "Hidden transcript evidence candidates") {
+		t.Fatalf("IncludeEvidence rendered pack unexpected:\n%s", rendered)
 	}
 }
 
@@ -119,4 +158,13 @@ func section(pack Pack, title string) Section {
 		}
 	}
 	return Section{}
+}
+
+func hasItem(section Section, title string) bool {
+	for _, item := range section.Items {
+		if item.Title == title {
+			return true
+		}
+	}
+	return false
 }

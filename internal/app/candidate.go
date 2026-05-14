@@ -371,4 +371,5 @@ func printReviewHelp(out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "By default, review shows pending semantic candidates and hides transcript_notes evidence.")
 	fmt.Fprintln(out, "Use --evidence to inspect transcript evidence, or --all to show both.")
+	fmt.Fprintln(out, "When an applied target is missing, review suggests restore for accidental deletion or retire for intentional deletion.")
 }

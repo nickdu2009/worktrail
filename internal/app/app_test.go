@@ -198,6 +198,36 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	}
 
 	out.Reset()
+	if err := Run(context.Background(), []string{"context", "task"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run context: %v stderr=%s", err, errb.String())
+	}
+	if strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "Evidence body.") || !strings.Contains(out.String(), "Hidden transcript evidence candidates: 2") || !strings.Contains(out.String(), "rule-1") {
+		t.Fatalf("context did not hide transcript evidence:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"context", "--evidence", "task"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run context evidence: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "Evidence body.") || !strings.Contains(out.String(), "rule-1") || strings.Contains(out.String(), "Hidden transcript evidence candidates") {
+		t.Fatalf("context evidence output unexpected:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"context", "--format", "json", "task"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run context json: %v stderr=%s", err, errb.String())
+	}
+	var contextJSON struct {
+		HiddenEvidenceCandidates int `json:"hidden_evidence_candidates"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &contextJSON); err != nil {
+		t.Fatal(err)
+	}
+	if contextJSON.HiddenEvidenceCandidates != 2 {
+		t.Fatalf("context json hidden_evidence_candidates = %d, want 2", contextJSON.HiddenEvidenceCandidates)
+	}
+
+	out.Reset()
 	if err := Run(context.Background(), []string{"distill", "--pending", "--limit", "1"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run distill pending: %v stderr=%s", err, errb.String())
 	}
@@ -380,6 +410,88 @@ func TestRetireClearsAppliedCandidateTargetWarning(t *testing.T) {
 	}
 }
 
+func TestAppSmokeCoreCLILifecycle(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "smoke-note", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/smoke-note.md", "--title", "Smoke Transcript Notes", "Smoke evidence body.")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "smoke-rule", "--type", "rule", "--target", "rules/smoke-rule.md", "--title", "Smoke Rule", "Smoke rule body.")
+	runApp(t, &out, &errb, "index", "rebuild")
+
+	text := runApp(t, &out, &errb, "review")
+	if !strings.Contains(text, "smoke-rule") || strings.Contains(text, "smoke-note") || !strings.Contains(text, "Hidden transcript evidence candidates: 1") {
+		t.Fatalf("smoke review output unexpected:\n%s", text)
+	}
+
+	text = runApp(t, &out, &errb, "context", "smoke task")
+	if !strings.Contains(text, "smoke-rule") || strings.Contains(text, "smoke-note") || strings.Contains(text, "Smoke evidence body.") || !strings.Contains(text, "Hidden transcript evidence candidates: 1") {
+		t.Fatalf("smoke context output unexpected:\n%s", text)
+	}
+
+	text = runApp(t, &out, &errb, "context", "--evidence", "smoke task")
+	if !strings.Contains(text, "smoke-rule") || !strings.Contains(text, "smoke-note") || !strings.Contains(text, "Smoke evidence body.") || strings.Contains(text, "Hidden transcript evidence candidates") {
+		t.Fatalf("smoke context evidence output unexpected:\n%s", text)
+	}
+
+	runApp(t, &out, &errb, "promote", "smoke-rule")
+	runApp(t, &out, &errb, "index", "rebuild")
+	text = runApp(t, &out, &errb, "context", "promoted smoke rule")
+	if !strings.Contains(text, "rules/smoke-rule.md") || !strings.Contains(text, "Smoke rule body.") {
+		t.Fatalf("smoke promoted context output unexpected:\n%s", text)
+	}
+
+	target := filepath.Join(project, ".worktrail", "rules", "smoke-rule.md")
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	text = runApp(t, &out, &errb, "review")
+	if !strings.Contains(text, "Applied candidate target warnings") || !strings.Contains(text, "worktrail restore <id>") || !strings.Contains(text, "worktrail retire <id> --reason <text>") {
+		t.Fatalf("smoke missing-target review output unexpected:\n%s", text)
+	}
+
+	runApp(t, &out, &errb, "restore", "smoke-rule")
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("restored target missing: %v", err)
+	}
+	text = runApp(t, &out, &errb, "review")
+	if strings.Contains(text, "Applied candidate target warnings") {
+		t.Fatalf("review still warned after restore:\n%s", text)
+	}
+
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	text = runApp(t, &out, &errb, "retire", "smoke-rule", "--reason", "smoke lifecycle retired")
+	if !strings.Contains(text, "smoke-rule\tretired") {
+		t.Fatalf("smoke retire output unexpected:\n%s", text)
+	}
+	text = runApp(t, &out, &errb, "review")
+	if strings.Contains(text, "Applied candidate target warnings") {
+		t.Fatalf("review still warned after retire:\n%s", text)
+	}
+
+	text = runApp(t, &out, &errb, "distill", "--pending", "--all", "--summary")
+	if !strings.Contains(text, "evidence_candidates: 1") {
+		t.Fatalf("smoke distill summary output unexpected:\n%s", text)
+	}
+	pack := filepath.Join(project, "smoke-distill.md")
+	runApp(t, &out, &errb, "distill", "--pending", "--all", "--write-pack", pack)
+	packBody, err := os.ReadFile(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(packBody, []byte("Smoke evidence body.")) {
+		t.Fatalf("smoke distill pack missing evidence body:\n%s", packBody)
+	}
+}
+
 func TestCandidatesCreateHelpDoesNotRequireTarget(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
@@ -420,4 +532,14 @@ func TestDistillAllLargeSetRequiresCompactOutput(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "avoid flooding the terminal") {
 		t.Fatalf("distill --all error = %v, stdout=%s", err, out.String())
 	}
+}
+
+func runApp(t *testing.T, out, errb *bytes.Buffer, args ...string) string {
+	t.Helper()
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), args, nil, out, errb); err != nil {
+		t.Fatalf("Run %v: %v stderr=%s", args, err, errb.String())
+	}
+	return out.String()
 }
