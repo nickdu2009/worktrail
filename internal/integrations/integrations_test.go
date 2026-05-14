@@ -159,6 +159,19 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 			t.Fatalf("expected managed block in %s", path)
 		}
 	}
+	reviewSkill, err := os.ReadFile(filepath.Join(env.Home, ".codex", "skills", "worktrail-review", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"worktrail candidates list --semantic --status pending --format json",
+		"Do not include `transcript_notes` evidence in the default review table",
+		"worktrail review --evidence",
+	} {
+		if !strings.Contains(string(reviewSkill), want) {
+			t.Fatalf("review skill missing %q:\n%s", want, reviewSkill)
+		}
+	}
 	for _, path := range []string{
 		filepath.Join(env.ProjectRoot, "AGENTS.md"),
 		filepath.Join(env.ProjectRoot, ".agents", "skills", "worktrail-state", "SKILL.md"),
