@@ -197,7 +197,7 @@ func writeHandoffCandidate(env paths.Env, tool, event string, payload map[string
 		"Draft handoff generated from the " + tool + " `" + event + "` hook.\n\n" +
 		"## Source Evidence\n" + payloadSummary(payload) + "\n\n" +
 		"## Review Required\n" +
-		"This candidate is pending. Hooks never promote, merge, discard, delete, or replace knowledge.\n"
+		"This candidate is pending. Hooks never promote, merge, discard, restore, retire, delete, or replace knowledge.\n"
 	data, err := store.RenderMarkdown(candidate, body)
 	if err != nil {
 		return "", err

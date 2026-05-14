@@ -37,6 +37,7 @@ type Candidate struct {
 	Status          string    `json:"status"`
 	SourceSessions  []string  `json:"source_sessions,omitempty"`
 	RedactionStatus string    `json:"redaction_status"`
+	RetireReason    string    `json:"retire_reason,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at,omitempty"`
 	Tags            []string  `json:"tags,omitempty"`

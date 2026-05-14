@@ -171,8 +171,9 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 			fmt.Fprintf(ioctx.Out, "- `%s` is %s but `%s` is missing; context will not load it as formal knowledge.\n", issue.ID, issue.Status, issue.TargetPath)
 		}
 		fmt.Fprintln(ioctx.Out, "  For promoted replace candidates, use `worktrail restore <id>` after explicit confirmation to recreate the missing target.")
+		fmt.Fprintln(ioctx.Out, "  If the target was intentionally removed, use `worktrail retire <id> --reason <text>` after explicit confirmation.")
 	}
-	fmt.Fprintln(ioctx.Out, "\nUse `worktrail candidates diff <id>` and, after explicit user confirmation, `worktrail promote|merge|discard <id>`.")
+	fmt.Fprintln(ioctx.Out, "\nUse `worktrail candidates diff <id>` and, after explicit user confirmation, `worktrail promote|merge|discard|restore|retire <id>`.")
 	return nil
 }
 
@@ -238,6 +239,16 @@ func runCandidateAction(_ context.Context, env paths.Env, ioctx IO, action strin
 			return err
 		}
 		return printApplyResult(ioctx, result, flagValue(flags, "format", "text"))
+	case "retire":
+		reason := flagValue(flags, "reason", "")
+		if reason == "" && len(positional) > 1 {
+			reason = joinArgs(positional[1:])
+		}
+		rec, err := manager.Retire(scope, id, reason)
+		if err != nil {
+			return err
+		}
+		return printCandidate(ioctx, rec, flagValue(flags, "format", "text"))
 	default:
 		return fmt.Errorf("unknown candidate action %q", action)
 	}
@@ -347,7 +358,7 @@ func printCandidatesHelp(out io.Writer, subcommand string) {
 		fmt.Fprintln(out, "usage: worktrail candidates <create|list|show|diff> [options]")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "list filters:")
-		fmt.Fprintln(out, "  --status pending|promoted|merged|discarded")
+		fmt.Fprintln(out, "  --status pending|promoted|merged|discarded|retired")
 		fmt.Fprintln(out, "  --type <candidate_type>")
 		fmt.Fprintln(out, "  --semantic     rule/decision/lesson/prompt/workflow only")
 		fmt.Fprintln(out, "  --evidence     transcript_notes only")

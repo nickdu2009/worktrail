@@ -167,6 +167,7 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		"worktrail candidates list --semantic --status pending --format json",
 		"Do not include `transcript_notes` evidence in the default review table",
 		"worktrail review --evidence",
+		"worktrail retire <id> --reason <text>",
 	} {
 		if !strings.Contains(string(reviewSkill), want) {
 			t.Fatalf("review skill missing %q:\n%s", want, reviewSkill)

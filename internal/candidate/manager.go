@@ -24,6 +24,7 @@ const (
 	StatusPromoted  = "promoted"
 	StatusMerged    = "merged"
 	StatusDiscarded = "discarded"
+	StatusRetired   = "retired"
 
 	OperationReplace = "replace"
 	OperationMerge   = "merge"
@@ -34,6 +35,8 @@ var (
 	ErrNotFound             = errors.New("candidate not found")
 	ErrTranscriptNotesApply = errors.New("transcript notes are evidence and must be distilled before promote or merge")
 	ErrRestoreUnsupported   = errors.New("restore only supports promoted replace candidates with missing targets")
+	ErrRetireUnsupported    = errors.New("retire only supports promoted or merged candidates with missing targets")
+	ErrRetireReasonRequired = errors.New("retire reason is required")
 )
 
 type Manager struct {
@@ -271,6 +274,52 @@ func (m Manager) Restore(scope, id string) (ApplyResult, error) {
 	}, nil
 }
 
+func (m Manager) Retire(scope, id, reason string) (Record, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return Record{}, ErrRetireReasonRequired
+	}
+	rec, err := m.Show(scope, id)
+	if err != nil {
+		return Record{}, err
+	}
+	if rec.Meta.Status != StatusPromoted && rec.Meta.Status != StatusMerged {
+		return Record{}, ErrRetireUnsupported
+	}
+	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+		return Record{}, ErrTranscriptNotesApply
+	}
+	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
+	if err != nil {
+		return Record{}, err
+	}
+	target, err := resolveTarget(root, rec.Meta.TargetPath)
+	if err != nil {
+		return Record{}, err
+	}
+	if _, err := os.Stat(target); err == nil {
+		return Record{}, fmt.Errorf("target %q still exists; retire only acknowledges missing targets", rec.Meta.TargetPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Record{}, err
+	}
+
+	previousStatus := rec.Meta.Status
+	rec.Meta.Status = StatusRetired
+	rec.Meta.RetireReason = reason
+	rec.Meta.UpdatedAt = m.now()
+	if err := writeRecord(rec); err != nil {
+		return Record{}, err
+	}
+	if err := wlog.Append(root, "candidate.retire", rec.Meta.ID, m.actor(), map[string]any{
+		"target_path":     rec.Meta.TargetPath,
+		"previous_status": previousStatus,
+		"reason":          reason,
+	}); err != nil {
+		return Record{}, err
+	}
+	return rec, nil
+}
+
 func (m Manager) Discard(scope, id string) (Record, error) {
 	rec, err := m.Show(scope, id)
 	if err != nil {
@@ -495,7 +544,7 @@ func normalizeScope(scope string) string {
 }
 
 func terminalStatus(status string) bool {
-	return status == StatusPromoted || status == StatusMerged || status == StatusDiscarded
+	return status == StatusPromoted || status == StatusMerged || status == StatusDiscarded || status == StatusRetired
 }
 
 func blockedError(result redact.Result) error {

@@ -327,6 +327,59 @@ func TestReviewWarnsWhenAppliedCandidateTargetMissing(t *testing.T) {
 	}
 }
 
+func TestRetireClearsAppliedCandidateTargetWarning(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"init"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run init: %v stderr=%s", err, errb.String())
+	}
+	if err := Run(context.Background(), []string{"candidates", "create", "--id", "retire-rule", "--type", "rule", "--target", "rules/retire-rule.md", "--title", "Retire Rule", "Retire body."}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates create rule: %v stderr=%s", err, errb.String())
+	}
+	if err := Run(context.Background(), []string{"promote", "retire-rule"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run promote: %v stderr=%s", err, errb.String())
+	}
+	if err := os.Remove(filepath.Join(project, ".worktrail", "rules", "retire-rule.md")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"review"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review after target removal: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "worktrail retire <id> --reason <text>") {
+		t.Fatalf("review did not suggest retire:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"retire", "retire-rule", "--reason", "smoke test cleanup"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run retire: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "retire-rule\tretired") {
+		t.Fatalf("retire output unexpected:\n%s", out.String())
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"review"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review after retire: %v stderr=%s", err, errb.String())
+	}
+	if strings.Contains(out.String(), "Applied candidate target warnings") {
+		t.Fatalf("review still warned after retire:\n%s", out.String())
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"candidates", "list", "--status", "retired", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates list retired: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), `"id":"retire-rule"`) || !strings.Contains(out.String(), `"retire_reason":"smoke test cleanup"`) {
+		t.Fatalf("retired list output unexpected:\n%s", out.String())
+	}
+}
+
 func TestCandidatesCreateHelpDoesNotRequireTarget(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")

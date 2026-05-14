@@ -24,4 +24,4 @@ For one explicit transcript file:
 4. Summarize created pending candidates and their target paths.
 5. Hand off review to `/worktrail-review`.
 
-Do not promote, merge, discard, or write formal knowledge from this skill. Import, extract, distill, and candidate creation produce pending candidates only. Transcript notes are evidence and must be distilled into semantic candidates before review or promotion.
+Do not promote, merge, discard, restore, retire, or write formal knowledge from this skill. Import, extract, distill, and candidate creation produce pending candidates only. Transcript notes are evidence and must be distilled into semantic candidates before review or promotion.

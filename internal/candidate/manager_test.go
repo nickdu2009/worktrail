@@ -234,6 +234,123 @@ func TestRestoreRejectsNonPromotedOrMergedCandidates(t *testing.T) {
 	}
 }
 
+func TestRetireAcknowledgesMissingPromotedOrMergedTargets(t *testing.T) {
+	m := testManager(t)
+	_, err := m.Create(CreateRequest{
+		ID:         "retire-rule",
+		Scope:      "project",
+		TargetPath: "rules/retire-rule.md",
+		Title:      "Retire Rule",
+		Body:       "# Retire Rule\n\nRetired body.\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Promote("project", "retire-rule"); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(m.Env.ProjectWT, "rules", "retire-rule.md")
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+
+	rec, err := m.Retire("project", "retire-rule", "smoke test cleanup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Meta.Status != StatusRetired {
+		t.Fatalf("retired status = %q", rec.Meta.Status)
+	}
+	if rec.Meta.RetireReason != "smoke test cleanup" {
+		t.Fatalf("retire reason = %q", rec.Meta.RetireReason)
+	}
+	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("retire recreated target or unexpected stat error: %v", err)
+	}
+	if _, err := m.Promote("project", "retire-rule"); err == nil || !strings.Contains(err.Error(), "already retired") {
+		t.Fatalf("promote retired candidate error = %v", err)
+	}
+
+	mergeTarget := filepath.Join(m.Env.ProjectWT, "project.md")
+	if err := os.MkdirAll(filepath.Dir(mergeTarget), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mergeTarget, []byte("# Project\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Create(CreateRequest{
+		ID:         "retire-merge",
+		Scope:      "project",
+		TargetPath: "project.md",
+		Title:      "Retire Merge",
+		Operation:  OperationMerge,
+		Body:       "Merged body.\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Merge("project", "retire-merge"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(mergeTarget); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := m.Retire("project", "retire-merge", "project document removed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Meta.Status != StatusRetired {
+		t.Fatalf("merged retire status = %q", merged.Meta.Status)
+	}
+
+	logBody, err := os.ReadFile(filepath.Join(m.Env.ProjectWT, "logs", "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logBody), "candidate.retire") || !strings.Contains(string(logBody), "smoke test cleanup") {
+		t.Fatalf("event log missing retire event:\n%s", logBody)
+	}
+}
+
+func TestRetireRejectsPendingExistingTargetAndMissingReason(t *testing.T) {
+	m := testManager(t)
+	if _, err := m.Create(CreateRequest{
+		ID:         "pending-retire",
+		Scope:      "project",
+		TargetPath: "rules/pending-retire.md",
+		Title:      "Pending Retire",
+		Body:       "Pending body.\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Retire("project", "pending-retire", "not accepted"); !errors.Is(err, ErrRetireUnsupported) {
+		t.Fatalf("pending retire error = %v", err)
+	}
+
+	if _, err := m.Create(CreateRequest{
+		ID:         "existing-retire",
+		Scope:      "project",
+		TargetPath: "rules/existing-retire.md",
+		Title:      "Existing Retire",
+		Body:       "Existing body.\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Promote("project", "existing-retire"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Retire("project", "existing-retire", "target still active"); err == nil || !strings.Contains(err.Error(), "still exists") {
+		t.Fatalf("existing target retire error = %v", err)
+	}
+
+	target := filepath.Join(m.Env.ProjectWT, "rules", "existing-retire.md")
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Retire("project", "existing-retire", " "); !errors.Is(err, ErrRetireReasonRequired) {
+		t.Fatalf("missing reason retire error = %v", err)
+	}
+}
+
 func TestMergeBacksUpAndAppendsCandidateBody(t *testing.T) {
 	m := testManager(t)
 	target := filepath.Join(m.Env.ProjectWT, "project.md")

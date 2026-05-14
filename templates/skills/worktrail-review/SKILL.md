@@ -1,6 +1,6 @@
 ---
 name: worktrail-review
-description: Review Worktrail candidates in chat before any promotion or merge.
+description: Review Worktrail candidates in chat before any promotion, merge, restore, retire, or discard.
 ---
 
 # Worktrail Review
@@ -15,8 +15,9 @@ Use this skill to review pending candidates in Codex or Claude Code chat.
 6. For a selected semantic candidate, run `worktrail candidates diff <candidate-id>`.
 7. Explain value, duplication risk, and redaction status.
 8. Wait for explicit user confirmation.
-9. Only after confirmation, run the requested non-interactive CLI command: `worktrail promote`, `worktrail merge`, or `worktrail discard`.
+9. If `worktrail review` reports an applied candidate with a missing target, explain the two safe paths: `worktrail restore <id>` recreates an accidentally deleted promoted replace target; `worktrail retire <id> --reason <text>` acknowledges an intentionally removed target.
+10. Only after confirmation, run the requested non-interactive CLI command: `worktrail promote`, `worktrail merge`, `worktrail discard`, `worktrail restore`, or `worktrail retire`.
 
 Never promote or merge `transcript_notes`; they are evidence and must be distilled into semantic candidates first.
 
-Never promote, merge, discard, delete, or replace from hooks or default MCP tools.
+Never promote, merge, discard, restore, retire, delete, or replace from hooks or default MCP tools.
