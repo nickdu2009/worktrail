@@ -138,6 +138,102 @@ func TestPromoteBacksUpWritesAtomicallyUpdatesStatusAndLogs(t *testing.T) {
 	}
 }
 
+func TestRestoreRecreatesMissingPromotedReplaceTarget(t *testing.T) {
+	m := testManager(t)
+	_, err := m.Create(CreateRequest{
+		ID:         "restore-rule",
+		Scope:      "project",
+		TargetPath: "rules/restore-rule.md",
+		Title:      "Restore Rule",
+		Body:       "# Restore Rule\n\nRestored body.\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Promote("project", "restore-rule"); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(m.Env.ProjectWT, "rules", "restore-rule.md")
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := m.Restore("project", "restore-rule")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "restored" {
+		t.Fatalf("restore status = %q", result.Status)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "# Restore Rule\n\nRestored body.\n" {
+		t.Fatalf("restored target body = %q", body)
+	}
+	updated, err := m.Show("project", "restore-rule")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Meta.Status != StatusPromoted {
+		t.Fatalf("candidate status = %q", updated.Meta.Status)
+	}
+	logBody, err := os.ReadFile(filepath.Join(m.Env.ProjectWT, "logs", "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logBody), "candidate.restore") {
+		t.Fatalf("event log missing restore event:\n%s", logBody)
+	}
+	if _, err := m.Restore("project", "restore-rule"); err == nil || !strings.Contains(err.Error(), "target") {
+		t.Fatalf("restore existing target error = %v", err)
+	}
+}
+
+func TestRestoreRejectsNonPromotedOrMergedCandidates(t *testing.T) {
+	m := testManager(t)
+	if _, err := m.Create(CreateRequest{
+		ID:         "pending-rule",
+		Scope:      "project",
+		TargetPath: "rules/pending.md",
+		Title:      "Pending Rule",
+		Body:       "Pending body.\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Restore("project", "pending-rule"); !errors.Is(err, ErrRestoreUnsupported) {
+		t.Fatalf("pending restore error = %v", err)
+	}
+
+	target := filepath.Join(m.Env.ProjectWT, "project.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("# Project\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Create(CreateRequest{
+		ID:         "merged-note",
+		Scope:      "project",
+		TargetPath: "project.md",
+		Title:      "Merged Note",
+		Operation:  OperationMerge,
+		Body:       "Merged body.\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Merge("project", "merged-note"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Restore("project", "merged-note"); !errors.Is(err, ErrRestoreUnsupported) {
+		t.Fatalf("merged restore error = %v", err)
+	}
+}
+
 func TestMergeBacksUpAndAppendsCandidateBody(t *testing.T) {
 	m := testManager(t)
 	target := filepath.Join(m.Env.ProjectWT, "project.md")

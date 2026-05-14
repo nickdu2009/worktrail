@@ -33,6 +33,7 @@ var (
 	ErrBlocked              = errors.New("candidate content contains blocked sensitive material")
 	ErrNotFound             = errors.New("candidate not found")
 	ErrTranscriptNotesApply = errors.New("transcript notes are evidence and must be distilled before promote or merge")
+	ErrRestoreUnsupported   = errors.New("restore only supports promoted replace candidates with missing targets")
 )
 
 type Manager struct {
@@ -214,6 +215,60 @@ func (m Manager) Promote(scope, id string) (ApplyResult, error) {
 
 func (m Manager) Merge(scope, id string) (ApplyResult, error) {
 	return m.apply(scope, id, OperationMerge)
+}
+
+func (m Manager) Restore(scope, id string) (ApplyResult, error) {
+	rec, err := m.Show(scope, id)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if rec.Meta.Status != StatusPromoted || rec.Meta.Operation != OperationReplace {
+		return ApplyResult{}, ErrRestoreUnsupported
+	}
+	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+		return ApplyResult{}, ErrTranscriptNotesApply
+	}
+	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	target, err := resolveTarget(root, rec.Meta.TargetPath)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if _, err := os.Stat(target); err == nil {
+		return ApplyResult{}, fmt.Errorf("target %q already exists; restore only repairs missing targets", rec.Meta.TargetPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return ApplyResult{}, err
+	}
+	scan := redact.Scan(rec.Body)
+	if scan.Status == redact.StatusBlocked {
+		_ = wlog.Append(root, "candidate.blocked", rec.Meta.ID, m.actor(), map[string]any{
+			"target_path": rec.Meta.TargetPath,
+			"operation":   "restore",
+		})
+		return ApplyResult{}, blockedError(scan)
+	}
+	if err := util.AtomicWrite(target, []byte(ensureTrailingNewline(scan.Text)), 0o644); err != nil {
+		return ApplyResult{}, err
+	}
+	rec.Body = scan.Text
+	rec.Meta.RedactionStatus = string(scan.Status)
+	rec.Meta.UpdatedAt = m.now()
+	if err := writeRecord(rec); err != nil {
+		return ApplyResult{}, err
+	}
+	if err := wlog.Append(root, "candidate.restore", rec.Meta.ID, m.actor(), map[string]any{
+		"target_path": rec.Meta.TargetPath,
+		"redaction":   rec.Meta.RedactionStatus,
+	}); err != nil {
+		return ApplyResult{}, err
+	}
+	return ApplyResult{
+		Candidate:  rec.Meta,
+		TargetPath: target,
+		Status:     "restored",
+	}, nil
 }
 
 func (m Manager) Discard(scope, id string) (Record, error) {

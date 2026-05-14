@@ -304,10 +304,26 @@ func TestReviewWarnsWhenAppliedCandidateTargetMissing(t *testing.T) {
 		"Applied candidate target warnings",
 		"`rule-1` is promoted but `rules/rule-1.md` is missing",
 		"context will not load it as formal knowledge",
+		"worktrail restore <id>",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("review output missing %q:\n%s", want, out.String())
 		}
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"restore", "rule-1"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run restore: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "rule-1\trestored") {
+		t.Fatalf("restore output unexpected:\n%s", out.String())
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"review"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review after restore: %v stderr=%s", err, errb.String())
+	}
+	if strings.Contains(out.String(), "Applied candidate target warnings") {
+		t.Fatalf("review still warned after restore:\n%s", out.String())
 	}
 }
 

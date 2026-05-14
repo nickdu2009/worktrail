@@ -56,7 +56,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 		return runCandidates(ctx, env, ioctx, args[1:])
 	case "review":
 		return runReview(ctx, env, ioctx, args[1:])
-	case "promote", "discard":
+	case "promote", "discard", "restore":
 		return runCandidateAction(ctx, env, ioctx, args[0], args[1:])
 	case "merge":
 		return runMerge(ctx, env, ioctx, args[1:])
@@ -106,6 +106,7 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  worktrail distill --pending [--limit N|--all] [--write-pack file]")
 	fmt.Fprintln(out, "  worktrail candidates create --help")
 	fmt.Fprintln(out, "  worktrail review [--semantic|--evidence|--all]")
+	fmt.Fprintln(out, "  worktrail restore <candidate-id>")
 }
 
 func stringFlag(args []string, name, def string) (string, []string, error) {

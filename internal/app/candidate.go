@@ -170,6 +170,7 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 		for _, issue := range missingAppliedTargets {
 			fmt.Fprintf(ioctx.Out, "- `%s` is %s but `%s` is missing; context will not load it as formal knowledge.\n", issue.ID, issue.Status, issue.TargetPath)
 		}
+		fmt.Fprintln(ioctx.Out, "  For promoted replace candidates, use `worktrail restore <id>` after explicit confirmation to recreate the missing target.")
 	}
 	fmt.Fprintln(ioctx.Out, "\nUse `worktrail candidates diff <id>` and, after explicit user confirmation, `worktrail promote|merge|discard <id>`.")
 	return nil
@@ -231,6 +232,12 @@ func runCandidateAction(_ context.Context, env paths.Env, ioctx IO, action strin
 			return err
 		}
 		return printCandidate(ioctx, rec, flagValue(flags, "format", "text"))
+	case "restore":
+		result, err := manager.Restore(scope, id)
+		if err != nil {
+			return err
+		}
+		return printApplyResult(ioctx, result, flagValue(flags, "format", "text"))
 	default:
 		return fmt.Errorf("unknown candidate action %q", action)
 	}
