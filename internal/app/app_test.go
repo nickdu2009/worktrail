@@ -265,6 +265,52 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	}
 }
 
+func TestReviewWarnsWhenAppliedCandidateTargetMissing(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"init"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run init: %v stderr=%s", err, errb.String())
+	}
+	if err := Run(context.Background(), []string{"candidates", "create", "--id", "rule-1", "--type", "rule", "--target", "rules/rule-1.md", "--title", "Rule", "Rule body."}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates create rule: %v stderr=%s", err, errb.String())
+	}
+	if err := Run(context.Background(), []string{"promote", "rule-1"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run promote: %v stderr=%s", err, errb.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"review"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review: %v stderr=%s", err, errb.String())
+	}
+	if strings.Contains(out.String(), "Applied candidate target warnings") {
+		t.Fatalf("review warned while promoted target exists:\n%s", out.String())
+	}
+
+	if err := os.Remove(filepath.Join(project, ".worktrail", "rules", "rule-1.md")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"review"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review after target removal: %v stderr=%s", err, errb.String())
+	}
+	for _, want := range []string{
+		"Applied candidate target warnings",
+		"`rule-1` is promoted but `rules/rule-1.md` is missing",
+		"context will not load it as formal knowledge",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("review output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestCandidatesCreateHelpDoesNotRequireTarget(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")

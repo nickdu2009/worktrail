@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
@@ -160,8 +161,56 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	if hiddenEvidence > 0 {
 		fmt.Fprintf(ioctx.Out, "\nHidden transcript evidence candidates: %d. Use `worktrail review --evidence` to inspect them or `worktrail distill --pending --limit 5` to distill them.\n", hiddenEvidence)
 	}
+	missingAppliedTargets, err := missingAppliedCandidateTargets(env, records)
+	if err != nil {
+		return err
+	}
+	if len(missingAppliedTargets) > 0 {
+		fmt.Fprintln(ioctx.Out, "\nApplied candidate target warnings:")
+		for _, issue := range missingAppliedTargets {
+			fmt.Fprintf(ioctx.Out, "- `%s` is %s but `%s` is missing; context will not load it as formal knowledge.\n", issue.ID, issue.Status, issue.TargetPath)
+		}
+	}
 	fmt.Fprintln(ioctx.Out, "\nUse `worktrail candidates diff <id>` and, after explicit user confirmation, `worktrail promote|merge|discard <id>`.")
 	return nil
+}
+
+type appliedTargetIssue struct {
+	ID         string
+	Status     string
+	TargetPath string
+}
+
+func missingAppliedCandidateTargets(env paths.Env, records []candidate.Record) ([]appliedTargetIssue, error) {
+	var issues []appliedTargetIssue
+	for _, rec := range records {
+		if rec.Meta.Status != candidate.StatusPromoted && rec.Meta.Status != candidate.StatusMerged {
+			continue
+		}
+		root, err := env.ScopeRoot(rec.Meta.Scope)
+		if err != nil {
+			return nil, err
+		}
+		target := filepath.Join(root, filepath.FromSlash(rec.Meta.TargetPath))
+		rel, err := filepath.Rel(root, target)
+		if err != nil {
+			return nil, err
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("candidate %q target escapes scope: %s", rec.Meta.ID, rec.Meta.TargetPath)
+		}
+		if _, err := os.Stat(target); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		issues = append(issues, appliedTargetIssue{
+			ID:         rec.Meta.ID,
+			Status:     rec.Meta.Status,
+			TargetPath: rec.Meta.TargetPath,
+		})
+	}
+	return issues, nil
 }
 
 func runCandidateAction(_ context.Context, env paths.Env, ioctx IO, action string, args []string) error {
