@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
+	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/redact"
 )
@@ -17,6 +18,10 @@ import (
 func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 	if len(args) == 0 {
 		return errors.New("candidates subcommand required")
+	}
+	if wantsHelp(args) {
+		printCandidatesHelp(ioctx.Out, firstArg(args, ""))
+		return nil
 	}
 	manager := candidate.Manager{Env: env, Actor: "cli:candidates"}
 	cmd, rest := args[0], args[1:]
@@ -52,7 +57,12 @@ func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) er
 		if err != nil {
 			return err
 		}
-		records = filterCandidateRecords(records, flagValue(flags, "type", ""), flagValue(flags, "status", ""))
+		records = filterCandidateRecords(records, candidateFilters{
+			Type:     flagValue(flags, "type", ""),
+			Status:   flagValue(flags, "status", ""),
+			Semantic: flagValue(flags, "semantic", "") == "true",
+			Evidence: flagValue(flags, "evidence", "") == "true",
+		})
 		if flagValue(flags, "format", "text") == "json" {
 			return json.NewEncoder(ioctx.Out).Encode(records)
 		}
@@ -78,18 +88,31 @@ func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) er
 	}
 }
 
-func filterCandidateRecords(records []candidate.Record, typ, status string) []candidate.Record {
-	typ = strings.TrimSpace(typ)
-	status = strings.TrimSpace(status)
-	if typ == "" && status == "" {
+type candidateFilters struct {
+	Type     string
+	Status   string
+	Semantic bool
+	Evidence bool
+}
+
+func filterCandidateRecords(records []candidate.Record, filters candidateFilters) []candidate.Record {
+	filters.Type = strings.TrimSpace(filters.Type)
+	filters.Status = strings.TrimSpace(filters.Status)
+	if filters.Type == "" && filters.Status == "" && !filters.Semantic && !filters.Evidence {
 		return records
 	}
 	filtered := records[:0]
 	for _, rec := range records {
-		if typ != "" && rec.Meta.CandidateType != typ {
+		if filters.Type != "" && rec.Meta.CandidateType != filters.Type {
 			continue
 		}
-		if status != "" && rec.Meta.Status != status {
+		if filters.Status != "" && rec.Meta.Status != filters.Status {
+			continue
+		}
+		if filters.Semantic && !isSemanticCandidateType(rec.Meta.CandidateType) {
+			continue
+		}
+		if filters.Evidence && rec.Meta.CandidateType != model.CandidateTypeTranscriptNotes {
 			continue
 		}
 		filtered = append(filtered, rec)
@@ -98,6 +121,10 @@ func filterCandidateRecords(records []candidate.Record, typ, status string) []ca
 }
 
 func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error {
+	if wantsHelp(args) {
+		printReviewHelp(ioctx.Out)
+		return nil
+	}
 	flags, _ := splitFlags(args)
 	scope := flagValue(flags, "scope", "project")
 	records, err := (candidate.Manager{Env: env, Actor: "cli:review"}).List(scope)
@@ -106,14 +133,32 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	}
 	fmt.Fprintln(ioctx.Out, "# Worktrail Candidate Review")
 	fmt.Fprintln(ioctx.Out)
+	showEvidence := flagValue(flags, "evidence", "") == "true"
+	showAll := flagValue(flags, "all", "") == "true"
+	showSemantic := flagValue(flags, "semantic", "") == "true"
+	hiddenEvidence := 0
 	for _, rec := range records {
 		if rec.Meta.Status != candidate.StatusPending {
+			continue
+		}
+		if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+			if !showEvidence && !showAll {
+				hiddenEvidence++
+				continue
+			}
+		} else if showEvidence {
+			continue
+		}
+		if showSemantic && !isSemanticCandidateType(rec.Meta.CandidateType) {
 			continue
 		}
 		fmt.Fprintf(ioctx.Out, "- `%s` %s -> `%s` [%s, redaction=%s]\n", rec.Meta.ID, rec.Meta.Title, rec.Meta.TargetPath, rec.Meta.CandidateType, rec.Meta.RedactionStatus)
 		if rec.Meta.Summary != "" {
 			fmt.Fprintf(ioctx.Out, "  %s\n", rec.Meta.Summary)
 		}
+	}
+	if hiddenEvidence > 0 {
+		fmt.Fprintf(ioctx.Out, "\nHidden transcript evidence candidates: %d. Use `worktrail review --evidence` to inspect them or `worktrail distill --pending --limit 5` to distill them.\n", hiddenEvidence)
 	}
 	fmt.Fprintln(ioctx.Out, "\nUse `worktrail candidates diff <id>` and, after explicit user confirmation, `worktrail promote|merge|discard <id>`.")
 	return nil
@@ -210,4 +255,53 @@ func printApplyResult(ioctx IO, result candidate.ApplyResult, format string) err
 		fmt.Fprintf(ioctx.Out, "backup\t%s\n", result.BackupPath)
 	}
 	return nil
+}
+
+func isSemanticCandidateType(typ string) bool {
+	switch typ {
+	case "rule", "decision", "lesson", "prompt", "workflow":
+		return true
+	default:
+		return false
+	}
+}
+
+func printCandidatesHelp(out io.Writer, subcommand string) {
+	switch subcommand {
+	case "create":
+		fmt.Fprintln(out, "usage: worktrail candidates create --target <path> [options] [body]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "options:")
+		fmt.Fprintln(out, "  --id <id>              optional stable candidate id")
+		fmt.Fprintln(out, "  --scope <scope>        project or user (default project)")
+		fmt.Fprintln(out, "  --type <type>          rule, decision, lesson, prompt, workflow, or transcript_notes")
+		fmt.Fprintln(out, "  --target <path>        target knowledge path, for example rules/testing.md")
+		fmt.Fprintln(out, "  --title <title>        candidate title")
+		fmt.Fprintln(out, "  --summary <text>       short review summary")
+		fmt.Fprintln(out, "  --operation <op>       replace or merge (default replace)")
+		fmt.Fprintln(out, "  --tags a,b             comma-separated tags")
+		fmt.Fprintln(out, "  --format text|json     output format")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "body can be passed as positional text or via stdin.")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "examples:")
+		fmt.Fprintln(out, "  worktrail candidates create --type rule --target rules/testing.md --title \"Testing Rules\" \"Keep tests focused.\"")
+		fmt.Fprintln(out, "  printf '# Workflow\\n\\nRun focused tests first.\\n' | worktrail candidates create --type workflow --target workflows/testing.md --title \"Testing Workflow\"")
+	default:
+		fmt.Fprintln(out, "usage: worktrail candidates <create|list|show|diff> [options]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "list filters:")
+		fmt.Fprintln(out, "  --status pending|promoted|merged|discarded")
+		fmt.Fprintln(out, "  --type <candidate_type>")
+		fmt.Fprintln(out, "  --semantic     rule/decision/lesson/prompt/workflow only")
+		fmt.Fprintln(out, "  --evidence     transcript_notes only")
+		fmt.Fprintln(out, "  --format json")
+	}
+}
+
+func printReviewHelp(out io.Writer) {
+	fmt.Fprintln(out, "usage: worktrail review [--semantic|--evidence|--all] [--scope project|user]")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "By default, review shows pending semantic candidates and hides transcript_notes evidence.")
+	fmt.Fprintln(out, "Use --evidence to inspect transcript evidence, or --all to show both.")
 }

@@ -23,6 +23,10 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 		usage(out)
 		return nil
 	}
+	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		usage(out)
+		return nil
+	}
 	env, err := paths.Discover()
 	if err != nil {
 		return err
@@ -95,6 +99,13 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 func usage(out io.Writer) {
 	fmt.Fprintln(out, "worktrail: local AI session knowledge and state layer")
 	fmt.Fprintln(out, "usage: worktrail <command> [args]")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "common commands:")
+	fmt.Fprintln(out, "  worktrail context <task>")
+	fmt.Fprintln(out, "  worktrail import codex [--all]")
+	fmt.Fprintln(out, "  worktrail distill --pending [--limit N|--all] [--write-pack file]")
+	fmt.Fprintln(out, "  worktrail candidates create --help")
+	fmt.Fprintln(out, "  worktrail review [--semantic|--evidence|--all]")
 }
 
 func stringFlag(args []string, name, def string) (string, []string, error) {

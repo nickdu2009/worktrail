@@ -98,6 +98,13 @@ func TestImportCodexDiscoversAndExtractsProjectSessions(t *testing.T) {
 		t.Fatalf("unexpected dry-run report: %+v", dry)
 	}
 	out.Reset()
+	if err := Run(context.Background(), []string{"import", "codex"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run import dry-run text: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "next steps:") || !strings.Contains(out.String(), "git guidance:") {
+		t.Fatalf("import text output missing guidance:\n%s", out.String())
+	}
+	out.Reset()
 	if err := Run(context.Background(), []string{"import", "codex", "--all", "--format", "json"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run import --all: %v stderr=%s", err, errb.String())
 	}
@@ -143,6 +150,9 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"candidates", "create", "--id", "note-1", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/note-1.md", "--title", "Transcript Notes", "Evidence body."}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run candidates create transcript: %v stderr=%s", err, errb.String())
 	}
+	if err := Run(context.Background(), []string{"candidates", "create", "--id", "note-2", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/note-2.md", "--title", "More Transcript Notes", "Second evidence body."}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates create second transcript: %v stderr=%s", err, errb.String())
+	}
 	if err := Run(context.Background(), []string{"candidates", "create", "--id", "rule-1", "--type", "rule", "--target", "rules/rule-1.md", "--title", "Rule", "Rule body."}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run candidates create rule: %v stderr=%s", err, errb.String())
 	}
@@ -155,8 +165,36 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &records); err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 1 || records[0].Meta.ID != "note-1" {
+	if len(records) != 2 || records[0].Meta.ID != "note-1" || records[1].Meta.ID != "note-2" {
 		t.Fatalf("filtered records = %#v", records)
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"candidates", "list", "--semantic", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates list semantic: %v stderr=%s", err, errb.String())
+	}
+	records = nil
+	if err := json.Unmarshal(out.Bytes(), &records); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Meta.ID != "rule-1" {
+		t.Fatalf("semantic records = %#v", records)
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"review"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review: %v stderr=%s", err, errb.String())
+	}
+	if strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "Hidden transcript evidence candidates: 2") {
+		t.Fatalf("review did not hide transcript evidence:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"review", "--evidence"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review evidence: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "rule-1") {
+		t.Fatalf("review evidence output unexpected:\n%s", out.String())
 	}
 
 	out.Reset()
@@ -165,6 +203,54 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Evidence Candidate `note-1`") {
 		t.Fatalf("distill pending output missing note-1:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "Evidence Candidate `note-2`") {
+		t.Fatalf("distill pending ignored limit:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "--pending", "--limit", "1", "--offset", "1"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill pending offset: %v stderr=%s", err, errb.String())
+	}
+	if strings.Contains(out.String(), "Evidence Candidate `note-1`") || !strings.Contains(out.String(), "Evidence Candidate `note-2`") {
+		t.Fatalf("distill pending offset output unexpected:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "--pending", "--all"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill pending all: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "Evidence candidates in this pack: 2") || !strings.Contains(out.String(), "Evidence Candidate `note-1`") || !strings.Contains(out.String(), "Evidence Candidate `note-2`") {
+		t.Fatalf("distill pending all output unexpected:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "--pending", "--all", "--summary"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill summary: %v stderr=%s", err, errb.String())
+	}
+	if strings.Contains(out.String(), "Transcript Evidence") || !strings.Contains(out.String(), "evidence_candidates: 2") {
+		t.Fatalf("distill summary output unexpected:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "--pending", "--all", "--json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill json: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), `"count":2`) {
+		t.Fatalf("distill json output unexpected:\n%s", out.String())
+	}
+
+	pack := filepath.Join(project, "distill.md")
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "--pending", "--all", "--write-pack", pack}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill write-pack: %v stderr=%s", err, errb.String())
+	}
+	packBody, err := os.ReadFile(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(packBody, []byte("Evidence Candidate `note-2`")) || !strings.Contains(out.String(), "pack: "+pack) {
+		t.Fatalf("write-pack output unexpected stdout=%s pack=%s", out.String(), packBody)
 	}
 
 	out.Reset()
@@ -176,5 +262,47 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("distill output missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestCandidatesCreateHelpDoesNotRequireTarget(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"candidates", "create", "--help"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates create help: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "usage: worktrail candidates create") || !strings.Contains(out.String(), "--target <path>") {
+		t.Fatalf("help output unexpected:\n%s", out.String())
+	}
+}
+
+func TestDistillAllLargeSetRequiresCompactOutput(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"init"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run init: %v stderr=%s", err, errb.String())
+	}
+	for i := 0; i < 6; i++ {
+		id := "note-large-" + string(rune('a'+i))
+		if err := Run(context.Background(), []string{"candidates", "create", "--id", id, "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/" + id + ".md", "--title", "Transcript Notes", "Evidence body."}, nil, &out, &errb); err != nil {
+			t.Fatalf("Run candidates create %s: %v stderr=%s", id, err, errb.String())
+		}
+	}
+	out.Reset()
+	err := Run(context.Background(), []string{"distill", "--pending", "--all"}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "avoid flooding the terminal") {
+		t.Fatalf("distill --all error = %v, stdout=%s", err, out.String())
 	}
 }
