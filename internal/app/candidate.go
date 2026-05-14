@@ -139,6 +139,7 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	showAll := flagValue(flags, "all", "") == "true"
 	showSemantic := flagValue(flags, "semantic", "") == "true"
 	hiddenEvidence := 0
+	hiddenNonSemantic := 0
 	for _, rec := range records {
 		if rec.Meta.Status != candidate.StatusPending {
 			continue
@@ -149,6 +150,10 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 				continue
 			}
 		} else if showEvidence {
+			continue
+		}
+		if !showAll && !showEvidence && !isSemanticCandidateType(rec.Meta.CandidateType) {
+			hiddenNonSemantic++
 			continue
 		}
 		if showSemantic && !isSemanticCandidateType(rec.Meta.CandidateType) {
@@ -168,6 +173,9 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	}
 	if hiddenEvidence > 0 {
 		fmt.Fprintf(ioctx.Out, "\nHidden transcript evidence candidates: %d. Use `worktrail review --evidence` to inspect them or `worktrail distill --pending --limit 5` to distill them.\n", hiddenEvidence)
+	}
+	if hiddenNonSemantic > 0 {
+		fmt.Fprintf(ioctx.Out, "\nHidden non-semantic pending candidates: %d. Use `worktrail review --all` to inspect them.\n", hiddenNonSemantic)
 	}
 	missingAppliedTargets, err := missingAppliedCandidateTargets(env, records)
 	if err != nil {
@@ -372,7 +380,7 @@ func printCandidatesHelp(out io.Writer, subcommand string) {
 func printReviewHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail review [--semantic|--evidence|--all] [--scope project|user]")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "By default, review shows pending semantic candidates and hides transcript_notes evidence.")
-	fmt.Fprintln(out, "Use --evidence to inspect transcript evidence, or --all to show both.")
+	fmt.Fprintln(out, "By default, review shows pending semantic candidates and hides transcript_notes evidence plus non-semantic operational candidates.")
+	fmt.Fprintln(out, "Use --evidence to inspect transcript evidence, or --all to show every pending candidate.")
 	fmt.Fprintln(out, "When an applied target is missing, review suggests restore for accidental deletion or retire for intentional deletion.")
 }

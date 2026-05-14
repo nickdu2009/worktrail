@@ -284,6 +284,9 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"candidates", "create", "--id", "ordinary-lesson", "--type", "lesson", "--target", "lessons/ordinary.md", "--title", "Ordinary Lesson", "Ordinary lesson body."}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run candidates create ordinary lesson: %v stderr=%s", err, errb.String())
 	}
+	if err := Run(context.Background(), []string{"candidates", "create", "--id", "handoff-noise", "--type", "handoff", "--target", "handoffs/noise.md", "--title", "Handoff Noise", "Operational handoff body."}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates create handoff noise: %v stderr=%s", err, errb.String())
+	}
 
 	out.Reset()
 	if err := Run(context.Background(), []string{"candidates", "list", "--type", model.CandidateTypeTranscriptNotes, "--status", candidate.StatusPending, "--format", "json"}, nil, &out, &errb); err != nil {
@@ -313,16 +316,24 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"review"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run review: %v stderr=%s", err, errb.String())
 	}
-	if strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "Hidden transcript evidence candidates: 2") {
-		t.Fatalf("review did not hide transcript evidence:\n%s", out.String())
+	if strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "handoff-noise") || !strings.Contains(out.String(), "Hidden transcript evidence candidates: 2") || !strings.Contains(out.String(), "Hidden non-semantic pending candidates: 1") {
+		t.Fatalf("review did not hide evidence or non-semantic candidates:\n%s", out.String())
 	}
 
 	out.Reset()
 	if err := Run(context.Background(), []string{"review", "--evidence"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run review evidence: %v stderr=%s", err, errb.String())
 	}
-	if !strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "rule-1") {
+	if !strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "rule-1") || strings.Contains(out.String(), "handoff-noise") {
 		t.Fatalf("review evidence output unexpected:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"review", "--all"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review all: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "rule-1") || !strings.Contains(out.String(), "handoff-noise") || strings.Contains(out.String(), "Hidden transcript evidence candidates") || strings.Contains(out.String(), "Hidden non-semantic pending candidates") {
+		t.Fatalf("review all output unexpected:\n%s", out.String())
 	}
 
 	out.Reset()

@@ -165,8 +165,9 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 	}
 	for _, want := range []string{
 		"worktrail candidates list --semantic --status pending --format json",
-		"Do not include `transcript_notes` evidence in the default review table",
+		"Do not include `transcript_notes` evidence or non-semantic operational candidates",
 		"worktrail review --evidence",
+		"worktrail review --all",
 		"worktrail retire <id> --reason <text>",
 	} {
 		if !strings.Contains(string(reviewSkill), want) {

@@ -29,6 +29,8 @@ worktrail index rebuild
 worktrail context "current task"
 ```
 
+`worktrail review` shows pending semantic candidates by default and reports hidden transcript evidence plus non-semantic operational candidates such as handoffs. Use `worktrail review --evidence` for raw transcript evidence, or `worktrail review --all` when operational candidates also need inspection.
+
 `worktrail context <task>` hides pending transcript evidence by default and reports how many evidence candidates are hidden. Use `worktrail context --evidence <task>` when the raw transcript notes themselves need to be included in the Pending Candidates section.
 
 ## Distillation proposals
