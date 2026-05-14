@@ -144,6 +144,7 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	writeTextFile(t, filepath.Join(root, "README.md"), "# KDD Root\n\nSkipped root overview.")
 	writeTextFile(t, filepath.Join(root, "project", "README.md"), "# Project KB\n\nShared overview.")
 	writeTextFile(t, filepath.Join(root, "project", "active-knowledge-log.md"), "# Active Log\n\nUnverified finding.")
+	writeTextFile(t, filepath.Join(root, "project", "architecture", "README.md"), "# Architecture\n\nDirectory guidance.")
 	writeTextFile(t, filepath.Join(root, "project", "architecture", "system.md"), "# System Architecture\n\nArchitecture body.")
 	writeTextFile(t, filepath.Join(root, "project", "architecture", "delivery-case-workbench-p0-implementation-alignment.md"), "# Alignment\n\nLong prefix body.")
 	writeTextFile(t, filepath.Join(root, "project", "architecture", "delivery-case-workbench-p0-implementation-plan.md"), "# Plan\n\nLong prefix plan.")
@@ -171,8 +172,11 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &dry); err != nil {
 		t.Fatal(err)
 	}
-	if !dry.DryRun || dry.Matched != 11 || dry.Blocked != 1 || dry.LocalSkipped != 1 {
+	if !dry.DryRun || dry.Matched != 11 || dry.Skipped != 2 || dry.Blocked != 1 || dry.LocalSkipped != 1 {
 		t.Fatalf("unexpected dry-run report: %+v", dry)
+	}
+	if !hasKDDSkippedPath(dry.Items, "project/architecture/README.md") {
+		t.Fatalf("dry-run did not report skipped category README: %+v", dry.Items)
 	}
 	if hasDuplicateKDDCandidateIDs(dry.Items) {
 		t.Fatalf("dry-run report has duplicate candidate ids: %+v", dry.Items)
@@ -192,7 +196,7 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.DryRun || report.Created != 11 || report.Blocked != 1 || report.LocalSkipped != 1 {
+	if report.DryRun || report.Created != 11 || report.Skipped != 2 || report.Blocked != 1 || report.LocalSkipped != 1 {
 		t.Fatalf("unexpected import report: %+v", report)
 	}
 
@@ -213,7 +217,7 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(activeLog, []byte(`"candidate_type": "lesson"`)) || !bytes.Contains(activeLog, []byte("Pending Verification")) {
+	if !bytes.Contains(activeLog, []byte(`"candidate_type": "lesson"`)) || !bytes.Contains(activeLog, []byte("Do not promote directly")) {
 		t.Fatalf("active log candidate unexpected:\n%s", activeLog)
 	}
 
@@ -428,6 +432,15 @@ func hasDuplicateKDDCandidateIDs(items []kddImportItem) bool {
 			return true
 		}
 		seen[item.CandidateID] = true
+	}
+	return false
+}
+
+func hasKDDSkippedPath(items []kddImportItem, sourcePath string) bool {
+	for _, item := range items {
+		if item.SourcePath == sourcePath && item.SkipReason != "" {
+			return true
+		}
 	}
 	return false
 }

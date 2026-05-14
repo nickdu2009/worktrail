@@ -148,6 +148,10 @@ func discoverKDDImportItems(root string) ([]kddImportItem, []kddImportItem, int,
 			localSkipped++
 			return nil
 		}
+		if isKDDCategoryREADME(rel) {
+			skippedItems = append(skippedItems, kddImportItem{SourcePath: rel, SkipReason: "category README is directory guidance and is skipped by default"})
+			return nil
+		}
 		item, ok := mapKDDPath(rel)
 		if !ok {
 			skippedItems = append(skippedItems, kddImportItem{SourcePath: rel, SkipReason: "outside supported KDD project knowledge paths"})
@@ -169,7 +173,7 @@ func mapKDDPath(rel string) (kddImportItem, bool) {
 		return newKDDImportItem(rel, "project", "project.md", candidate.OperationMerge, "KDD Project README", "Imported KDD project README."), true
 	}
 	if rel == "project/active-knowledge-log.md" {
-		item := newKDDImportItem(rel, "lesson", "lessons/kdd-active-knowledge-log.md", candidate.OperationReplace, "KDD Active Knowledge Log", "Pending Verification: imported from KDD active knowledge log.")
+		item := newKDDImportItem(rel, "lesson", "lessons/kdd-active-knowledge-log.md", candidate.OperationReplace, "KDD Active Knowledge Log", "Pending Verification: imported from KDD active knowledge log as a split source. Do not promote directly without extracting durable semantic candidates.")
 		return item, true
 	}
 	if !strings.HasPrefix(rel, "project/") {
@@ -197,6 +201,13 @@ func mapKDDPath(rel string) (kddImportItem, bool) {
 	default:
 		return newKDDImportItem(rel, "lesson", filepath.ToSlash(filepath.Join("lessons", "kdd-"+slug+".md")), candidate.OperationReplace, titleFromKDDPath(rel), "Imported uncategorized KDD project knowledge."), true
 	}
+}
+
+func isKDDCategoryREADME(rel string) bool {
+	if !strings.HasPrefix(rel, "project/") || !strings.HasSuffix(rel, "/README.md") {
+		return false
+	}
+	return rel != "project/README.md"
 }
 
 func newKDDImportItem(rel, typ, target, op, title, summary string) kddImportItem {

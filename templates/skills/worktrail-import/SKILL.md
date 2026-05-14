@@ -12,8 +12,9 @@ For an existing `docs/knowledge-driven-development/` project knowledge base:
 1. Run `worktrail import kdd` first and show the dry-run matched, blocked, skipped, and local-skipped counts.
 2. If the user asked to proceed, run `worktrail import kdd --all`.
 3. Summarize created pending semantic candidates and their target paths.
-4. Explain that `local/**` is skipped by default and requires a separate user-scope migration workflow if needed.
-5. Hand off review to `/worktrail-review`.
+4. Explain that `local/**` and category README files are skipped by default.
+5. Treat `project/active-knowledge-log.md` as a pending split source, not as a candidate to promote directly.
+6. Hand off review to `/worktrail-review`.
 
 For all current-project Codex conversations:
 
