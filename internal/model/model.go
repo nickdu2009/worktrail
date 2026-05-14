@@ -26,21 +26,24 @@ type Knowledge struct {
 }
 
 type Candidate struct {
-	Schema          string    `json:"schema"`
-	ID              string    `json:"id"`
-	Scope           string    `json:"scope"`
-	CandidateType   string    `json:"candidate_type"`
-	TargetPath      string    `json:"target_path"`
-	Title           string    `json:"title"`
-	Summary         string    `json:"summary"`
-	Operation       string    `json:"operation"`
-	Status          string    `json:"status"`
-	SourceSessions  []string  `json:"source_sessions,omitempty"`
-	RedactionStatus string    `json:"redaction_status"`
-	RetireReason    string    `json:"retire_reason,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at,omitempty"`
-	Tags            []string  `json:"tags,omitempty"`
+	Schema             string    `json:"schema"`
+	ID                 string    `json:"id"`
+	Scope              string    `json:"scope"`
+	CandidateType      string    `json:"candidate_type"`
+	TargetPath         string    `json:"target_path"`
+	Title              string    `json:"title"`
+	Summary            string    `json:"summary"`
+	Operation          string    `json:"operation"`
+	Status             string    `json:"status"`
+	SourceSessions     []string  `json:"source_sessions,omitempty"`
+	SourceCandidateIDs []string  `json:"source_candidate_ids,omitempty"`
+	EvidenceLabel      string    `json:"evidence_label,omitempty"`
+	Confidence         float64   `json:"confidence,omitempty"`
+	RedactionStatus    string    `json:"redaction_status"`
+	RetireReason       string    `json:"retire_reason,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at,omitempty"`
+	Tags               []string  `json:"tags,omitempty"`
 }
 
 type State struct {

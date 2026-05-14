@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
+	wtdistill "github.com/nickdu2009/worktrail/internal/distill"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/redact"
@@ -156,6 +157,13 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 		fmt.Fprintf(ioctx.Out, "- `%s` %s -> `%s` [%s, redaction=%s]\n", rec.Meta.ID, rec.Meta.Title, rec.Meta.TargetPath, rec.Meta.CandidateType, rec.Meta.RedactionStatus)
 		if rec.Meta.Summary != "" {
 			fmt.Fprintf(ioctx.Out, "  %s\n", rec.Meta.Summary)
+		}
+		warnings, err := wtdistill.WarningCodes(env, scope, records, rec, true)
+		if err != nil {
+			return err
+		}
+		if len(warnings) > 0 {
+			fmt.Fprintf(ioctx.Out, "  warnings: %s\n", strings.Join(warnings, ", "))
 		}
 	}
 	if hiddenEvidence > 0 {
@@ -325,12 +333,7 @@ func printApplyResult(ioctx IO, result candidate.ApplyResult, format string) err
 }
 
 func isSemanticCandidateType(typ string) bool {
-	switch typ {
-	case "architecture", "decision", "glossary", "integration", "lesson", "project", "prompt", "rule", "validation", "workflow":
-		return true
-	default:
-		return false
-	}
+	return model.IsSemanticCandidateType(typ)
 }
 
 func printCandidatesHelp(out io.Writer, subcommand string) {
@@ -360,7 +363,7 @@ func printCandidatesHelp(out io.Writer, subcommand string) {
 		fmt.Fprintln(out, "list filters:")
 		fmt.Fprintln(out, "  --status pending|promoted|merged|discarded|retired")
 		fmt.Fprintln(out, "  --type <candidate_type>")
-		fmt.Fprintln(out, "  --semantic     rule/decision/lesson/prompt/workflow only")
+		fmt.Fprintln(out, "  --semantic     semantic knowledge candidates only")
 		fmt.Fprintln(out, "  --evidence     transcript_notes only")
 		fmt.Fprintln(out, "  --format json")
 	}

@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
-	"github.com/nickdu2009/worktrail/internal/model"
+	wtdistill "github.com/nickdu2009/worktrail/internal/distill"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/util"
 )
@@ -29,6 +29,9 @@ func runDistill(_ context.Context, env paths.Env, ioctx IO, args []string) error
 	if wantsHelp(args) {
 		printDistillHelp(ioctx.Out)
 		return nil
+	}
+	if len(args) > 0 && (args[0] == "validate" || args[0] == "apply") {
+		return runDistillProposal(env, ioctx, args[0], args[1:])
 	}
 	flags, positional := splitFlags(args)
 	scope := flagValue(flags, "scope", "project")
@@ -49,8 +52,9 @@ func runDistill(_ context.Context, env paths.Env, ioctx IO, args []string) error
 			return err
 		}
 		var pending []candidate.Record
+		includeSplitSources := flagValue(flags, "split-sources", "") == "true"
 		for _, rec := range all {
-			if rec.Meta.Status != candidate.StatusPending || rec.Meta.CandidateType != model.CandidateTypeTranscriptNotes {
+			if !wtdistill.IsDistillSource(rec, includeSplitSources) {
 				continue
 			}
 			pending = append(pending, rec)
@@ -64,6 +68,9 @@ func runDistill(_ context.Context, env paths.Env, ioctx IO, args []string) error
 		}
 		records = pending
 		if len(records) == 0 {
+			if includeSplitSources {
+				return errors.New("no pending distillation source candidates found")
+			}
 			return errors.New("no pending transcript_notes candidates found")
 		}
 	} else {
@@ -75,8 +82,8 @@ func runDistill(_ context.Context, env paths.Env, ioctx IO, args []string) error
 		if err != nil {
 			return err
 		}
-		if rec.Meta.CandidateType != model.CandidateTypeTranscriptNotes {
-			return fmt.Errorf("candidate %q is %q, want %q", rec.Meta.ID, rec.Meta.CandidateType, model.CandidateTypeTranscriptNotes)
+		if !wtdistill.IsDistillSource(rec, true) {
+			return fmt.Errorf("candidate %q is not a supported distillation source", rec.Meta.ID)
 		}
 		records = append(records, rec)
 	}
@@ -103,6 +110,30 @@ func runDistill(_ context.Context, env paths.Env, ioctx IO, args []string) error
 	return renderDistillPack(ioctx.Out, records)
 }
 
+func runDistillProposal(env paths.Env, ioctx IO, cmd string, args []string) error {
+	flags, positional := splitFlags(args)
+	path := firstArg(positional, "")
+	if path == "" {
+		return fmt.Errorf("usage: worktrail distill %s <proposal.json> [--scope project|user] [--format text|json]", cmd)
+	}
+	proposal, err := wtdistill.LoadProposal(path)
+	if err != nil {
+		return err
+	}
+	scope := flagValue(flags, "scope", "project")
+	manager := candidate.Manager{Env: env, Actor: "cli:distill-" + cmd}
+	var report wtdistill.Report
+	if cmd == "apply" {
+		report, err = wtdistill.Apply(env, manager, scope, proposal)
+	} else {
+		report, err = wtdistill.Validate(env, manager, scope, proposal)
+	}
+	if err != nil {
+		return err
+	}
+	return printDistillProposalReport(ioctx, report, flagValue(flags, "format", flagValue(flags, "json", "text")))
+}
+
 func parsePositiveInt(value string, def int, name string) (int, error) {
 	if strings.TrimSpace(value) == "" {
 		return def, nil
@@ -118,18 +149,18 @@ func renderDistillPack(out io.Writer, records []candidate.Record) error {
 	fmt.Fprintln(out, "# Worktrail Distillation Pack")
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Evidence candidates in this pack: %d\n\n", len(records))
-	fmt.Fprintln(out, "You are the current AI coding agent. Distill the transcript evidence below into semantic Worktrail candidates.")
+	fmt.Fprintln(out, "You are the current AI coding agent. Distill the evidence below into a semantic Worktrail proposal JSON.")
 	fmt.Fprintln(out, "Do not promote, merge, discard, restore, retire, or write formal knowledge from this pack.")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Create only useful pending candidates with semantic knowledge types such as `rule`, `decision`, `architecture`, `integration`, `validation`, `glossary`, `lesson`, `prompt`, or `workflow`.")
+	fmt.Fprintln(out, "Create only useful pending candidates with semantic knowledge types such as `rule`, `decision`, `architecture`, `integration`, `validation`, `glossary`, `lesson`, `project`, `prompt`, or `workflow`.")
 	fmt.Fprintln(out, "Prefer a small number of durable, reusable items over transcript summaries.")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "For each distilled item, run `worktrail candidates create` with the chosen type, target path, title, summary, and body.")
+	fmt.Fprintln(out, "Write a JSON file, then run `worktrail distill validate <proposal.json>` and `worktrail distill apply <proposal.json>`.")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Candidate JSON shape for reasoning:")
+	fmt.Fprintln(out, "Proposal JSON shape:")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "```json")
-	fmt.Fprintln(out, `{"candidates":[{"candidate_type":"rule|decision|architecture|integration|validation|glossary|lesson|prompt|workflow","title":"Durable knowledge title","summary":"Short semantic summary","target_path":"rules/name.md|decisions/ADR-name.md|architecture/name.md|integrations/name.md|validation/name.md|glossary/name.md|lessons/name.md|prompts/name.md|workflows/name.md","operation":"replace|merge","tags":["tag"],"body":"Markdown content to create as a pending candidate"}]}`)
+	fmt.Fprintln(out, `{"schema":"worktrail.distill.proposal.v1","source_candidate_ids":["source-id"],"candidates":[{"candidate_type":"rule|decision|architecture|integration|validation|glossary|lesson|project|prompt|workflow","title":"Durable knowledge title","summary":"Short semantic summary","target_path":"rules/name.md|decisions/name.md|architecture/name.md|integrations/name.md|validation/name.md|glossary/name.md|lessons/name.md|project.md|prompts/name.md|workflows/name.md","operation":"replace|merge","tags":["tag"],"evidence_label":"Pending Verification","confidence":0.7,"body":"Markdown content to create as a pending candidate"}]}`)
 	fmt.Fprintln(out, "```")
 	for _, rec := range records {
 		fmt.Fprintln(out)
@@ -144,7 +175,7 @@ func renderDistillPack(out io.Writer, records []candidate.Record) error {
 			fmt.Fprintf(out, "- Tags: `%s`\n", strings.Join(rec.Meta.Tags, "`, `"))
 		}
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "### Transcript Evidence")
+		fmt.Fprintln(out, "### Source Evidence")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, rec.Body)
 	}
@@ -160,10 +191,17 @@ func writeDistillPack(path string, records []candidate.Record) error {
 }
 
 func newDistillSummary(scope string, records []candidate.Record, packPath string) distillSummary {
+	mode := "transcript_notes"
+	for _, rec := range records {
+		if rec.Meta.CandidateType != "transcript_notes" {
+			mode = "distillation_sources"
+			break
+		}
+	}
 	summary := distillSummary{
 		Count:     len(records),
 		Scope:     scope,
-		Mode:      "transcript_notes",
+		Mode:      mode,
 		WritePack: packPath,
 	}
 	for _, rec := range records {
@@ -181,23 +219,46 @@ func printDistillSummary(out io.Writer, summary distillSummary) {
 		fmt.Fprintf(out, "candidate: %s\n", id)
 	}
 	if summary.WritePack != "" {
-		fmt.Fprintln(out, "next: have the current AI agent read the pack and create semantic pending candidates with `worktrail candidates create`")
+		fmt.Fprintln(out, "next: have the current AI agent read the pack, write proposal JSON, then run `worktrail distill validate <proposal.json>` and `worktrail distill apply <proposal.json>`")
 	} else {
 		fmt.Fprintln(out, "next: run `worktrail distill --pending --limit 5 --offset <N>` or `worktrail distill --pending --all --write-pack distill.md`")
 	}
 }
 
+func printDistillProposalReport(ioctx IO, report wtdistill.Report, format string) error {
+	if format == "json" || format == "true" {
+		return json.NewEncoder(ioctx.Out).Encode(report)
+	}
+	fmt.Fprintf(ioctx.Out, "valid: %v\ncreated: %d\nskipped: %d\nblocked: %d\n", report.Valid, report.Created, report.Skipped, report.Blocked)
+	for _, warning := range report.Warnings {
+		fmt.Fprintf(ioctx.Out, "warning: %s\n", warning)
+	}
+	for _, item := range report.Items {
+		fmt.Fprintf(ioctx.Out, "item %d\t%s\t%s\t%s\n", item.ProposalIndex, item.Status, item.CandidateID, item.TargetPath)
+		if len(item.WarningCodes) > 0 {
+			fmt.Fprintf(ioctx.Out, "  warnings: %s\n", strings.Join(item.WarningCodes, ", "))
+		}
+		if len(item.Errors) > 0 {
+			fmt.Fprintf(ioctx.Out, "  errors: %s\n", strings.Join(item.Errors, "; "))
+		}
+	}
+	return nil
+}
+
 func printDistillHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail distill <candidate-id>")
 	fmt.Fprintln(out, "       worktrail distill --pending [--limit N|--all] [--offset N] [--summary|--json|--write-pack file]")
+	fmt.Fprintln(out, "       worktrail distill validate <proposal.json> [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "       worktrail distill apply <proposal.json> [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Distill prints an agent-facing pack from transcript_notes evidence. It does not create, promote, merge, discard, restore, or retire knowledge.")
+	fmt.Fprintln(out, "Distill prints an agent-facing pack from evidence or validates/applies proposal JSON into pending semantic candidates. It never promotes, merges, discards, restores, or retires knowledge.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "bulk options:")
 	fmt.Fprintln(out, "  --pending            select pending transcript_notes")
+	fmt.Fprintln(out, "  --split-sources      include allowed pending split-source lessons with transcript_notes")
 	fmt.Fprintln(out, "  --limit N            output at most N evidence candidates (default 5)")
 	fmt.Fprintln(out, "  --offset N           skip N evidence candidates for paging")
-	fmt.Fprintln(out, "  --all                select all pending transcript_notes")
+	fmt.Fprintln(out, "  --all                select all pending sources for the chosen mode")
 	fmt.Fprintln(out, "  --summary            print ids and next steps only")
 	fmt.Fprintln(out, "  --json               print summary JSON only")
 	fmt.Fprintln(out, "  --write-pack <file>  write the full pack to a file and print a compact summary")

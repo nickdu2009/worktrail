@@ -46,16 +46,19 @@ type Manager struct {
 }
 
 type CreateRequest struct {
-	ID             string
-	Scope          string
-	CandidateType  string
-	TargetPath     string
-	Title          string
-	Summary        string
-	Operation      string
-	SourceSessions []string
-	Tags           []string
-	Body           string
+	ID                 string
+	Scope              string
+	CandidateType      string
+	TargetPath         string
+	Title              string
+	Summary            string
+	Operation          string
+	SourceSessions     []string
+	SourceCandidateIDs []string
+	EvidenceLabel      string
+	Confidence         float64
+	Tags               []string
+	Body               string
 }
 
 type Record struct {
@@ -109,20 +112,23 @@ func (m Manager) Create(req CreateRequest) (Record, error) {
 	}
 
 	meta := model.Candidate{
-		Schema:          model.SchemaCandidate,
-		ID:              id,
-		Scope:           scope,
-		CandidateType:   candidateType,
-		TargetPath:      targetPathForMeta(root, target),
-		Title:           title,
-		Summary:         strings.TrimSpace(req.Summary),
-		Operation:       operation,
-		Status:          StatusPending,
-		SourceSessions:  append([]string(nil), req.SourceSessions...),
-		RedactionStatus: string(scan.Status),
-		CreatedAt:       now,
-		UpdatedAt:       now,
-		Tags:            append([]string(nil), req.Tags...),
+		Schema:             model.SchemaCandidate,
+		ID:                 id,
+		Scope:              scope,
+		CandidateType:      candidateType,
+		TargetPath:         targetPathForMeta(root, target),
+		Title:              title,
+		Summary:            strings.TrimSpace(req.Summary),
+		Operation:          operation,
+		Status:             StatusPending,
+		SourceSessions:     append([]string(nil), req.SourceSessions...),
+		SourceCandidateIDs: append([]string(nil), req.SourceCandidateIDs...),
+		EvidenceLabel:      strings.TrimSpace(req.EvidenceLabel),
+		Confidence:         req.Confidence,
+		RedactionStatus:    string(scan.Status),
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		Tags:               append([]string(nil), req.Tags...),
 	}
 	rec := Record{Meta: meta, Body: scan.Text}
 	rec.Path, err = m.candidatePath(scope, id)

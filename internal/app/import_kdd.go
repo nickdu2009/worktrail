@@ -94,6 +94,10 @@ func runImportKDD(env paths.Env, ioctx IO, flags map[string]string, scope string
 		if report.DryRun {
 			continue
 		}
+		tags := []string{"kdd-import"}
+		if item.SourcePath == "project/active-knowledge-log.md" {
+			tags = append(tags, "kdd", "split-source")
+		}
 		rec, err := manager.Create(candidate.CreateRequest{
 			Scope:         "project",
 			ID:            item.CandidateID,
@@ -102,7 +106,7 @@ func runImportKDD(env paths.Env, ioctx IO, flags map[string]string, scope string
 			Title:         item.Title,
 			Summary:       item.Summary,
 			Operation:     item.Operation,
-			Tags:          []string{"kdd-import"},
+			Tags:          tags,
 			Body:          body,
 		})
 		if err != nil {

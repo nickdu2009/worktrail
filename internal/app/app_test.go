@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
+	wtdistill "github.com/nickdu2009/worktrail/internal/distill"
 	"github.com/nickdu2009/worktrail/internal/model"
 )
 
@@ -220,6 +221,9 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	if !bytes.Contains(activeLog, []byte(`"candidate_type": "lesson"`)) || !bytes.Contains(activeLog, []byte("Do not promote directly")) {
 		t.Fatalf("active log candidate unexpected:\n%s", activeLog)
 	}
+	if !bytes.Contains(activeLog, []byte(`"kdd"`)) || !bytes.Contains(activeLog, []byte(`"split-source"`)) {
+		t.Fatalf("active log candidate missing split-source tags:\n%s", activeLog)
+	}
 
 	out.Reset()
 	if err := Run(context.Background(), []string{"import", "kdd", "--all", "--format", "json"}, nil, &out, &errb); err != nil {
@@ -274,6 +278,12 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"candidates", "create", "--id", "rule-1", "--type", "rule", "--target", "rules/rule-1.md", "--title", "Rule", "Rule body."}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run candidates create rule: %v stderr=%s", err, errb.String())
 	}
+	if err := Run(context.Background(), []string{"candidates", "create", "--id", "split-source", "--type", "lesson", "--target", "lessons/kdd-active-knowledge-log.md", "--title", "KDD Active Log", "--summary", "Do not promote directly", "--tags", "split-source", "Split source body."}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates create split source: %v stderr=%s", err, errb.String())
+	}
+	if err := Run(context.Background(), []string{"candidates", "create", "--id", "ordinary-lesson", "--type", "lesson", "--target", "lessons/ordinary.md", "--title", "Ordinary Lesson", "Ordinary lesson body."}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates create ordinary lesson: %v stderr=%s", err, errb.String())
+	}
 
 	out.Reset()
 	if err := Run(context.Background(), []string{"candidates", "list", "--type", model.CandidateTypeTranscriptNotes, "--status", candidate.StatusPending, "--format", "json"}, nil, &out, &errb); err != nil {
@@ -295,7 +305,7 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &records); err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 1 || records[0].Meta.ID != "rule-1" {
+	if len(records) != 3 || !hasCandidateID(records, "rule-1") || !hasCandidateID(records, "split-source") || !hasCandidateID(records, "ordinary-lesson") {
 		t.Fatalf("semantic records = %#v", records)
 	}
 
@@ -376,8 +386,15 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"distill", "--pending", "--all", "--summary"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run distill summary: %v stderr=%s", err, errb.String())
 	}
-	if strings.Contains(out.String(), "Transcript Evidence") || !strings.Contains(out.String(), "evidence_candidates: 2") {
+	if strings.Contains(out.String(), "Source Evidence") || !strings.Contains(out.String(), "evidence_candidates: 2") || strings.Contains(out.String(), "split-source") {
 		t.Fatalf("distill summary output unexpected:\n%s", out.String())
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "--pending", "--split-sources", "--all", "--summary"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill split sources summary: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "evidence_candidates: 3") || !strings.Contains(out.String(), "candidate: split-source") || strings.Contains(out.String(), "ordinary-lesson") {
+		t.Fatalf("distill split sources summary output unexpected:\n%s", out.String())
 	}
 
 	out.Reset()
@@ -411,11 +428,275 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 			t.Fatalf("distill output missing %q:\n%s", want, text)
 		}
 	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "split-source"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill split source: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "Evidence Candidate `split-source`") || !strings.Contains(out.String(), "Split source body.") {
+		t.Fatalf("distill split source output unexpected:\n%s", out.String())
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "ordinary-lesson"}, nil, &out, &errb); err == nil || !strings.Contains(err.Error(), "not a supported distillation source") {
+		t.Fatalf("ordinary lesson distill error = %v stdout=%s", err, out.String())
+	}
+}
+
+func TestDistillProposalValidateAndApplyPartial(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "note-1", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/note-1.md", "--title", "Transcript Notes", "Evidence body.")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "same-target", "--type", "rule", "--target", "rules/existing.md", "--title", "Same Target", "Existing pending body.")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "rules", "existing.md"), "# Existing\n\nExisting formal rule.\n")
+
+	proposal := filepath.Join(project, "proposal.json")
+	writeTextFile(t, proposal, `{
+  "schema": "worktrail.distill.proposal.v1",
+  "source_candidate_ids": ["note-1"],
+  "candidates": [
+    {
+      "candidate_type": "rule",
+      "title": "Existing Rule",
+      "summary": "Distilled rule.",
+      "target_path": "rules/existing.md",
+      "operation": "replace",
+      "tags": ["distilled"],
+      "evidence_label": "Pending Verification",
+      "confidence": 0.8,
+      "body": "# Existing Rule\n\nUse this rule."
+    },
+    {
+      "candidate_type": "validation",
+      "title": "Invalid Confidence",
+      "target_path": "validation/invalid.md",
+      "operation": "replace",
+      "confidence": 0,
+      "body": "# Invalid\n"
+    },
+    {
+      "candidate_type": "decision",
+      "title": "Blocked Decision",
+      "target_path": "decisions/blocked.md",
+      "operation": "replace",
+      "body": "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----"
+    },
+    {
+      "candidate_type": "rule",
+      "title": "Bad Target",
+      "target_path": ".worktrail/rules/bad.md",
+      "operation": "replace",
+      "body": "# Bad\n"
+    },
+    {
+      "candidate_type": "decision",
+      "title": "Wrong Target Type",
+      "target_path": "rules/wrong-type.md",
+      "operation": "replace",
+      "body": "# Wrong Type\n"
+    },
+    {
+      "candidate_type": "rule",
+      "title": "Missing Source",
+      "target_path": "rules/missing-source.md",
+      "operation": "replace",
+      "source_candidate_ids": ["missing-source"],
+      "body": "# Missing Source\n"
+    }
+  ]
+}`)
+
+	badSchema := filepath.Join(project, "bad-schema.json")
+	writeTextFile(t, badSchema, `{"schema":"wrong","source_candidate_ids":["note-1"],"candidates":[]}`)
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "validate", badSchema, "--format", "json"}, nil, &out, &errb); err == nil || !strings.Contains(err.Error(), "proposal schema must be") {
+		t.Fatalf("bad schema error = %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "validate", proposal, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill validate: %v stderr=%s", err, errb.String())
+	}
+	var validation wtdistill.Report
+	if err := json.Unmarshal(out.Bytes(), &validation); err != nil {
+		t.Fatal(err)
+	}
+	if validation.Valid || validation.Blocked != 1 || len(validation.Items) != 6 || validation.Items[0].Status != "valid" || validation.Items[1].Status != "error" || validation.Items[2].Status != "blocked" || validation.Items[3].Status != "error" || validation.Items[4].Status != "error" || validation.Items[5].Status != "error" {
+		t.Fatalf("validation report unexpected: %+v", validation)
+	}
+	if !containsString(validation.Items[4].Errors, "candidate_type does not match target_path") {
+		t.Fatalf("type-target mismatch errors unexpected: %+v", validation.Items[4])
+	}
+	if !containsString(validation.Items[5].Errors, "source candidate not found: missing-source") {
+		t.Fatalf("missing source errors unexpected: %+v", validation.Items[5])
+	}
+	for _, want := range []string{"target_exists", "replace_target_exists", "same_target_pending:2"} {
+		if !containsString(validation.Items[0].WarningCodes, want) {
+			t.Fatalf("validation first item missing warning %q: %+v", want, validation.Items[0])
+		}
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "apply", proposal, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill apply: %v stderr=%s", err, errb.String())
+	}
+	var applied wtdistill.Report
+	if err := json.Unmarshal(out.Bytes(), &applied); err != nil {
+		t.Fatal(err)
+	}
+	if applied.Valid || applied.Created != 1 || applied.Blocked != 1 || len(applied.Items) != 6 || applied.Items[0].Status != "created" {
+		t.Fatalf("apply report unexpected: %+v", applied)
+	}
+	createdID := applied.Items[0].CandidateID
+	out.Reset()
+	if err := Run(context.Background(), []string{"candidates", "show", createdID, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidate show: %v stderr=%s", err, errb.String())
+	}
+	var rec candidate.Record
+	if err := json.Unmarshal(out.Bytes(), &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Meta.SourceCandidateIDs == nil || len(rec.Meta.SourceCandidateIDs) != 1 || rec.Meta.SourceCandidateIDs[0] != "note-1" || rec.Meta.EvidenceLabel != "Pending Verification" || rec.Meta.Confidence != 0.8 {
+		t.Fatalf("created candidate metadata unexpected: %+v", rec.Meta)
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "apply", proposal, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run duplicate distill apply: %v stderr=%s", err, errb.String())
+	}
+	var duplicate wtdistill.Report
+	if err := json.Unmarshal(out.Bytes(), &duplicate); err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.Created != 0 || duplicate.Skipped != 1 || duplicate.Items[0].Status != "skipped" {
+		t.Fatalf("duplicate apply report unexpected: %+v", duplicate)
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"candidates", "show", "note-1", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run source candidate show: %v stderr=%s", err, errb.String())
+	}
+	var source candidate.Record
+	if err := json.Unmarshal(out.Bytes(), &source); err != nil {
+		t.Fatal(err)
+	}
+	if source.Meta.Status != candidate.StatusPending {
+		t.Fatalf("source status changed: %+v", source.Meta)
+	}
+}
+
+func TestDistillProposalEndToEndPromoteContextFromSplitSource(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "active-log", "--type", "lesson", "--target", "lessons/kdd-active-knowledge-log.md", "--title", "KDD Active Log", "--summary", "Do not promote directly", "--tags", "kdd,split-source", "Split source evidence body.")
+
+	proposal := filepath.Join(project, "split-source-proposal.json")
+	writeTextFile(t, proposal, `{
+  "schema": "worktrail.distill.proposal.v1",
+  "source_candidate_ids": ["active-log"],
+  "candidates": [
+    {
+      "candidate_type": "glossary",
+      "title": "Distilled Term",
+      "summary": "A glossary item distilled from split-source evidence.",
+      "target_path": "glossary/distilled-term.md",
+      "operation": "replace",
+      "tags": ["distilled"],
+      "evidence_label": "User Confirmed",
+      "body": "# Distilled Term\n\nDefinition from split source evidence."
+    }
+  ]
+}`)
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "validate", proposal, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill validate split source: %v stderr=%s", err, errb.String())
+	}
+	var validation wtdistill.Report
+	if err := json.Unmarshal(out.Bytes(), &validation); err != nil {
+		t.Fatal(err)
+	}
+	if !validation.Valid || len(validation.Items) != 1 || validation.Items[0].Status != "valid" {
+		t.Fatalf("split source validation report unexpected: %+v", validation)
+	}
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"distill", "apply", proposal, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run distill apply split source: %v stderr=%s", err, errb.String())
+	}
+	var applied wtdistill.Report
+	if err := json.Unmarshal(out.Bytes(), &applied); err != nil {
+		t.Fatal(err)
+	}
+	if !applied.Valid || applied.Created != 1 || len(applied.Items) != 1 || applied.Items[0].Status != "created" {
+		t.Fatalf("split source apply report unexpected: %+v", applied)
+	}
+	createdID := applied.Items[0].CandidateID
+
+	text := runApp(t, &out, &errb, "review")
+	if !strings.Contains(text, createdID) || !strings.Contains(text, "Distilled Term") || !strings.Contains(text, "Do not promote directly") {
+		t.Fatalf("split source review output unexpected:\n%s", text)
+	}
+
+	runApp(t, &out, &errb, "promote", createdID)
+	runApp(t, &out, &errb, "index", "rebuild")
+	text = runApp(t, &out, &errb, "context", "distilled term")
+	if !strings.Contains(text, "glossary/distilled-term.md") || !strings.Contains(text, "Definition from split source evidence.") {
+		t.Fatalf("split source promoted context output unexpected:\n%s", text)
+	}
+}
+
+func TestReviewShowsPendingSemanticWarnings(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "rules", "existing.md"), "# Existing\n\nExisting formal rule.\n")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "replace-existing-1", "--type", "rule", "--target", "rules/existing.md", "--operation", "replace", "--title", "Replace Existing 1", "Rule body 1.")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "replace-existing-2", "--type", "rule", "--target", "rules/existing.md", "--operation", "replace", "--title", "Replace Existing 2", "Rule body 2.")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "merge-missing", "--type", "workflow", "--target", "workflows/missing.md", "--operation", "merge", "--title", "Merge Missing", "Workflow body.")
+
+	text := runApp(t, &out, &errb, "review")
+	for _, want := range []string{
+		"warnings: target_exists, replace_target_exists, same_target_pending:2",
+		"warnings: merge_target_missing",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("review output missing %q:\n%s", want, text)
+		}
+	}
 }
 
 func hasCandidateType(records []candidate.Record, typ string) bool {
 	for _, rec := range records {
 		if rec.Meta.CandidateType == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCandidateID(records []candidate.Record, id string) bool {
+	for _, rec := range records {
+		if rec.Meta.ID == id {
 			return true
 		}
 	}
@@ -439,6 +720,15 @@ func hasDuplicateKDDCandidateIDs(items []kddImportItem) bool {
 func hasKDDSkippedPath(items []kddImportItem, sourcePath string) bool {
 	for _, item := range items {
 		if item.SourcePath == sourcePath && item.SkipReason != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
 			return true
 		}
 	}

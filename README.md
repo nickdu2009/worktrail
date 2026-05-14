@@ -31,6 +31,41 @@ worktrail context "current task"
 
 `worktrail context <task>` hides pending transcript evidence by default and reports how many evidence candidates are hidden. Use `worktrail context --evidence <task>` when the raw transcript notes themselves need to be included in the Pending Candidates section.
 
+## Distillation proposals
+
+Transcript evidence and KDD split sources can be distilled into semantic pending candidates with an agent-authored proposal:
+
+```bash
+worktrail distill --pending --all --write-pack worktrail-distill.md
+worktrail distill validate proposal.json
+worktrail distill apply proposal.json
+worktrail review
+```
+
+Proposal JSON uses schema `worktrail.distill.proposal.v1`:
+
+```json
+{
+  "schema": "worktrail.distill.proposal.v1",
+  "source_candidate_ids": ["codex-01-user"],
+  "candidates": [
+    {
+      "candidate_type": "rule",
+      "title": "Review Before Promote",
+      "summary": "Imported evidence should be reviewed before formal knowledge changes.",
+      "target_path": "rules/review-before-promote.md",
+      "operation": "replace",
+      "evidence_label": "Pending Verification",
+      "confidence": 0.7,
+      "tags": ["distilled"],
+      "body": "# Review Before Promote\n\nKeep imported evidence pending until it is reviewed."
+    }
+  ]
+}
+```
+
+`distill apply` creates pending semantic candidates only. It never promotes, merges, discards, restores, or retires knowledge.
+
 ## KDD import
 
 Existing `docs/knowledge-driven-development/` project knowledge can be migrated into Worktrail as pending candidates:

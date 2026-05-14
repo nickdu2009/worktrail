@@ -226,12 +226,7 @@ func pendingCandidateVisible(entry index.Entry, includeEvidence bool) bool {
 }
 
 func isSemanticCandidateType(typ string) bool {
-	switch typ {
-	case "architecture", "decision", "glossary", "integration", "lesson", "project", "prompt", "rule", "validation", "workflow":
-		return true
-	default:
-		return false
-	}
+	return model.IsSemanticCandidateType(typ)
 }
 
 func countPendingTranscriptEvidence(entries []index.Entry) int {
