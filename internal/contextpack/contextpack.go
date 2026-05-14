@@ -77,6 +77,7 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 	}{
 		{"User Knowledge", func(e index.Entry) bool { return e.Scope == "user" && isKnowledge(e.Type) }},
 		{"Project Knowledge", func(e index.Entry) bool { return e.Scope == "project" && isProjectKnowledge(e.Type) }},
+		{"Workflows", func(e index.Entry) bool { return e.Type == "workflow" }},
 		{"Active State", func(e index.Entry) bool { return e.Type == "state" && (e.Active || e.Status == "active") }},
 		{"Decisions", func(e index.Entry) bool { return e.Type == "decision" }},
 		{"Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }},

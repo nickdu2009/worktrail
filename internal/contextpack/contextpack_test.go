@@ -28,6 +28,12 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 		"type":  "rule",
 		"title": "Testing Rule",
 	}, "Run targeted tests.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "workflows", "release.md"), map[string]any{
+		"id":    "release",
+		"scope": "project",
+		"type":  "workflow",
+		"title": "Release Workflow",
+	}, "Build, test, then ship.")
 	writePackDoc(t, filepath.Join(env.ProjectWT, "state", "active", "current.md"), map[string]any{
 		"id":     "current",
 		"scope":  "project",
@@ -66,10 +72,14 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	for _, title := range []string{"User Knowledge", "Active State", "Decisions", "Handoffs", "Rules", "Pending Candidates"} {
+	for _, title := range []string{"User Knowledge", "Workflows", "Active State", "Decisions", "Handoffs", "Rules", "Pending Candidates"} {
 		if !hasSection(pack, title) {
 			t.Fatalf("missing section %q in %+v", title, pack.Sections)
 		}
+	}
+	workflows := section(pack, "Workflows")
+	if len(workflows.Items) != 1 || workflows.Items[0].Title != "Release Workflow" {
+		t.Fatalf("workflow section unexpected: %+v", workflows.Items)
 	}
 	pending := section(pack, "Pending Candidates")
 	if len(pending.Items) != 1 || !pending.Items[0].Unapproved {
