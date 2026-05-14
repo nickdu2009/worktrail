@@ -45,6 +45,8 @@ worktrail review
 
 `docs/knowledge-driven-development/local/**` is skipped by default because it may contain current-developer paths, temporary IDs, or private environment context. Category README files such as `project/architecture/README.md` are also skipped by default because they are usually directory guidance rather than durable project knowledge. `project/active-knowledge-log.md` is imported only as a pending split source and should not be promoted directly.
 
+See [docs/kdd-import-dogfood-acceptance.md](docs/kdd-import-dogfood-acceptance.md) for the delivery-experts dogfood acceptance record.
+
 ## Restore vs retire
 
 `worktrail review` warns when an applied candidate says a formal target exists but the target file is missing.
