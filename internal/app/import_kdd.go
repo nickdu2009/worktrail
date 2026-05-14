@@ -1,6 +1,8 @@
 package app
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -200,13 +202,25 @@ func mapKDDPath(rel string) (kddImportItem, bool) {
 func newKDDImportItem(rel, typ, target, op, title, summary string) kddImportItem {
 	return kddImportItem{
 		SourcePath:    rel,
-		CandidateID:   "kdd-" + util.Slug(strings.TrimSuffix(rel, ".md")),
+		CandidateID:   kddCandidateID(rel),
 		CandidateType: typ,
 		TargetPath:    target,
 		Operation:     op,
 		Title:         title,
 		Summary:       summary,
 	}
+}
+
+func kddCandidateID(rel string) string {
+	base := "kdd-" + util.Slug(strings.TrimSuffix(rel, ".md"))
+	if len(base) <= 64 {
+		return base
+	}
+	sum := sha1.Sum([]byte(rel))
+	suffix := hex.EncodeToString(sum[:])[:8]
+	keep := 64 - len(suffix) - 1
+	base = strings.Trim(base[:keep], "-")
+	return base + "-" + suffix
 }
 
 func titleFromKDDPath(rel string) string {

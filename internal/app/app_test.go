@@ -145,6 +145,8 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	writeTextFile(t, filepath.Join(root, "project", "README.md"), "# Project KB\n\nShared overview.")
 	writeTextFile(t, filepath.Join(root, "project", "active-knowledge-log.md"), "# Active Log\n\nUnverified finding.")
 	writeTextFile(t, filepath.Join(root, "project", "architecture", "system.md"), "# System Architecture\n\nArchitecture body.")
+	writeTextFile(t, filepath.Join(root, "project", "architecture", "delivery-case-workbench-p0-implementation-alignment.md"), "# Alignment\n\nLong prefix body.")
+	writeTextFile(t, filepath.Join(root, "project", "architecture", "delivery-case-workbench-p0-implementation-plan.md"), "# Plan\n\nLong prefix plan.")
 	writeTextFile(t, filepath.Join(root, "project", "decisions", "choice.md"), "# Choice\n\nDecision body.")
 	writeTextFile(t, filepath.Join(root, "project", "runbooks", "release.md"), "# Release\n\nRunbook body.")
 	writeTextFile(t, filepath.Join(root, "project", "integrations", "api.md"), "# API\n\nIntegration body.")
@@ -169,8 +171,11 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &dry); err != nil {
 		t.Fatal(err)
 	}
-	if !dry.DryRun || dry.Matched != 9 || dry.Blocked != 1 || dry.LocalSkipped != 1 {
+	if !dry.DryRun || dry.Matched != 11 || dry.Blocked != 1 || dry.LocalSkipped != 1 {
 		t.Fatalf("unexpected dry-run report: %+v", dry)
+	}
+	if hasDuplicateKDDCandidateIDs(dry.Items) {
+		t.Fatalf("dry-run report has duplicate candidate ids: %+v", dry.Items)
 	}
 
 	missingRoot := filepath.Join(project, "missing-kdd")
@@ -187,7 +192,7 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.DryRun || report.Created != 9 || report.Blocked != 1 || report.LocalSkipped != 1 {
+	if report.DryRun || report.Created != 11 || report.Blocked != 1 || report.LocalSkipped != 1 {
 		t.Fatalf("unexpected import report: %+v", report)
 	}
 
@@ -220,7 +225,7 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &duplicate); err != nil {
 		t.Fatal(err)
 	}
-	if duplicate.Created != 0 || duplicate.Skipped < 9 {
+	if duplicate.Created != 0 || duplicate.Skipped < 11 {
 		t.Fatalf("duplicate import report unexpected: %+v", duplicate)
 	}
 
@@ -409,6 +414,20 @@ func hasCandidateType(records []candidate.Record, typ string) bool {
 		if rec.Meta.CandidateType == typ {
 			return true
 		}
+	}
+	return false
+}
+
+func hasDuplicateKDDCandidateIDs(items []kddImportItem) bool {
+	seen := map[string]bool{}
+	for _, item := range items {
+		if item.CandidateID == "" {
+			continue
+		}
+		if seen[item.CandidateID] {
+			return true
+		}
+		seen[item.CandidateID] = true
 	}
 	return false
 }
