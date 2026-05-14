@@ -156,7 +156,7 @@ func parseJSONL(source string, r io.Reader) (Transcript, error) {
 	if err := scanner.Err(); err != nil {
 		return Transcript{}, err
 	}
-	return Transcript{Source: source, Messages: messages}, nil
+	return Transcript{Source: source, Messages: dedupeMirroredMessages(messages)}, nil
 }
 
 func messageFromRaw(raw map[string]any) Message {
@@ -217,6 +217,46 @@ func messageFromPayload(raw, payload map[string]any) Message {
 		}
 	}
 	return msg
+}
+
+func dedupeMirroredMessages(messages []Message) []Message {
+	if len(messages) < 2 {
+		return messages
+	}
+	deduped := make([]Message, 0, len(messages))
+	for _, msg := range messages {
+		if len(deduped) > 0 && isMirroredMessage(deduped[len(deduped)-1], msg) {
+			if msg.RawType == "message" {
+				deduped[len(deduped)-1] = msg
+			}
+			continue
+		}
+		deduped = append(deduped, msg)
+	}
+	return deduped
+}
+
+func isMirroredMessage(a, b Message) bool {
+	if a.Role != b.Role || a.Content != b.Content {
+		return false
+	}
+	aEvent := isCodexEventMessage(a.RawType)
+	bEvent := isCodexEventMessage(b.RawType)
+	if !(aEvent && b.RawType == "message") && !(bEvent && a.RawType == "message") {
+		return false
+	}
+	if a.CreatedAt.IsZero() || b.CreatedAt.IsZero() {
+		return true
+	}
+	delta := a.CreatedAt.Sub(b.CreatedAt)
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta <= 2*time.Second
+}
+
+func isCodexEventMessage(rawType string) bool {
+	return rawType == "agent_message" || rawType == "user_message"
 }
 
 func firstString(raw map[string]any, keys ...string) string {

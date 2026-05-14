@@ -68,6 +68,24 @@ func TestParseCodexDesktopPayloadJSONL(t *testing.T) {
 	}
 }
 
+func TestParseCodexDesktopDedupesMirroredEventMessages(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"timestamp":"2026-04-12T00:48:18Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue work."}]}}`,
+		`{"timestamp":"2026-04-12T00:48:19Z","type":"event_msg","payload":{"type":"agent_message","message":"I will inspect the repo."}}`,
+		`{"timestamp":"2026-04-12T00:48:20Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will inspect the repo."}]}}`,
+	}, "\n")
+	tr, err := ParseCodexJSONL(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("ParseCodexJSONL() error = %v", err)
+	}
+	if len(tr.Messages) != 2 {
+		t.Fatalf("messages = %d, want 2: %+v", len(tr.Messages), tr.Messages)
+	}
+	if tr.Messages[1].Role != "assistant" || tr.Messages[1].Content != "I will inspect the repo." || tr.Messages[1].RawType != "message" {
+		t.Fatalf("unexpected deduped assistant message: %+v", tr.Messages[1])
+	}
+}
+
 func TestSyncMetadataOnlyDoesNotCopyRawTranscript(t *testing.T) {
 	tmp := t.TempDir()
 	source := filepath.Join(tmp, "codex-session.jsonl")
