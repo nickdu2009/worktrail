@@ -11,6 +11,13 @@ non-goals, behavior, and acceptance criteria.
 
 ## Pending
 
+- Prepare the `v1.0.0` release package without expanding core functionality:
+  add release notes or `CHANGELOG.md`, document what `v1.0.0` means in the
+  README, add a release operation checklist, include the long-term vision
+  discussion, rerun the release gate, and tag `v1.0.0`.
+  Requirements:
+  [worktrail-release-acceptance.md](worktrail-release-acceptance.md) and
+  [worktrail-long-term-vision-discussion.md](worktrail-long-term-vision-discussion.md).
 - Run post-release dogfood passes and convert repeated feedback into numbered
   follow-up requirements before the next implementation round.
   Requirements:
