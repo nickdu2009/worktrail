@@ -486,6 +486,8 @@ func baseReviewPlanReasonCodes(rec candidate.Record, item reviewPlanItem, analys
 		}
 		if source.CandidateType == model.CandidateTypeTranscriptNotes {
 			codes = append(codes, "source_type_transcript_notes")
+		} else if source.CandidateType == model.CandidateTypeMigrationSource {
+			codes = append(codes, "source_type_migration_source")
 		} else if source.IsSplitSource {
 			codes = append(codes, "source_type_split_source")
 		} else {
@@ -552,7 +554,7 @@ func allReviewPlanSourcesUsable(statuses []reviewPlanSourceStatus) bool {
 		if !status.Exists || status.Status != candidate.StatusPending {
 			return false
 		}
-		if status.CandidateType != model.CandidateTypeTranscriptNotes && !status.IsSplitSource {
+		if status.CandidateType != model.CandidateTypeTranscriptNotes && status.CandidateType != model.CandidateTypeMigrationSource && !status.IsSplitSource {
 			return false
 		}
 	}

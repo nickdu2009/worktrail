@@ -116,21 +116,22 @@ worktrail evidence archive <candidate-id> --confirm --reason "covered by applied
 worktrail evidence discard <candidate-id> --confirm --reason "empty duplicate evidence"
 ```
 
-`worktrail evidence plan` emits the v1 contract `worktrail.evidence.plan.v1`. It reports `transcript_notes` and KDD split-source `lesson` evidence, counts pending and applied semantic references, and recommends `keep`, `archive`, `discard`, or `needs_human_review`. Archive and discard require `--confirm`, keep candidate files for audit, and only run when the current evidence plan recommends the same action.
+`worktrail evidence plan` emits the v1 contract `worktrail.evidence.plan.v1`. It reports `transcript_notes`, `migration_source`, and legacy KDD split-source evidence, counts pending and applied semantic references, and recommends `keep`, `archive`, `discard`, or `needs_human_review`. Archive and discard require `--confirm`, keep candidate files for audit, and only run when the current evidence plan recommends the same action.
 
-## KDD import
+## KDD migration
 
 Existing `docs/knowledge-driven-development/` project knowledge can be migrated into Worktrail as pending candidates:
 
 ```bash
-worktrail import kdd
-worktrail import kdd --all
+worktrail migrate kdd
+worktrail migrate kdd --write-candidates
+worktrail doctor migration
 worktrail review
 ```
 
-`worktrail import kdd` is a dry-run by default. `--all` creates pending semantic candidates only; it does not promote or merge formal knowledge. Candidate `target_path` values are relative to `.worktrail/`, for example `architecture/system.md`.
+`worktrail migrate kdd` is a dry-run by default. `--write-candidates` creates pending candidates only; it does not promote or merge formal knowledge. Candidate `target_path` values are relative to the Worktrail scope root, for example `architecture/system.md` for project knowledge.
 
-`docs/knowledge-driven-development/local/**` is skipped by default because it may contain current-developer paths, temporary IDs, or private environment context. Category README files such as `project/architecture/README.md` are also skipped by default because they are usually directory guidance rather than durable project knowledge. `project/active-knowledge-log.md` is imported only as a pending split source and should not be promoted directly.
+`docs/knowledge-driven-development/local/**` migrates to user-scope pending candidates only. Category README files such as `project/architecture/README.md` are skipped by default because they are usually directory guidance rather than durable project knowledge. `active-knowledge-log.md` files migrate as `migration_source` evidence and must be distilled before formal knowledge is promoted or merged. Migration is complete only after `worktrail doctor migration` passes and the legacy KDD root is removed with explicit cleanup.
 
 See [docs/kdd-import-dogfood-acceptance.md](docs/kdd-import-dogfood-acceptance.md) for the delivery-experts dogfood acceptance record.
 

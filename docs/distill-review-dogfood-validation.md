@@ -51,23 +51,22 @@ Expected result:
 - Semantic candidates are pending.
 - No formal knowledge is changed until explicit promote or merge.
 
-### KDD Split-Source Distillation
+### KDD Migration-Source Distillation
 
 Steps:
 
-1. Run `worktrail import kdd --all` in a temporary or disposable acceptance
+1. Run `worktrail migrate kdd --write-candidates` in a temporary or disposable acceptance
    workspace.
-2. Confirm the active-log candidate is marked with `kdd` and `split-source`
-   tags or otherwise matches split-source detection.
-3. Generate a proposal from the split-source lesson.
+2. Confirm the active-log candidate has candidate type `migration_source`.
+3. Generate a proposal from the migration source.
 4. Run validate and apply.
-5. Confirm semantic candidates reference the split source.
-6. Confirm the split-source candidate itself is not recommended for direct
+5. Confirm semantic candidates reference the migration source.
+6. Confirm the migration-source candidate itself is not eligible for direct
    promotion.
 
 Expected result:
 
-- KDD active log acts as evidence only.
+- KDD active log acts as `migration_source` evidence only.
 - Derived semantic candidates are reviewable through normal Worktrail flow.
 - Legacy KDD root is not used as a long-term source of truth.
 

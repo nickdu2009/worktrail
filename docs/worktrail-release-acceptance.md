@@ -48,6 +48,19 @@ The release candidate baseline includes these user-facing contracts:
 - `worktrail.review.plan.v1`
 - `worktrail.review.apply_plan.report.v1`
 - `worktrail.evidence.plan.v1`
+- `worktrail.doctor.migration.v1`
+
+The release candidate baseline includes the KDD migration path:
+
+- `worktrail migrate kdd` is the public entry point for migrating legacy KDD
+  knowledge into pending Worktrail candidates.
+- `worktrail doctor migration` is the acceptance check for migration hygiene.
+- `worktrail import kdd` is not a public migration entry point.
+- Legacy KDD roots must not remain after migration cleanup.
+- `docs/knowledge-driven-development/local/**` migrates only to user-scope
+  pending candidates.
+- `active-knowledge-log.md` migrates as `migration_source` evidence and must be
+  distilled before any formal knowledge is promoted or merged.
 
 Installed agent skills include:
 
@@ -185,8 +198,9 @@ Requirements:
 - `source_candidate_ids` should be present for distilled semantic candidates.
 - Redaction status must be visible in review and plan outputs.
 - Duplicate or empty semantic candidates should be recommended conservatively.
-- KDD split-source lessons should remain evidence-like and should not be
-  promoted, merged, or discarded directly through review automation.
+- `migration_source` and legacy KDD split-source candidates should remain
+  evidence-like and should not be promoted, merged, or discarded directly
+  through review automation.
 
 ### Apply-Plan Safety
 

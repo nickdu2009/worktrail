@@ -266,6 +266,9 @@ func IsDistillSource(rec candidate.Record, includeSplitSources bool) bool {
 	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
 		return true
 	}
+	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+		return includeSplitSources
+	}
 	return includeSplitSources && IsSplitSourceLesson(rec)
 }
 

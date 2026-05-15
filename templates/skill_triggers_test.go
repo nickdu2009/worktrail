@@ -1,0 +1,118 @@
+package templates
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
+	expected := map[string][]string{
+		"worktrail-context":  {"worktrail context", "continue a previous task"},
+		"worktrail-state":    {"worktrail state", "save progress"},
+		"worktrail-handoff":  {"worktrail handoff", "new conversation", "end current chat", "Do not only output a copyable text handoff"},
+		"worktrail-import":   {"worktrail import", "worktrail sync", "worktrail migrate kdd"},
+		"worktrail-distill":  {"worktrail distill --pending --summary", "worktrail.distill.proposal.v1"},
+		"worktrail-review":   {"worktrail review plan --format json", "promoted, merged, discarded, restored, or retired"},
+		"worktrail-maintain": {"worktrail context \"maintenance\"", "worktrail evidence plan --format json"},
+	}
+	seen := map[string]bool{}
+	rendered := RenderSkillTriggerRouting()
+	for _, trigger := range SkillTriggers() {
+		seen[trigger.Skill] = true
+		if len(trigger.UseWhen) == 0 || len(trigger.RequiredActions) == 0 || len(trigger.Never) == 0 {
+			t.Fatalf("%s must define use_when, required_actions, and never entries: %+v", trigger.Skill, trigger)
+		}
+		for _, want := range expected[trigger.Skill] {
+			if !strings.Contains(rendered, want) {
+				t.Fatalf("rendered trigger routing missing %q for %s:\n%s", want, trigger.Skill, rendered)
+			}
+		}
+	}
+	for skill := range expected {
+		if !seen[skill] {
+			t.Fatalf("trigger contract missing %s", skill)
+		}
+	}
+	if strings.Contains(rendered, "worktrail-evidence") {
+		t.Fatalf("evidence lifecycle should belong to worktrail-maintain, not a separate skill:\n%s", rendered)
+	}
+}
+
+func TestRenderRootTemplateReplacesRoutingPlaceholder(t *testing.T) {
+	body := "before\n" + SkillTriggerRoutingPlaceholder + "\nafter"
+	rendered := RenderRootTemplate(body)
+	if strings.Contains(rendered, SkillTriggerRoutingPlaceholder) {
+		t.Fatalf("placeholder was not replaced:\n%s", rendered)
+	}
+	for _, want := range []string{"## Skill Trigger Routing", "worktrail-handoff", "worktrail handoff", "new conversation", "end current chat"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered root template missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestPlaceholderIsOnlyUsedByRootRuleTemplates(t *testing.T) {
+	rootPaths := []string{
+		"root/AGENTS.md",
+		"root/CLAUDE.md",
+		"root/cursor-worktrail.mdc",
+	}
+	for _, path := range rootPaths {
+		body, err := Read(path)
+		if err != nil {
+			t.Fatalf("Read(%s): %v", path, err)
+		}
+		if !strings.Contains(body, SkillTriggerRoutingPlaceholder) {
+			t.Fatalf("%s missing trigger routing placeholder", path)
+		}
+	}
+
+	nonRootPaths := []string{
+		"config/codex-hooks.json",
+		"config/claude-settings.json",
+		"config/cursor-hooks.json",
+		"config/cursor-mcp.json",
+		"skills/worktrail-context/SKILL.md",
+		"skills/worktrail-state/SKILL.md",
+		"skills/worktrail-handoff/SKILL.md",
+		"skills/worktrail-import/SKILL.md",
+		"skills/worktrail-distill/SKILL.md",
+		"skills/worktrail-review/SKILL.md",
+		"skills/worktrail-maintain/SKILL.md",
+	}
+	for _, path := range nonRootPaths {
+		body, err := Read(path)
+		if err != nil {
+			t.Fatalf("Read(%s): %v", path, err)
+		}
+		if strings.Contains(body, SkillTriggerRoutingPlaceholder) {
+			t.Fatalf("%s must not depend on trigger routing placeholder", path)
+		}
+	}
+}
+
+func TestSkillTemplatesExposeTriggerIntent(t *testing.T) {
+	expected := map[string][]string{
+		"worktrail-context":  {"description:", "Use this skill when", "starting", "resuming", "continuing"},
+		"worktrail-state":    {"description:", "Use this skill when", "long", "risky", "checkpoint"},
+		"worktrail-handoff":  {"description:", "Use this skill", "new conversation", "end current chat", "worktrail handoff", "do not only output"},
+		"worktrail-import":   {"description:", "Use this skill when", "import", "sync", "migrate"},
+		"worktrail-distill":  {"description:", "Use this skill when", "transcript_notes", "migration_source", "semantic Worktrail candidates"},
+		"worktrail-review":   {"description:", "Use this skill when", "review candidates", "promoted", "retired"},
+		"worktrail-maintain": {"description:", "Use this skill when", "maintain", "clean up", "evidence lifecycle"},
+	}
+	for skill, wants := range expected {
+		body, err := Read("skills/" + skill + "/SKILL.md")
+		if err != nil {
+			t.Fatalf("Read skill %s: %v", skill, err)
+		}
+		if !strings.HasPrefix(body, "---\n") {
+			t.Fatalf("%s frontmatter must be first:\n%s", skill, body)
+		}
+		for _, want := range wants {
+			if !strings.Contains(strings.ToLower(body), strings.ToLower(want)) {
+				t.Fatalf("%s skill template missing %q:\n%s", skill, want, body)
+			}
+		}
+	}
+}

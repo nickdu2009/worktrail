@@ -202,7 +202,9 @@ func evidenceReferenceCounts(id string, records []candidate.Record) (int, int) {
 
 func recommendEvidenceAction(rec candidate.Record, item evidencePlanItem) (string, []string) {
 	var reasons []string
-	if item.IsSplitSource {
+	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+		reasons = append(reasons, "migration_source_evidence")
+	} else if item.IsSplitSource {
 		reasons = append(reasons, "kdd_split_source_evidence")
 	} else {
 		reasons = append(reasons, "transcript_notes_evidence")
@@ -223,11 +225,11 @@ func recommendEvidenceAction(rec candidate.Record, item evidencePlanItem) (strin
 		reasons = append(reasons, "referenced_by_applied_semantic", "archive_after_review")
 		return "archive", reasons
 	}
-	if !item.IsSplitSource && strings.TrimSpace(rec.Body) == "" {
+	if !item.IsSplitSource && rec.Meta.CandidateType != model.CandidateTypeMigrationSource && strings.TrimSpace(rec.Body) == "" {
 		reasons = append(reasons, "empty_evidence_body", "unreferenced_evidence")
 		return "discard", reasons
 	}
-	if item.IsSplitSource {
+	if item.IsSplitSource || rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
 		reasons = append(reasons, "defer_evidence_cleanup")
 	}
 	reasons = append(reasons, "needs_human_confirmation")
@@ -236,6 +238,9 @@ func recommendEvidenceAction(rec candidate.Record, item evidencePlanItem) (strin
 
 func isEvidenceLifecycleCandidate(rec candidate.Record) bool {
 	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+		return true
+	}
+	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
 		return true
 	}
 	return isReviewSplitSourceLesson(rec)
@@ -334,7 +339,7 @@ func printEvidenceHelp(out io.Writer) {
 	fmt.Fprintln(out, "       worktrail evidence archive <candidate-id> --confirm [--scope project|user] [--reason text]")
 	fmt.Fprintln(out, "       worktrail evidence discard <candidate-id> --confirm [--scope project|user] [--reason text]")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Builds a read-only lifecycle plan for transcript_notes and KDD split-source evidence candidates.")
+	fmt.Fprintln(out, "Builds a read-only lifecycle plan for transcript_notes, migration_source, and KDD split-source evidence candidates.")
 	fmt.Fprintln(out, "Scope defaults to project; pass --scope user for user-level evidence.")
 	fmt.Fprintln(out, "Archive and discard require --confirm and only run when evidence plan recommends the same action.")
 }

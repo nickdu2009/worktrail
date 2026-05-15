@@ -13,4 +13,6 @@ Use Worktrail at the start and end of substantial coding tasks:
 - Use `/worktrail-import` only for explicit transcript files that should become pending candidates.
 - Use `/worktrail-review` to inspect candidates before any promote, merge, discard, restore, or retire action.
 
+{{WORKTRAIL_SKILL_TRIGGER_ROUTING}}
+
 Worktrail hooks may create state, checkpoints, candidates, event logs, and local transcript metadata. Hooks must never promote, merge, discard, restore, retire, delete, or replace knowledge.

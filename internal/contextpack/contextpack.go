@@ -244,7 +244,7 @@ func pendingCandidateVisible(entry index.Entry, includeEvidence bool) bool {
 	if entry.Type != "candidate" || entry.Status != "pending" {
 		return false
 	}
-	if entry.CandidateType == model.CandidateTypeTranscriptNotes {
+	if entry.CandidateType == model.CandidateTypeTranscriptNotes || entry.CandidateType == model.CandidateTypeMigrationSource {
 		return includeEvidence
 	}
 	return isSemanticCandidateType(entry.CandidateType)

@@ -218,6 +218,7 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 		if err != nil {
 			return err
 		}
+		rootBody = wtmpl.RenderRootTemplate(rootBody)
 		if err := applyManaged(rootFile, rootBody); err != nil {
 			return err
 		}
@@ -232,6 +233,7 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 		if err != nil {
 			return err
 		}
+		ruleBody = wtmpl.RenderRootTemplate(ruleBody)
 		if err := applySkillManaged(ruleFile, ruleBody); err != nil {
 			return err
 		}

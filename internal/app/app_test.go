@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
 	wtdistill "github.com/nickdu2009/worktrail/internal/distill"
+	kddmigration "github.com/nickdu2009/worktrail/internal/migration/kdd"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 )
@@ -237,7 +239,24 @@ func TestImportCursorUsesObservedRegistryAndDoesNotScanLogs(t *testing.T) {
 	}
 }
 
-func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
+func TestImportHelpDoesNotExposeKDDMigration(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"import", "--help"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run import help: %v stderr=%s", err, errb.String())
+	}
+	if strings.Contains(out.String(), "import kdd") {
+		t.Fatalf("import help exposed legacy KDD migration:\n%s", out.String())
+	}
+}
+
+func TestMigrateKDDCreatesProjectAndUserCandidates(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
 	root := filepath.Join(project, "docs", "knowledge-driven-development")
@@ -268,14 +287,14 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := Run(context.Background(), []string{"import", "kdd", "--format", "json"}, nil, &out, &errb); err != nil {
-		t.Fatalf("Run import kdd dry-run: %v stderr=%s", err, errb.String())
+	if err := Run(context.Background(), []string{"migrate", "kdd", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run migrate kdd dry-run: %v stderr=%s", err, errb.String())
 	}
-	var dry kddImportReport
+	var dry kddmigration.Report
 	if err := json.Unmarshal(out.Bytes(), &dry); err != nil {
 		t.Fatal(err)
 	}
-	if !dry.DryRun || dry.Matched != 11 || dry.Skipped != 2 || dry.Blocked != 1 || dry.LocalSkipped != 1 {
+	if !dry.DryRun || dry.Matched != 12 || dry.Skipped != 2 || dry.Blocked != 1 || dry.ProjectItems != 11 || dry.LocalItems != 1 {
 		t.Fatalf("unexpected dry-run report: %+v", dry)
 	}
 	if !hasKDDSkippedPath(dry.Items, "project/architecture/README.md") {
@@ -287,19 +306,19 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 
 	missingRoot := filepath.Join(project, "missing-kdd")
 	out.Reset()
-	if err := Run(context.Background(), []string{"import", "kdd", "--root", missingRoot, "--format", "json"}, nil, &out, &errb); err == nil || !strings.Contains(err.Error(), "kdd root does not exist") {
+	if err := Run(context.Background(), []string{"migrate", "kdd", "--root", missingRoot, "--format", "json"}, nil, &out, &errb); err == nil || !strings.Contains(err.Error(), "kdd root does not exist") {
 		t.Fatalf("missing root error = %v", err)
 	}
 
 	out.Reset()
-	if err := Run(context.Background(), []string{"import", "kdd", "--all", "--format", "json"}, nil, &out, &errb); err != nil {
-		t.Fatalf("Run import kdd --all: %v stderr=%s", err, errb.String())
+	if err := Run(context.Background(), []string{"migrate", "kdd", "--write-candidates", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run migrate kdd --write-candidates: %v stderr=%s", err, errb.String())
 	}
-	var report kddImportReport
+	var report kddmigration.Report
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.DryRun || report.Created != 11 || report.Skipped != 2 || report.Blocked != 1 || report.LocalSkipped != 1 {
+	if report.DryRun || report.Created != 12 || report.Skipped != 2 || report.Blocked != 1 || report.ProjectItems != 11 || report.LocalItems != 1 {
 		t.Fatalf("unexpected import report: %+v", report)
 	}
 
@@ -320,22 +339,29 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(activeLog, []byte(`"candidate_type": "lesson"`)) || !bytes.Contains(activeLog, []byte("Do not promote directly")) {
+	if !bytes.Contains(activeLog, []byte(`"candidate_type": "migration_source"`)) || !bytes.Contains(activeLog, []byte(`"target_path": "imports/kdd/project/active-knowledge-log.md"`)) {
 		t.Fatalf("active log candidate unexpected:\n%s", activeLog)
 	}
-	if !bytes.Contains(activeLog, []byte(`"kdd"`)) || !bytes.Contains(activeLog, []byte(`"split-source"`)) {
-		t.Fatalf("active log candidate missing split-source tags:\n%s", activeLog)
+	if !bytes.Contains(activeLog, []byte(`"kdd"`)) || !bytes.Contains(activeLog, []byte(`"migration_source"`)) {
+		t.Fatalf("active log candidate missing migration tags:\n%s", activeLog)
+	}
+	localActiveLog, err := os.ReadFile(filepath.Join(home, "candidates", "user", "kdd-local-active-knowledge-log.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(localActiveLog, []byte(`"candidate_type": "migration_source"`)) || !bytes.Contains(localActiveLog, []byte(`"target_path": "imports/kdd/local/active-knowledge-log.md"`)) || !bytes.Contains(localActiveLog, []byte(`"local_path_detected"`)) {
+		t.Fatalf("local active log candidate unexpected:\n%s", localActiveLog)
 	}
 
 	out.Reset()
-	if err := Run(context.Background(), []string{"import", "kdd", "--all", "--format", "json"}, nil, &out, &errb); err != nil {
-		t.Fatalf("Run duplicate import kdd --all: %v stderr=%s", err, errb.String())
+	if err := Run(context.Background(), []string{"migrate", "kdd", "--write-candidates", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run duplicate migrate kdd --write-candidates: %v stderr=%s", err, errb.String())
 	}
-	var duplicate kddImportReport
+	var duplicate kddmigration.Report
 	if err := json.Unmarshal(out.Bytes(), &duplicate); err != nil {
 		t.Fatal(err)
 	}
-	if duplicate.Created != 0 || duplicate.Skipped < 11 {
+	if duplicate.Created != 0 || duplicate.Skipped < 12 {
 		t.Fatalf("duplicate import report unexpected: %+v", duplicate)
 	}
 
@@ -355,6 +381,140 @@ func TestImportKDDCreatesSemanticCandidates(t *testing.T) {
 	text := runApp(t, &out, &errb, "context", "architecture")
 	if !strings.Contains(text, "Architecture") || !strings.Contains(text, "Architecture body.") {
 		t.Fatalf("context missing promoted architecture:\n%s", text)
+	}
+}
+
+func TestDoctorMigrationDetectsRisksAndCleanupClearsLegacyRoot(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	root := filepath.Join(project, "docs", "knowledge-driven-development")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	writeWorktrailGovernance(t, project)
+	writeTextFile(t, filepath.Join(root, "project", "README.md"), "# Legacy\n")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "runbooks", "legacy.md"), "# Legacy Runbook\n")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "migration-source", "--type", model.CandidateTypeMigrationSource, "--target", "imports/kdd/project/active-knowledge-log.md", "--title", "Migration Source", "--tags", "kdd-migration", "Mixed evidence.")
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"doctor", "migration", "--format", "json"}, nil, &out, &errb)
+	if err == nil {
+		t.Fatalf("doctor migration unexpectedly passed:\n%s", out.String())
+	}
+	var report migrationDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"SRC001", "KDD002", "REV001"} {
+		if !hasMigrationFinding(report, code) {
+			t.Fatalf("doctor report missing %s: %+v", code, report.Findings)
+		}
+	}
+
+	runApp(t, &out, &errb, "discard", "migration-source")
+	if err := os.RemoveAll(filepath.Join(project, ".worktrail", "runbooks")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"migrate", "kdd", "--cleanup-legacy", "--confirm", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("cleanup legacy: %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("legacy root still exists or stat failed: %v", err)
+	}
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"doctor", "migration", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("doctor after cleanup: %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+}
+
+func TestMigrateKDDCleanupArchivePathSafety(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	root := filepath.Join(project, "docs", "knowledge-driven-development")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	writeWorktrailGovernance(t, project)
+	writeTextFile(t, filepath.Join(root, "project", "README.md"), "# Legacy\n")
+
+	unsafeArchive := filepath.Join(root, "archive")
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"migrate", "kdd", "--cleanup-legacy", "--confirm", "--archive-path", unsafeArchive, "--format", "json"}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "archive path must be outside legacy KDD root") {
+		t.Fatalf("unsafe archive path error = %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("legacy root should remain after blocked archive cleanup: %v", err)
+	}
+
+	archive := filepath.Join(project, "archives", "legacy-kdd")
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"migrate", "kdd", "--cleanup-legacy", "--confirm", "--archive-path", archive, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("archive cleanup: %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+	var report legacyCleanupReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK || report.Action != "archived" || report.ArchivePath != archive {
+		t.Fatalf("archive cleanup report unexpected: %+v", report)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("legacy root should be gone after archive cleanup, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(archive, "project", "README.md")); err != nil {
+		t.Fatalf("archived legacy content missing: %v", err)
+	}
+}
+
+func TestDoctorMigrationReportsTrackedRuntimeState(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	writeWorktrailGovernance(t, project)
+	writeTextFile(t, filepath.Join(project, ".worktrail", "index", "index.db"), "{}\n")
+	if err := exec.Command("git", "-C", project, "init").Run(); err != nil {
+		t.Skipf("git init failed: %v", err)
+	}
+	if err := exec.Command("git", "-C", project, "add", "-f", ".worktrail/index/index.db").Run(); err != nil {
+		t.Skipf("git add failed: %v", err)
+	}
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"doctor", "migration", "--format", "json"}, nil, &out, &errb)
+	if err == nil {
+		t.Fatalf("doctor migration unexpectedly passed:\n%s", out.String())
+	}
+	var report migrationDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !hasMigrationFinding(report, "GIT001") {
+		t.Fatalf("doctor report missing GIT001: %+v", report.Findings)
 	}
 }
 
@@ -714,7 +874,7 @@ func TestDistillProposalValidateAndApplyPartial(t *testing.T) {
 	}
 }
 
-func TestDistillProposalEndToEndPromoteContextFromSplitSource(t *testing.T) {
+func TestDistillProposalEndToEndPromoteContextFromMigrationSource(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
 	if err := os.MkdirAll(project, 0o755); err != nil {
@@ -725,7 +885,7 @@ func TestDistillProposalEndToEndPromoteContextFromSplitSource(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	runApp(t, &out, &errb, "init")
-	runApp(t, &out, &errb, "candidates", "create", "--id", "active-log", "--type", "lesson", "--target", "lessons/kdd-active-knowledge-log.md", "--title", "KDD Active Log", "--summary", "Do not promote directly", "--tags", "kdd,split-source", "Split source evidence body.")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "active-log", "--type", model.CandidateTypeMigrationSource, "--target", "imports/kdd/project/active-knowledge-log.md", "--title", "KDD Active Log", "--tags", "kdd,migration_source", "Migration source evidence body.")
 
 	proposal := filepath.Join(project, "split-source-proposal.json")
 	writeTextFile(t, proposal, `{
@@ -747,39 +907,39 @@ func TestDistillProposalEndToEndPromoteContextFromSplitSource(t *testing.T) {
 
 	out.Reset()
 	if err := Run(context.Background(), []string{"distill", "validate", proposal, "--format", "json"}, nil, &out, &errb); err != nil {
-		t.Fatalf("Run distill validate split source: %v stderr=%s", err, errb.String())
+		t.Fatalf("Run distill validate migration source: %v stderr=%s", err, errb.String())
 	}
 	var validation wtdistill.Report
 	if err := json.Unmarshal(out.Bytes(), &validation); err != nil {
 		t.Fatal(err)
 	}
 	if !validation.Valid || len(validation.Items) != 1 || validation.Items[0].Status != "valid" {
-		t.Fatalf("split source validation report unexpected: %+v", validation)
+		t.Fatalf("migration source validation report unexpected: %+v", validation)
 	}
 
 	out.Reset()
 	if err := Run(context.Background(), []string{"distill", "apply", proposal, "--format", "json"}, nil, &out, &errb); err != nil {
-		t.Fatalf("Run distill apply split source: %v stderr=%s", err, errb.String())
+		t.Fatalf("Run distill apply migration source: %v stderr=%s", err, errb.String())
 	}
 	var applied wtdistill.Report
 	if err := json.Unmarshal(out.Bytes(), &applied); err != nil {
 		t.Fatal(err)
 	}
 	if !applied.Valid || applied.Created != 1 || len(applied.Items) != 1 || applied.Items[0].Status != "created" {
-		t.Fatalf("split source apply report unexpected: %+v", applied)
+		t.Fatalf("migration source apply report unexpected: %+v", applied)
 	}
 	createdID := applied.Items[0].CandidateID
 
 	text := runApp(t, &out, &errb, "review")
-	if !strings.Contains(text, createdID) || !strings.Contains(text, "Distilled Term") || !strings.Contains(text, "Do not promote directly") {
-		t.Fatalf("split source review output unexpected:\n%s", text)
+	if !strings.Contains(text, createdID) || !strings.Contains(text, "Distilled Term") || !strings.Contains(text, "migration_source, pending") {
+		t.Fatalf("migration source review output unexpected:\n%s", text)
 	}
 
 	runApp(t, &out, &errb, "promote", createdID)
 	runApp(t, &out, &errb, "index", "rebuild")
 	text = runApp(t, &out, &errb, "context", "distilled term")
 	if !strings.Contains(text, "glossary/distilled-term.md") || !strings.Contains(text, "Definition from split source evidence.") {
-		t.Fatalf("split source promoted context output unexpected:\n%s", text)
+		t.Fatalf("migration source promoted context output unexpected:\n%s", text)
 	}
 }
 
@@ -874,7 +1034,16 @@ func hasCandidateID(records []candidate.Record, id string) bool {
 	return false
 }
 
-func hasDuplicateKDDCandidateIDs(items []kddImportItem) bool {
+func hasMigrationFinding(report migrationDoctorReport, code string) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDuplicateKDDCandidateIDs(items []kddmigration.Item) bool {
 	seen := map[string]bool{}
 	for _, item := range items {
 		if item.CandidateID == "" {
@@ -888,7 +1057,14 @@ func hasDuplicateKDDCandidateIDs(items []kddImportItem) bool {
 	return false
 }
 
-func hasKDDSkippedPath(items []kddImportItem, sourcePath string) bool {
+func writeWorktrailGovernance(t *testing.T, project string) {
+	t.Helper()
+	body := "Use worktrail context before work, worktrail review before applying candidates, and worktrail handoff before ending a session.\n"
+	writeTextFile(t, filepath.Join(project, "AGENTS.md"), body)
+	writeTextFile(t, filepath.Join(project, "CLAUDE.md"), body)
+}
+
+func hasKDDSkippedPath(items []kddmigration.Item, sourcePath string) bool {
 	for _, item := range items {
 		if item.SourcePath == sourcePath && item.SkipReason != "" {
 			return true

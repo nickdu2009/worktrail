@@ -138,6 +138,27 @@ func TestPromoteBacksUpWritesAtomicallyUpdatesStatusAndLogs(t *testing.T) {
 	}
 }
 
+func TestMigrationSourceCannotPromoteOrMerge(t *testing.T) {
+	m := testManager(t)
+	_, err := m.Create(CreateRequest{
+		ID:            "kdd-active-log",
+		Scope:         "project",
+		CandidateType: model.CandidateTypeMigrationSource,
+		TargetPath:    "imports/kdd/project/active-knowledge-log.md",
+		Title:         "KDD Active Log",
+		Body:          "# Active Log\n\nMixed migration evidence.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Promote("project", "kdd-active-log"); !errors.Is(err, ErrMigrationSourceApply) {
+		t.Fatalf("Promote migration_source error = %v", err)
+	}
+	if _, err := m.Merge("project", "kdd-active-log"); !errors.Is(err, ErrMigrationSourceApply) {
+		t.Fatalf("Merge migration_source error = %v", err)
+	}
+}
+
 func TestRestoreRecreatesMissingPromotedReplaceTarget(t *testing.T) {
 	m := testManager(t)
 	_, err := m.Create(CreateRequest{

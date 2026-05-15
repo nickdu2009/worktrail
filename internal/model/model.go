@@ -8,7 +8,10 @@ const (
 	SchemaState     = "worktrail.state.v1"
 )
 
-const CandidateTypeTranscriptNotes = "transcript_notes"
+const (
+	CandidateTypeTranscriptNotes = "transcript_notes"
+	CandidateTypeMigrationSource = "migration_source"
+)
 
 type Knowledge struct {
 	Schema         string    `json:"schema"`

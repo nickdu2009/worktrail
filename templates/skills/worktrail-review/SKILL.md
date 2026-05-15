@@ -1,11 +1,11 @@
 ---
 name: worktrail-review
-description: Review Worktrail candidates in chat before any promotion, merge, restore, retire, or discard.
+description: Review pending Worktrail candidates and decide whether knowledge should be promoted, merged, discarded, restored, or retired after explicit user confirmation.
 ---
 
 # Worktrail Review
 
-Use this skill to review pending candidates in Codex or Claude Code chat.
+Use this skill when the user asks to review candidates, inspect pending Worktrail knowledge, or decide whether knowledge should be promoted, merged, discarded, restored, or retired.
 
 1. Run `worktrail review plan --format json` to get the read-only agent contract for pending semantic candidates. Read-only review commands do not need user confirmation.
 2. Group the JSON items by `recommended_action`: `promote`, `merge`, `discard`, and `needs_human_review`, and show counts for each group before item details.
@@ -23,6 +23,6 @@ Do not automatically commit git changes.
 
 Never promote or merge `transcript_notes`; they are evidence and must be distilled into semantic candidates first.
 
-Never promote, merge, or discard KDD split-source `lesson` candidates directly from the review plan. They are evidence-like sources and should remain for the evidence lifecycle workflow.
+Never promote, merge, or discard `migration_source` or legacy KDD split-source candidates directly from the review plan. They are evidence-like sources and should remain for the evidence lifecycle workflow.
 
 Never promote, merge, discard, restore, retire, delete, or replace from hooks or default MCP tools.

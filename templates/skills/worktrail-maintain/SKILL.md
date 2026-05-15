@@ -1,11 +1,11 @@
 ---
 name: worktrail-maintain
-description: Summarize Worktrail maintenance state and guide explicit user-confirmed distill, review, and evidence lifecycle actions.
+description: Maintain, clean up, advance, or summarize Worktrail knowledge through read-only discovery and explicit user-confirmed distill, review, and evidence lifecycle actions.
 ---
 
 # Worktrail Maintain
 
-Use this skill when the user asks to clean up or advance Worktrail knowledge with minimal intervention.
+Use this skill when the user asks to maintain, clean up, advance, summarize, or do low-intervention upkeep for Worktrail knowledge, pending evidence, review candidates, or evidence lifecycle actions.
 
 1. Run the read-only discovery chain without asking for confirmation first.
 2. Start with `worktrail context "maintenance"` and summarize only maintenance counts and next steps.

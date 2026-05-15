@@ -1,13 +1,13 @@
 ---
 name: worktrail-distill
-description: Distill pending Worktrail evidence into semantic pending candidates with proposal validation and explicit user confirmation.
+description: Distill pending transcript_notes, migration_source, KDD split-source, or imported Worktrail evidence into semantic pending candidates with proposal validation and explicit user confirmation.
 ---
 
 # Worktrail Distill
 
-Use this skill when pending `transcript_notes` evidence or KDD split-source evidence should become semantic Worktrail candidates.
+Use this skill when pending `transcript_notes`, `migration_source`, legacy KDD split-source evidence, or imported evidence should become semantic Worktrail candidates.
 
-1. Run `worktrail distill --pending --summary` to discover pending transcript evidence. If the command reports that another scope has pending evidence, rerun the exact suggested `--scope` command and preserve that scope for validate/apply. Use `worktrail distill --pending --split-sources --summary` only when KDD split-source evidence is intentionally in scope.
+1. Run `worktrail distill --pending --summary` to discover pending transcript evidence. If the command reports that another scope has pending evidence, rerun the exact suggested `--scope` command and preserve that scope for validate/apply. Use `worktrail distill --pending --split-sources --summary` when `migration_source` or legacy KDD split-source evidence is intentionally in scope.
 2. If useful evidence exists, create a temporary pack with `worktrail distill --pending --all --write-pack <temporary-file>` or the scoped equivalent. The temporary filename must not include transcript ids, session ids, local usernames, or local absolute paths.
 3. Read the pack and draft a `worktrail.distill.proposal.v1` proposal. Proposal bodies must be durable semantic knowledge, not transcript summaries. Candidate summaries should explain reusable value, `target_path` values must be stable and type-appropriate, and distilled semantic candidates must keep `source_candidate_ids`.
 4. Store the proposal in a temporary file. Prefer a system temporary directory or an ignored workspace-local file. Do not commit the pack or proposal unless the user explicitly asks.
@@ -23,4 +23,4 @@ Do not automatically commit git changes.
 
 Never promote or merge `transcript_notes`; they are evidence and must become semantic candidates first.
 
-Never promote, merge, or discard KDD split-source `lesson` candidates directly. They are evidence-like sources.
+Never promote, merge, or discard `migration_source` or legacy KDD split-source candidates directly. They are evidence-like sources.

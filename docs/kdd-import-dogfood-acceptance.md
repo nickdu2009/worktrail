@@ -1,6 +1,6 @@
-# KDD Import Dogfood Acceptance
+# KDD Migration Dogfood Acceptance
 
-This record captures the real-project acceptance pass for importing legacy
+This record captures the real-project acceptance pass for migrating legacy
 `docs/knowledge-driven-development/` knowledge into Worktrail pending candidates.
 
 ## Fixture
@@ -14,7 +14,7 @@ This record captures the real-project acceptance pass for importing legacy
 
 The first dogfood pass exposed a real candidate-id collision when long KDD paths
 shared the same truncated prefix. Worktrail now appends a stable hash suffix when
-creating KDD candidate ids, so repeated imports stay deterministic without
+creating KDD candidate ids, so repeated migrations stay deterministic without
 colliding.
 
 The review pass also showed two content-quality issues:
@@ -22,8 +22,8 @@ The review pass also showed two content-quality issues:
 - Category README files were directory guidance, not durable project knowledge.
 - `project/active-knowledge-log.md` was too coarse to promote directly.
 
-The importer now skips category README files and imports the active log only as a
-pending split source marked `Pending Verification`.
+The migration path skips category README files and migrates the active log only
+as pending `migration_source` evidence marked `Pending Verification`.
 
 ## Final Dry Run
 
@@ -31,17 +31,18 @@ After the refinements:
 
 - `matched`: 37
 - `skipped`: 7
-- `local_skipped`: 7
+- `local_items`: 7
 - `blocked`: 0
 
 Skipped files were the root overview and six category README files. Local files
-under `local/**` were reported separately and not imported.
+under `local/**` were reported separately and migrate to user-scope pending
+candidates only.
 
-## Import Verification
+## Migration Verification
 
-`worktrail import kdd --all --format json` created 37 pending candidates.
-Running the same import again created 0 new candidates and counted all duplicates
-as skipped.
+`worktrail migrate kdd --write-candidates --format json` created pending
+candidates. Running the same migration again created 0 new candidates and
+counted all duplicates as skipped.
 
 Semantic distribution:
 
@@ -67,6 +68,7 @@ imported project README candidate. After that:
 - `worktrail context` loaded the promoted decision and merged project knowledge
 - review output did not report missing-target warnings
 
-This confirms the KDD import remains a pending-candidate bridge into the existing
+This confirms KDD migration remains a pending-candidate bridge into the existing
 review, promote, merge, and context lifecycle. It does not create a long-term
-dual knowledge root.
+dual knowledge root, and migration is complete only after the legacy KDD root is
+removed and `worktrail doctor migration` passes.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/util"
+	wtmpl "github.com/nickdu2009/worktrail/templates"
 )
 
 func testEnv(t *testing.T) paths.Env {
@@ -141,6 +142,7 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		if !strings.Contains(string(data), util.ManagedBegin) {
 			t.Fatalf("expected managed block in %s", path)
 		}
+		assertRenderedTriggerRouting(t, path)
 	}
 	for _, path := range []string{
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-context", "SKILL.md"),
@@ -251,6 +253,7 @@ func TestInstallClaudeUserAndProject(t *testing.T) {
 		if !strings.Contains(string(data), util.ManagedBegin) {
 			t.Fatalf("expected managed block in %s", path)
 		}
+		assertRenderedTriggerRouting(t, path)
 	}
 	for _, path := range []string{
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-import", "SKILL.md"),
@@ -281,6 +284,9 @@ func TestInstallClaudeUserAndProject(t *testing.T) {
 		}
 		if strings.HasSuffix(path, ".md") && !strings.Contains(string(data), util.ManagedBegin) {
 			t.Fatalf("expected managed block in %s", path)
+		}
+		if filepath.Base(path) == "CLAUDE.md" {
+			assertRenderedTriggerRouting(t, path)
 		}
 	}
 }
@@ -316,6 +322,9 @@ func TestInstallCursorProjectManagesNativeConfigWithoutIgnoringCursor(t *testing
 			if !strings.Contains(string(data), util.ManagedBegin) {
 				t.Fatalf("expected managed block in %s", path)
 			}
+		}
+		if strings.HasSuffix(path, "worktrail.mdc") {
+			assertRenderedTriggerRouting(t, path)
 		}
 	}
 	raw, err := os.ReadFile(mcpPath)
@@ -402,5 +411,36 @@ func TestInstallCursorCoexistsWithCodexClaudeVisibleSkills(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("cursor uninstall removed other tool skill %s: %v", path, err)
 		}
+	}
+}
+
+func assertRenderedTriggerRouting(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"## Skill Trigger Routing",
+		"### worktrail-context",
+		"### worktrail-state",
+		"### worktrail-handoff",
+		"### worktrail-import",
+		"### worktrail-distill",
+		"### worktrail-review",
+		"### worktrail-maintain",
+		"worktrail handoff",
+		"new conversation",
+		"end current chat",
+		"Do not only output a copyable text handoff",
+		"worktrail evidence plan --format json",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("rendered trigger routing in %s missing %q:\n%s", path, want, text)
+		}
+	}
+	if strings.Contains(text, wtmpl.SkillTriggerRoutingPlaceholder) {
+		t.Fatalf("trigger routing placeholder leaked into %s:\n%s", path, text)
 	}
 }

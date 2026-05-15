@@ -1,21 +1,22 @@
 ---
 name: worktrail-import
-description: Discover, sync, and extract pending Worktrail candidates from Codex, Claude, or Cursor transcript files, including all current-project Codex conversations and observed Cursor transcripts when requested.
+description: Import, sync, extract, or migrate pending Worktrail candidates from Codex, Claude, Cursor, transcript files, current-project conversations, observed Cursor transcripts, or legacy KDD docs.
 ---
 
 # Worktrail Import
 
-Use this skill when the user wants to extract reusable knowledge from existing AI coding conversations.
+Use this skill when the user wants to import, sync, extract, migrate, or reuse knowledge from Codex, Claude, Cursor, transcript files, all current-project conversations, observed Cursor conversations, or legacy KDD docs.
 
 For an existing `docs/knowledge-driven-development/` project knowledge base:
 
-1. Run `worktrail import kdd` first and show the dry-run matched, blocked, skipped, and local-skipped counts.
-2. If the user asked to proceed, run `worktrail import kdd --all`.
-3. Summarize created pending semantic candidates and their target paths.
-4. Explain that `local/**` and category README files are skipped by default.
-5. Treat `project/active-knowledge-log.md` as a pending split source, not as a candidate to promote directly.
-6. If active-log split-source knowledge needs promotion, run `worktrail distill <candidate-id>` or `worktrail distill --pending --split-sources`, write a `worktrail.distill.proposal.v1` JSON proposal, then run `worktrail distill validate <proposal.json>` and `worktrail distill apply <proposal.json>`.
-7. Hand off review to `/worktrail-review`.
+1. Run `worktrail migrate kdd` first and show the dry-run matched, blocked, skipped, project item, and local item counts.
+2. If the user asked to proceed, run `worktrail migrate kdd --write-candidates`.
+3. Summarize created pending candidates, scopes, and target paths.
+4. Explain that `local/**` migrates to user-scope candidates only and category README files are skipped by default.
+5. Treat `active-knowledge-log.md` files as pending `migration_source` evidence, not as candidates to promote directly.
+6. If active-log migration source knowledge needs promotion, run `worktrail distill <candidate-id>` or `worktrail distill --pending --split-sources`, write a `worktrail.distill.proposal.v1` JSON proposal, then run `worktrail distill validate <proposal.json>` and `worktrail distill apply <proposal.json>`.
+7. Run `worktrail doctor migration` after review and only then use explicit cleanup for the legacy root.
+8. Hand off review to `/worktrail-review`.
 
 For all current-project Codex conversations:
 

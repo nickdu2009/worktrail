@@ -250,6 +250,9 @@ func isReviewEvidenceSource(rec candidate.Record) bool {
 	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
 		return true
 	}
+	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+		return true
+	}
 	return isReviewSplitSourceLesson(rec)
 }
 

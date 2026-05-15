@@ -35,10 +35,11 @@ var (
 	ErrBlocked              = errors.New("candidate content contains blocked sensitive material")
 	ErrNotFound             = errors.New("candidate not found")
 	ErrTranscriptNotesApply = errors.New("transcript notes are evidence and must be distilled before promote or merge")
+	ErrMigrationSourceApply = errors.New("migration sources are evidence and must be distilled before promote or merge")
 	ErrRestoreUnsupported   = errors.New("restore only supports promoted replace candidates with missing targets")
 	ErrRetireUnsupported    = errors.New("retire only supports promoted or merged candidates with missing targets")
 	ErrRetireReasonRequired = errors.New("retire reason is required")
-	ErrEvidenceUnsupported  = errors.New("evidence lifecycle only supports transcript_notes and KDD split-source lessons")
+	ErrEvidenceUnsupported  = errors.New("evidence lifecycle only supports transcript_notes, migration_source, and KDD split-source lessons")
 )
 
 type Manager struct {
@@ -239,6 +240,9 @@ func (m Manager) Restore(scope, id string) (ApplyResult, error) {
 	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
 		return ApplyResult{}, ErrTranscriptNotesApply
 	}
+	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+		return ApplyResult{}, ErrMigrationSourceApply
+	}
 	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
 	if err != nil {
 		return ApplyResult{}, err
@@ -296,6 +300,9 @@ func (m Manager) Retire(scope, id, reason string) (Record, error) {
 	}
 	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
 		return Record{}, ErrTranscriptNotesApply
+	}
+	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+		return Record{}, ErrMigrationSourceApply
 	}
 	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
 	if err != nil {
@@ -431,6 +438,9 @@ func (m Manager) apply(scope, id, op string) (ApplyResult, error) {
 	}
 	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
 		return ApplyResult{}, ErrTranscriptNotesApply
+	}
+	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+		return ApplyResult{}, ErrMigrationSourceApply
 	}
 	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
 	if err != nil {
@@ -625,6 +635,9 @@ func terminalStatus(status string) bool {
 
 func isLifecycleEvidence(rec Record) bool {
 	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+		return true
+	}
+	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
 		return true
 	}
 	if rec.Meta.CandidateType != "lesson" {

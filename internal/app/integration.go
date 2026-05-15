@@ -50,10 +50,13 @@ func runUninstall(_ context.Context, env paths.Env, ioctx IO, args []string) err
 	return nil
 }
 
-func runDoctor(_ context.Context, env paths.Env, ioctx IO, args []string) error {
+func runDoctor(ctx context.Context, env paths.Env, ioctx IO, args []string) error {
 	if len(args) == 0 {
 		fmt.Fprintf(ioctx.Out, "user: %s\nproject: %s\n", env.UserRoot, env.ProjectWT)
 		return nil
+	}
+	if args[0] == "migration" {
+		return runDoctorMigration(ctx, env, ioctx, args[1:])
 	}
 	flags, _ := splitFlags(args[1:])
 	report, err := integrations.Doctor(env, integrations.Tool(args[0]), integrationOptions(flags))
