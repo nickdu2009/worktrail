@@ -12,6 +12,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/candidate"
 	wtdistill "github.com/nickdu2009/worktrail/internal/distill"
 	"github.com/nickdu2009/worktrail/internal/model"
+	"github.com/nickdu2009/worktrail/internal/paths"
 )
 
 func TestInitCreatesUserAndProjectRoots(t *testing.T) {
@@ -689,6 +690,52 @@ func TestReviewShowsPendingSemanticWarnings(t *testing.T) {
 	for _, want := range []string{
 		"warnings: target_exists, replace_target_exists, same_target_pending:2",
 		"warnings: merge_target_missing",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("review output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestReviewShowsSourceCandidateIDsAndWarnings(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "note-1", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/note-1.md", "--title", "Transcript Notes", "Evidence body.")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "old-note", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/old-note.md", "--title", "Old Transcript Notes", "Old evidence body.")
+	runApp(t, &out, &errb, "discard", "old-note")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "ordinary-lesson", "--type", "lesson", "--target", "lessons/ordinary.md", "--title", "Ordinary Lesson", "Ordinary lesson body.")
+
+	env, err := paths.Discover()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (candidate.Manager{Env: env, Actor: "test"}).Create(candidate.CreateRequest{
+		Scope:              "project",
+		ID:                 "source-aware-rule",
+		CandidateType:      "rule",
+		TargetPath:         "rules/source-aware.md",
+		Title:              "Source Aware Rule",
+		Summary:            "Review should show source evidence details.",
+		Operation:          candidate.OperationReplace,
+		SourceCandidateIDs: []string{"note-1", "old-note", "ordinary-lesson", "missing-source"},
+		Body:               "# Source Aware Rule\n\nReview source visibility.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	text := runApp(t, &out, &errb, "review")
+	for _, want := range []string{
+		"source_candidate_ids: `note-1` (transcript_notes, pending, redaction=clean), `old-note` (transcript_notes, discarded, redaction=clean), `ordinary-lesson` (lesson, pending, redaction=clean), `missing-source` (missing)",
+		"warnings: source_not_pending:old-note, source_not_evidence:ordinary-lesson, source_missing:missing-source",
+		"next: worktrail candidates diff source-aware-rule",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("review output missing %q:\n%s", want, text)

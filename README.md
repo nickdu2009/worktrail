@@ -23,13 +23,16 @@ worktrail init
 worktrail context "current task"
 worktrail candidates create --type rule --target rules/example.md --title "Example Rule" "Rule body."
 worktrail review
+worktrail review plan --format json
 worktrail candidates diff <candidate-id>
 worktrail promote <candidate-id>
 worktrail index rebuild
 worktrail context "current task"
 ```
 
-`worktrail review` shows pending semantic candidates by default and reports hidden transcript evidence plus non-semantic operational candidates such as handoffs. Use `worktrail review --evidence` for raw transcript evidence, or `worktrail review --all` when operational candidates also need inspection.
+`worktrail review` shows pending semantic candidates by default and reports hidden transcript evidence plus non-semantic operational candidates such as handoffs. Semantic candidates include `source_candidate_ids` details when present, source health warnings, target/duplicate warnings, and a focused `worktrail candidates diff <id>` next step. Use `worktrail review --evidence` for raw transcript evidence, or `worktrail review --all` when operational candidates also need inspection.
+
+`worktrail review plan --format json` emits the read-only agent contract `worktrail.review.plan.v1`. It groups pending semantic candidates into deterministic recommendations: `promote`, `merge`, `discard`, or `needs_human_review`. The command never changes candidate state or formal knowledge; state-changing commands still require explicit user confirmation.
 
 `worktrail context <task>` hides pending transcript evidence by default and reports how many evidence candidates are hidden. Use `worktrail context --evidence <task>` when the raw transcript notes themselves need to be included in the Pending Candidates section.
 
@@ -66,7 +69,21 @@ Proposal JSON uses schema `worktrail.distill.proposal.v1`:
 }
 ```
 
-`distill apply` creates pending semantic candidates only. It never promotes, merges, discards, restores, or retires knowledge.
+`distill apply` creates pending semantic candidates only. It never promotes, merges, discards, restores, or retires knowledge. JSON output remains the stable machine contract; default text output summarizes created, skipped, blocked, and error items without printing candidate bodies or local proposal paths.
+
+Copyable proposal examples live under `docs/examples/distill/`. Test fixtures live under `internal/testdata/distill/` and use only synthetic candidates.
+
+## Evidence lifecycle
+
+Evidence candidates remain available for source traceability after distillation:
+
+```bash
+worktrail evidence plan --format json
+worktrail evidence plan --status archived
+worktrail evidence plan --status all --format json
+```
+
+`worktrail evidence plan` emits the read-only v1 contract `worktrail.evidence.plan.v1`. It reports `transcript_notes` and KDD split-source `lesson` evidence, counts pending and applied semantic references, and recommends `keep`, `archive`, `discard`, or `needs_human_review`. Version 1 is read-only: archive and discard mutating commands are intentionally not part of this contract.
 
 ## KDD import
 

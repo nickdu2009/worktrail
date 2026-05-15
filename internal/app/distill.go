@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -112,12 +114,16 @@ func runDistill(_ context.Context, env paths.Env, ioctx IO, args []string) error
 
 func runDistillProposal(env paths.Env, ioctx IO, cmd string, args []string) error {
 	flags, positional := splitFlags(args)
+	format := flagValue(flags, "format", flagValue(flags, "json", "text"))
 	path := firstArg(positional, "")
 	if path == "" {
 		return fmt.Errorf("usage: worktrail distill %s <proposal.json> [--scope project|user] [--format text|json]", cmd)
 	}
 	proposal, err := wtdistill.LoadProposal(path)
 	if err != nil {
+		if format != "json" && format != "true" {
+			fmt.Fprintf(ioctx.Out, "Distill %s: failed\n\nError: %s\n", cmd, distillFatalProposalError(err))
+		}
 		return err
 	}
 	scope := flagValue(flags, "scope", "project")
@@ -131,7 +137,7 @@ func runDistillProposal(env paths.Env, ioctx IO, cmd string, args []string) erro
 	if err != nil {
 		return err
 	}
-	return printDistillProposalReport(ioctx, report, flagValue(flags, "format", flagValue(flags, "json", "text")))
+	return printDistillProposalReport(ioctx, cmd, proposal, report, format)
 }
 
 func parsePositiveInt(value string, def int, name string) (int, error) {
@@ -225,24 +231,93 @@ func printDistillSummary(out io.Writer, summary distillSummary) {
 	}
 }
 
-func printDistillProposalReport(ioctx IO, report wtdistill.Report, format string) error {
+func printDistillProposalReport(ioctx IO, cmd string, proposal wtdistill.Proposal, report wtdistill.Report, format string) error {
 	if format == "json" || format == "true" {
 		return json.NewEncoder(ioctx.Out).Encode(report)
 	}
-	fmt.Fprintf(ioctx.Out, "valid: %v\ncreated: %d\nskipped: %d\nblocked: %d\n", report.Valid, report.Created, report.Skipped, report.Blocked)
-	for _, warning := range report.Warnings {
-		fmt.Fprintf(ioctx.Out, "warning: %s\n", warning)
+	errorsCount := distillReportErrorCount(report)
+	fmt.Fprintf(ioctx.Out, "Distill %s: %s\n\n", cmd, distillReportTextStatus(report, errorsCount))
+	fmt.Fprintf(ioctx.Out, "Summary: created=%d skipped=%d blocked=%d errors=%d warnings=%d\n", report.Created, report.Skipped, report.Blocked, errorsCount, len(report.Warnings))
+	if len(report.Warnings) > 0 {
+		fmt.Fprintf(ioctx.Out, "Warnings: %s\n", strings.Join(report.Warnings, ", "))
 	}
-	for _, item := range report.Items {
-		fmt.Fprintf(ioctx.Out, "item %d\t%s\t%s\t%s\n", item.ProposalIndex, item.Status, item.CandidateID, item.TargetPath)
-		if len(item.WarningCodes) > 0 {
-			fmt.Fprintf(ioctx.Out, "  warnings: %s\n", strings.Join(item.WarningCodes, ", "))
+	for _, section := range []struct {
+		Title  string
+		Status string
+	}{
+		{"Created", "created"},
+		{"Skipped", "skipped"},
+		{"Blocked", "blocked"},
+		{"Errors", "error"},
+	} {
+		var items []wtdistill.ItemReport
+		for _, item := range report.Items {
+			if item.Status == section.Status {
+				items = append(items, item)
+			}
 		}
-		if len(item.Errors) > 0 {
-			fmt.Fprintf(ioctx.Out, "  errors: %s\n", strings.Join(item.Errors, "; "))
+		if len(items) == 0 {
+			continue
+		}
+		fmt.Fprintln(ioctx.Out)
+		fmt.Fprintln(ioctx.Out, section.Title)
+		for _, item := range items {
+			renderDistillReportItem(ioctx.Out, proposal, item)
 		}
 	}
 	return nil
+}
+
+func distillReportErrorCount(report wtdistill.Report) int {
+	count := 0
+	for _, item := range report.Items {
+		if item.Status == "error" {
+			count++
+		}
+	}
+	return count
+}
+
+func distillReportTextStatus(report wtdistill.Report, errorsCount int) string {
+	switch {
+	case report.Created > 0 && report.Skipped == 0 && report.Blocked == 0 && errorsCount == 0:
+		return "success"
+	case report.Created > 0 && (report.Skipped > 0 || report.Blocked > 0 || errorsCount > 0):
+		return "partial success"
+	case report.Created == 0 && (report.Blocked > 0 || errorsCount > 0):
+		return "completed with issues"
+	default:
+		return "no changes"
+	}
+}
+
+func renderDistillReportItem(out io.Writer, proposal wtdistill.Proposal, item wtdistill.ItemReport) {
+	operation := ""
+	if item.ProposalIndex >= 0 && item.ProposalIndex < len(proposal.Candidates) {
+		operation = strings.TrimSpace(proposal.Candidates[item.ProposalIndex].Operation)
+	}
+	if operation == "" {
+		operation = "unknown"
+	}
+	if strings.TrimSpace(item.CandidateID) != "" {
+		fmt.Fprintf(out, "- [%d] %s -> %s (%s, %s)\n", item.ProposalIndex, item.CandidateID, item.TargetPath, item.CandidateType, operation)
+	} else {
+		fmt.Fprintf(out, "- [%d] %s (%s, %s)\n", item.ProposalIndex, item.TargetPath, item.CandidateType, operation)
+	}
+	if len(item.WarningCodes) > 0 {
+		fmt.Fprintf(out, "  warnings: %s\n", strings.Join(item.WarningCodes, ", "))
+	}
+	if len(item.Errors) > 0 {
+		fmt.Fprintf(out, "  errors: %s\n", strings.Join(item.Errors, "; "))
+	}
+}
+
+func distillFatalProposalError(err error) string {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return fmt.Sprintf("failed to %s proposal %s: %v", pathErr.Op, filepath.Base(pathErr.Path), pathErr.Err)
+	}
+	return err.Error()
 }
 
 func printDistillHelp(out io.Writer) {

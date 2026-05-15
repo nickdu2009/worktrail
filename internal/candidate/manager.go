@@ -25,6 +25,7 @@ const (
 	StatusMerged    = "merged"
 	StatusDiscarded = "discarded"
 	StatusRetired   = "retired"
+	StatusArchived  = "archived"
 
 	OperationReplace = "replace"
 	OperationMerge   = "merge"
@@ -550,7 +551,7 @@ func normalizeScope(scope string) string {
 }
 
 func terminalStatus(status string) bool {
-	return status == StatusPromoted || status == StatusMerged || status == StatusDiscarded || status == StatusRetired
+	return status == StatusPromoted || status == StatusMerged || status == StatusDiscarded || status == StatusRetired || status == StatusArchived
 }
 
 func blockedError(result redact.Result) error {

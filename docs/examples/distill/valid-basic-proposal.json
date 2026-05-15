@@ -1,0 +1,17 @@
+{
+  "schema": "worktrail.distill.proposal.v1",
+  "source_candidate_ids": ["note-1"],
+  "candidates": [
+    {
+      "candidate_type": "rule",
+      "title": "Basic Rule",
+      "summary": "Synthetic example distilled from transcript evidence.",
+      "target_path": "rules/basic.md",
+      "operation": "replace",
+      "evidence_label": "Pending Verification",
+      "confidence": 0.8,
+      "tags": ["distilled", "example"],
+      "body": "# Basic Rule\n\nKeep useful transcript findings as pending semantic candidates until review."
+    }
+  ]
+}

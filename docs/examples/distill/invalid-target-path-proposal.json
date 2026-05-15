@@ -1,0 +1,13 @@
+{
+  "schema": "worktrail.distill.proposal.v1",
+  "source_candidate_ids": ["note-1"],
+  "candidates": [
+    {
+      "candidate_type": "rule",
+      "title": "Bad Target",
+      "target_path": ".worktrail/rules/bad.md",
+      "operation": "replace",
+      "body": "# Bad Target\n\nDo not include the .worktrail prefix in proposal target paths."
+    }
+  ]
+}
