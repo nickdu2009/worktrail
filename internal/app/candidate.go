@@ -126,6 +126,9 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	if len(args) > 0 && args[0] == "plan" {
 		return runReviewPlan(env, ioctx, args[1:])
 	}
+	if len(args) > 0 && args[0] == "apply-plan" {
+		return runReviewApplyPlan(env, ioctx, args[1:])
+	}
 	if wantsHelp(args) {
 		printReviewHelp(ioctx.Out)
 		return nil
@@ -452,6 +455,7 @@ func printCandidatesHelp(out io.Writer, subcommand string) {
 func printReviewHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail review [--semantic|--evidence|--all] [--scope project|user]")
 	fmt.Fprintln(out, "       worktrail review plan [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "       worktrail review apply-plan <plan.json> --confirm [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "By default, review shows pending semantic candidates and hides transcript_notes evidence plus non-semantic operational candidates.")
 	fmt.Fprintln(out, "Use review plan for the read-only agent contract grouped by recommended action.")

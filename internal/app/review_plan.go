@@ -19,6 +19,7 @@ import (
 )
 
 const reviewPlanSchema = "worktrail.review.plan.v1"
+const reviewApplyPlanReportSchema = "worktrail.review.apply_plan.report.v1"
 
 type reviewPlan struct {
 	Schema      string            `json:"schema"`
@@ -34,6 +35,32 @@ type reviewPlanSummary struct {
 	Merge            int `json:"merge"`
 	Discard          int `json:"discard"`
 	NeedsHumanReview int `json:"needs_human_review"`
+}
+
+type reviewApplyPlanReport struct {
+	Schema     string                 `json:"schema"`
+	PlanSchema string                 `json:"plan_schema"`
+	Scope      string                 `json:"scope"`
+	Summary    reviewApplyPlanSummary `json:"summary"`
+	Items      []reviewApplyPlanItem  `json:"items"`
+}
+
+type reviewApplyPlanSummary struct {
+	Total   int `json:"total"`
+	Applied int `json:"applied"`
+	Skipped int `json:"skipped"`
+	Stale   int `json:"stale"`
+	Failed  int `json:"failed"`
+}
+
+type reviewApplyPlanItem struct {
+	CandidateID   string   `json:"candidate_id"`
+	PlannedAction string   `json:"planned_action"`
+	Result        string   `json:"result"`
+	Status        string   `json:"status,omitempty"`
+	TargetPath    string   `json:"target_path,omitempty"`
+	ReasonCodes   []string `json:"reason_codes,omitempty"`
+	Error         string   `json:"error,omitempty"`
 }
 
 type reviewPlanItem struct {
@@ -93,6 +120,179 @@ func runReviewPlan(env wtpaths.Env, ioctx IO, args []string) error {
 		return json.NewEncoder(ioctx.Out).Encode(plan)
 	}
 	return renderReviewPlanText(ioctx.Out, plan)
+}
+
+func runReviewApplyPlan(env wtpaths.Env, ioctx IO, args []string) error {
+	if wantsHelp(args) {
+		printReviewApplyPlanHelp(ioctx.Out)
+		return nil
+	}
+	flags, positional := splitFlags(args)
+	if flagValue(flags, "confirm", "") != "true" {
+		return fmt.Errorf("worktrail review apply-plan requires --confirm")
+	}
+	planPath := firstArg(positional, flagValue(flags, "plan", ""))
+	if strings.TrimSpace(planPath) == "" {
+		return fmt.Errorf("worktrail review apply-plan requires a plan file")
+	}
+	data, err := os.ReadFile(planPath)
+	if err != nil {
+		return err
+	}
+	var plan reviewPlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return err
+	}
+	if plan.Schema != reviewPlanSchema {
+		return fmt.Errorf("unsupported review plan schema %q", plan.Schema)
+	}
+	scope := flagValue(flags, "scope", plan.Scope)
+	if scope == "" {
+		scope = "project"
+	}
+	report := applyReviewPlan(env, scope, plan)
+	if flagValue(flags, "format", "text") == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(report)
+	}
+	return renderReviewApplyPlanText(ioctx.Out, report)
+}
+
+func applyReviewPlan(env wtpaths.Env, scope string, plan reviewPlan) reviewApplyPlanReport {
+	report := reviewApplyPlanReport{
+		Schema:     reviewApplyPlanReportSchema,
+		PlanSchema: plan.Schema,
+		Scope:      scope,
+		Items:      []reviewApplyPlanItem{},
+	}
+	manager := candidate.Manager{Env: env, Actor: "cli:review-apply-plan"}
+	records, err := manager.List(scope)
+	if err != nil {
+		item := reviewApplyPlanItem{
+			Result:      "failed",
+			ReasonCodes: []string{"candidate_list_failed"},
+			Error:       err.Error(),
+		}
+		report.Items = append(report.Items, item)
+		report.Summary.Total = 1
+		report.Summary.Failed = 1
+		return report
+	}
+	byID := map[string]candidate.Record{}
+	for _, rec := range records {
+		byID[rec.Meta.ID] = rec
+	}
+	analysis := newReviewPlanAnalysis(records)
+	for _, planned := range plan.Items {
+		item := reviewApplyPlanItem{
+			CandidateID:   planned.CandidateID,
+			PlannedAction: planned.RecommendedAction,
+			TargetPath:    planned.TargetPath,
+		}
+		switch planned.RecommendedAction {
+		case "needs_human_review":
+			item.Result = "skipped"
+			item.ReasonCodes = []string{"needs_human_review_skipped"}
+			report.Summary.Skipped++
+		case "promote", "merge", "discard":
+			rec, ok := byID[planned.CandidateID]
+			if !ok {
+				item.Result = "stale"
+				item.ReasonCodes = []string{"candidate_missing"}
+				report.Summary.Stale++
+				break
+			}
+			targetExists, err := reviewPlanTargetExists(env, scope, rec.Meta.TargetPath)
+			if err != nil {
+				item.Result = "failed"
+				item.ReasonCodes = []string{"target_check_failed"}
+				item.Error = err.Error()
+				report.Summary.Failed++
+				break
+			}
+			currentSnapshot := reviewPlanSnapshotFor(rec, targetExists)
+			mismatches := reviewPlanSnapshotMismatches(planned.Snapshot, currentSnapshot)
+			currentItem, err := buildReviewPlanItem(env, scope, records, rec, analysis)
+			if err != nil {
+				item.Result = "failed"
+				item.ReasonCodes = []string{"current_plan_item_failed"}
+				item.Error = err.Error()
+				report.Summary.Failed++
+				break
+			}
+			if currentItem.RecommendedAction != planned.RecommendedAction {
+				mismatches = appendReviewPlanReasonCodes(mismatches, "recommended_action_changed")
+			}
+			if len(mismatches) > 0 {
+				item.Result = "stale"
+				item.ReasonCodes = mismatches
+				report.Summary.Stale++
+				break
+			}
+			status, err := applyReviewPlanAction(manager, scope, planned.CandidateID, planned.RecommendedAction)
+			if err != nil {
+				item.Result = "failed"
+				item.ReasonCodes = []string{"apply_failed"}
+				item.Error = err.Error()
+				report.Summary.Failed++
+				break
+			}
+			item.Result = "applied"
+			item.Status = status
+			report.Summary.Applied++
+		default:
+			item.Result = "skipped"
+			item.ReasonCodes = []string{"unsupported_recommended_action"}
+			report.Summary.Skipped++
+		}
+		report.Items = append(report.Items, item)
+	}
+	report.Summary.Total = len(report.Items)
+	return report
+}
+
+func applyReviewPlanAction(manager candidate.Manager, scope, id, action string) (string, error) {
+	switch action {
+	case "promote":
+		result, err := manager.Promote(scope, id)
+		return result.Status, err
+	case "merge":
+		result, err := manager.Merge(scope, id)
+		return result.Status, err
+	case "discard":
+		rec, err := manager.Discard(scope, id)
+		return rec.Meta.Status, err
+	default:
+		return "", fmt.Errorf("unsupported review plan action %q", action)
+	}
+}
+
+func reviewPlanSnapshotMismatches(planned, current reviewPlanSnapshot) []string {
+	var mismatches []string
+	if planned.CandidateStatus != current.CandidateStatus {
+		mismatches = append(mismatches, "candidate_status_changed")
+	}
+	if planned.CandidateOperation != current.CandidateOperation {
+		mismatches = append(mismatches, "candidate_operation_changed")
+	}
+	if planned.CandidateTargetPath != current.CandidateTargetPath {
+		mismatches = append(mismatches, "candidate_target_path_changed")
+	}
+	if planned.CandidateRedactionStatus != current.CandidateRedactionStatus {
+		mismatches = append(mismatches, "candidate_redaction_status_changed")
+	}
+	if planned.CandidateBodyHash != current.CandidateBodyHash {
+		mismatches = append(mismatches, "candidate_body_hash_changed")
+	}
+	if planned.CandidateMetadataHash != current.CandidateMetadataHash {
+		mismatches = append(mismatches, "candidate_metadata_hash_changed")
+	}
+	if planned.TargetExists != current.TargetExists {
+		mismatches = append(mismatches, "target_exists_changed")
+	}
+	if planned.SourceCandidateIDsHash != current.SourceCandidateIDsHash {
+		mismatches = append(mismatches, "source_candidate_ids_hash_changed")
+	}
+	return mismatches
 }
 
 func buildReviewPlan(env wtpaths.Env, scope string, records []candidate.Record, now time.Time) (reviewPlan, error) {
@@ -515,6 +715,52 @@ func renderReviewPlanText(out io.Writer, plan reviewPlan) error {
 	return nil
 }
 
+func renderReviewApplyPlanText(out io.Writer, report reviewApplyPlanReport) error {
+	fmt.Fprintln(out, "# Worktrail Review Apply Plan")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "Schema: %s\n", report.Schema)
+	fmt.Fprintf(out, "Scope: %s\n", report.Scope)
+	fmt.Fprintf(out, "Summary: total=%d applied=%d skipped=%d stale=%d failed=%d\n", report.Summary.Total, report.Summary.Applied, report.Summary.Skipped, report.Summary.Stale, report.Summary.Failed)
+	for _, group := range []struct {
+		Result string
+		Title  string
+	}{
+		{"applied", "Applied"},
+		{"skipped", "Skipped"},
+		{"stale", "Stale"},
+		{"failed", "Failed"},
+	} {
+		var items []reviewApplyPlanItem
+		for _, item := range report.Items {
+			if item.Result == group.Result {
+				items = append(items, item)
+			}
+		}
+		if len(items) == 0 {
+			continue
+		}
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, group.Title)
+		for _, item := range items {
+			fmt.Fprintf(out, "- `%s` action=%s", item.CandidateID, item.PlannedAction)
+			if item.Status != "" {
+				fmt.Fprintf(out, " status=%s", item.Status)
+			}
+			if item.TargetPath != "" {
+				fmt.Fprintf(out, " target=`%s`", item.TargetPath)
+			}
+			fmt.Fprintln(out)
+			if len(item.ReasonCodes) > 0 {
+				fmt.Fprintf(out, "  reason_codes: %s\n", strings.Join(item.ReasonCodes, ", "))
+			}
+			if item.Error != "" {
+				fmt.Fprintf(out, "  error: %s\n", item.Error)
+			}
+		}
+	}
+	return nil
+}
+
 func reviewPlanSourceSummary(item reviewPlanItem) string {
 	if len(item.SourceCandidateIDs) == 0 {
 		return "none"
@@ -538,4 +784,11 @@ func printReviewPlanHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail review plan [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Builds a read-only agent review contract for pending semantic candidates.")
+}
+
+func printReviewApplyPlanHelp(out io.Writer) {
+	fmt.Fprintln(out, "usage: worktrail review apply-plan <plan.json> --confirm [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Applies promote, merge, and discard actions from a fresh worktrail.review.plan.v1 file.")
+	fmt.Fprintln(out, "Candidates with stale snapshots or needs_human_review are skipped without evidence cleanup.")
 }
