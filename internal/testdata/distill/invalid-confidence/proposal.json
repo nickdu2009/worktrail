@@ -1,0 +1,14 @@
+{
+  "schema": "worktrail.distill.proposal.v1",
+  "source_candidate_ids": ["note-1"],
+  "candidates": [
+    {
+      "candidate_type": "validation",
+      "title": "Invalid Confidence",
+      "target_path": "validation/invalid-confidence.md",
+      "operation": "replace",
+      "confidence": 0,
+      "body": "# Invalid Confidence\n"
+    }
+  ]
+}

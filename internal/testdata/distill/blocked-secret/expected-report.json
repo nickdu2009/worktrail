@@ -1,0 +1,14 @@
+{
+  "command": "apply",
+  "valid": false,
+  "created": 0,
+  "skipped": 0,
+  "blocked": 1,
+  "items": [
+    {
+      "proposal_index": 0,
+      "status": "blocked",
+      "errors": ["candidate content contains blocked sensitive material"]
+    }
+  ]
+}

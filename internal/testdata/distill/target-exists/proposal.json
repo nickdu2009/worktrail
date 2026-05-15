@@ -1,0 +1,13 @@
+{
+  "schema": "worktrail.distill.proposal.v1",
+  "source_candidate_ids": ["note-1"],
+  "candidates": [
+    {
+      "candidate_type": "rule",
+      "title": "Target Exists Rule",
+      "target_path": "rules/target-exists.md",
+      "operation": "replace",
+      "body": "# Target Exists Rule\n\nThis proposal should warn because the target already exists."
+    }
+  ]
+}

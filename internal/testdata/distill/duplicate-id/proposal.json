@@ -1,0 +1,13 @@
+{
+  "schema": "worktrail.distill.proposal.v1",
+  "source_candidate_ids": ["note-1"],
+  "candidates": [
+    {
+      "candidate_type": "rule",
+      "title": "Duplicate Rule",
+      "target_path": "rules/duplicate.md",
+      "operation": "replace",
+      "body": "# Duplicate Rule\n\nNew proposed body."
+    }
+  ]
+}

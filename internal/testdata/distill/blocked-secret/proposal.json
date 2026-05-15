@@ -1,0 +1,13 @@
+{
+  "schema": "worktrail.distill.proposal.v1",
+  "source_candidate_ids": ["note-1"],
+  "candidates": [
+    {
+      "candidate_type": "decision",
+      "title": "Blocked Decision",
+      "target_path": "decisions/blocked.md",
+      "operation": "replace",
+      "body": "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----"
+    }
+  ]
+}

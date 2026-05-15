@@ -1,0 +1,14 @@
+{
+  "command": "validate",
+  "valid": false,
+  "created": 0,
+  "skipped": 0,
+  "blocked": 0,
+  "items": [
+    {
+      "proposal_index": 0,
+      "status": "error",
+      "errors": ["target_path must not include .worktrail prefix"]
+    }
+  ]
+}

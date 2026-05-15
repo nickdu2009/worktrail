@@ -1,0 +1,29 @@
+{
+  "schema": "worktrail.distill.proposal.v1",
+  "candidates": [
+    {
+      "candidate_type": "rule",
+      "title": "Missing Source",
+      "target_path": "rules/missing-source.md",
+      "operation": "replace",
+      "source_candidate_ids": ["note-404"],
+      "body": "# Missing Source\n"
+    },
+    {
+      "candidate_type": "rule",
+      "title": "Old Source",
+      "target_path": "rules/old-source.md",
+      "operation": "replace",
+      "source_candidate_ids": ["old-note"],
+      "body": "# Old Source\n"
+    },
+    {
+      "candidate_type": "rule",
+      "title": "Unexpected Source",
+      "target_path": "rules/unexpected-source.md",
+      "operation": "replace",
+      "source_candidate_ids": ["ordinary-lesson"],
+      "body": "# Unexpected Source\n"
+    }
+  ]
+}

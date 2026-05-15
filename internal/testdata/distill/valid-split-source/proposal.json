@@ -1,0 +1,17 @@
+{
+  "schema": "worktrail.distill.proposal.v1",
+  "source_candidate_ids": ["kdd-active-log"],
+  "candidates": [
+    {
+      "candidate_type": "glossary",
+      "title": "Split Term",
+      "summary": "Synthetic glossary entry distilled from a KDD split source.",
+      "target_path": "glossary/split-term.md",
+      "operation": "replace",
+      "evidence_label": "Pending Verification",
+      "confidence": 0.7,
+      "tags": ["distilled", "kdd"],
+      "body": "# Split Term\n\nKDD active-log entries are evidence sources and should be distilled before formal review."
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "command": "validate",
+  "valid": false,
+  "created": 0,
+  "skipped": 0,
+  "blocked": 0,
+  "items": [
+    {
+      "proposal_index": 0,
+      "status": "error",
+      "errors": ["source candidate not found: note-404"]
+    },
+    {
+      "proposal_index": 1,
+      "status": "error",
+      "errors": ["source candidate is not pending: old-note"]
+    },
+    {
+      "proposal_index": 2,
+      "status": "error",
+      "errors": ["source candidate type is not allowed: ordinary-lesson"]
+    }
+  ]
+}

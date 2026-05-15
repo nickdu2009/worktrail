@@ -1,0 +1,4 @@
+{
+  "command": "apply",
+  "expect_error_contains": "proposal schema must be"
+}

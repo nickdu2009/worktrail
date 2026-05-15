@@ -1,0 +1,16 @@
+{
+  "command": "apply",
+  "valid": true,
+  "created": 1,
+  "skipped": 0,
+  "blocked": 0,
+  "items": [
+    {
+      "proposal_index": 0,
+      "status": "created",
+      "candidate_id": "distill-glossary-glossary-split-term-0c96b208",
+      "warning_codes": [],
+      "errors": []
+    }
+  ]
+}
