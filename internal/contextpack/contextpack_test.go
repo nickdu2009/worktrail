@@ -89,6 +89,12 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	if pack.HiddenEvidenceCandidates != 1 {
 		t.Fatalf("HiddenEvidenceCandidates = %d, want 1", pack.HiddenEvidenceCandidates)
 	}
+	if pack.Maintenance.PendingEvidenceCandidates != 1 || pack.Maintenance.PendingSemanticCandidates != 1 || pack.Maintenance.EvidenceLifecycleCandidates != 0 {
+		t.Fatalf("maintenance counts unexpected: %+v", pack.Maintenance)
+	}
+	if !containsStep(pack.Maintenance.NextSteps, "worktrail distill --pending --summary") || !containsStep(pack.Maintenance.NextSteps, "worktrail review plan --format json") {
+		t.Fatalf("maintenance next steps unexpected: %+v", pack.Maintenance.NextSteps)
+	}
 	for _, title := range []string{"User Knowledge", "Workflows", "Active State", "Decisions", "Handoffs", "Rules", "Pending Candidates"} {
 		if !hasSection(pack, title) {
 			t.Fatalf("missing section %q in %+v", title, pack.Sections)
@@ -112,6 +118,9 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	if !strings.Contains(rendered, "Hidden transcript evidence candidates: 1") || !strings.Contains(rendered, "worktrail context --evidence <task>") {
 		t.Fatalf("rendered pack missing hidden evidence guidance:\n%s", rendered)
 	}
+	if !strings.Contains(rendered, "## Maintenance") || !strings.Contains(rendered, "Pending evidence candidates: 1") || !strings.Contains(rendered, "Pending review candidates: 1") {
+		t.Fatalf("rendered pack missing maintenance hints:\n%s", rendered)
+	}
 	if strings.Contains(rendered, "Raw transcript evidence content.") || strings.Contains(rendered, "Pending non-semantic candidate content.") {
 		t.Fatalf("default rendered pack leaked hidden candidates:\n%s", rendered)
 	}
@@ -130,6 +139,32 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	rendered = RenderMarkdown(withEvidence)
 	if !strings.Contains(rendered, "Raw transcript evidence content.") || strings.Contains(rendered, "Hidden transcript evidence candidates") {
 		t.Fatalf("IncludeEvidence rendered pack unexpected:\n%s", rendered)
+	}
+}
+
+func TestBuildOmitsMaintenanceTextWhenCountsAreZero(t *testing.T) {
+	tmp := t.TempDir()
+	env := paths.Env{
+		UserRoot:  filepath.Join(tmp, "user"),
+		ProjectWT: filepath.Join(tmp, "project", ".worktrail"),
+	}
+	writePackDoc(t, filepath.Join(env.ProjectWT, "rules", "testing.md"), map[string]any{
+		"id":    "testing",
+		"scope": "project",
+		"type":  "rule",
+		"title": "Testing Rule",
+	}, "Run targeted tests.")
+
+	pack, err := Build(env, Options{Task: "quiet"})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if hasMaintenance(pack.Maintenance) {
+		t.Fatalf("maintenance should be empty: %+v", pack.Maintenance)
+	}
+	rendered := RenderMarkdown(pack)
+	if strings.Contains(rendered, "## Maintenance") {
+		t.Fatalf("rendered quiet pack included maintenance section:\n%s", rendered)
 	}
 }
 
@@ -163,6 +198,15 @@ func section(pack Pack, title string) Section {
 func hasItem(section Section, title string) bool {
 	for _, item := range section.Items {
 		if item.Title == title {
+			return true
+		}
+	}
+	return false
+}
+
+func containsStep(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
 			return true
 		}
 	}

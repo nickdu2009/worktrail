@@ -142,7 +142,7 @@ func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
 			userRootFile:     filepath.Join(env.Home, ".codex", "AGENTS.md"),
 			userSkillRoot:    filepath.Join(env.Home, ".codex", "skills"),
 			projectSkillRoot: filepath.Join(env.ProjectRoot, ".agents", "skills"),
-			userSkills:       []string{"worktrail-context", "worktrail-handoff", "worktrail-import", "worktrail-review"},
+			userSkills:       []string{"worktrail-context", "worktrail-handoff", "worktrail-import", "worktrail-distill", "worktrail-review"},
 			projectJSONPath:  filepath.Join(env.ProjectRoot, ".codex", "hooks.json"),
 			projectJSONTmpl:  "config/codex-hooks.json",
 		}, nil
@@ -154,7 +154,7 @@ func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
 			projectRootFile:  filepath.Join(env.ProjectRoot, "CLAUDE.md"),
 			userSkillRoot:    filepath.Join(env.Home, ".claude", "skills"),
 			projectSkillRoot: filepath.Join(env.ProjectRoot, ".claude", "skills"),
-			userSkills:       []string{"worktrail-context", "worktrail-handoff", "worktrail-import", "worktrail-review"},
+			userSkills:       []string{"worktrail-context", "worktrail-handoff", "worktrail-import", "worktrail-distill", "worktrail-review"},
 			projectSkills:    []string{"worktrail-context", "worktrail-state", "worktrail-handoff"},
 			projectJSONPath:  filepath.Join(env.ProjectRoot, ".claude", "settings.json"),
 			projectJSONTmpl:  "config/claude-settings.json",

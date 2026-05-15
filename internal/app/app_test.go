@@ -359,12 +359,24 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	}
 	var contextJSON struct {
 		HiddenEvidenceCandidates int `json:"hidden_evidence_candidates"`
+		Maintenance              struct {
+			PendingEvidenceCandidates   int      `json:"pending_evidence_candidates"`
+			PendingSemanticCandidates   int      `json:"pending_semantic_candidates"`
+			EvidenceLifecycleCandidates int      `json:"evidence_lifecycle_candidates"`
+			NextSteps                   []string `json:"next_steps"`
+		} `json:"maintenance"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &contextJSON); err != nil {
 		t.Fatal(err)
 	}
 	if contextJSON.HiddenEvidenceCandidates != 2 {
 		t.Fatalf("context json hidden_evidence_candidates = %d, want 2", contextJSON.HiddenEvidenceCandidates)
+	}
+	if contextJSON.Maintenance.PendingEvidenceCandidates != 2 || contextJSON.Maintenance.PendingSemanticCandidates != 3 {
+		t.Fatalf("context json maintenance counts unexpected: %+v", contextJSON.Maintenance)
+	}
+	if !containsString(contextJSON.Maintenance.NextSteps, "worktrail distill --pending --summary") || !containsString(contextJSON.Maintenance.NextSteps, "worktrail review plan --format json") {
+		t.Fatalf("context json maintenance next_steps unexpected: %+v", contextJSON.Maintenance.NextSteps)
 	}
 
 	out.Reset()

@@ -146,6 +146,7 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-context", "SKILL.md"),
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-handoff", "SKILL.md"),
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-import", "SKILL.md"),
+		filepath.Join(env.Home, ".codex", "skills", "worktrail-distill", "SKILL.md"),
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-review", "SKILL.md"),
 	} {
 		data, err := os.ReadFile(path)
@@ -159,6 +160,23 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 			t.Fatalf("expected managed block in %s", path)
 		}
 	}
+	distillSkill, err := os.ReadFile(filepath.Join(env.Home, ".codex", "skills", "worktrail-distill", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"worktrail distill --pending --summary",
+		"worktrail distill --pending --all --write-pack",
+		"worktrail distill validate <proposal.json>",
+		"worktrail distill apply <proposal.json>",
+		"worktrail review plan --format json",
+		"Do not paste transcript evidence bodies",
+		"Do not commit the pack or proposal",
+	} {
+		if !strings.Contains(string(distillSkill), want) {
+			t.Fatalf("distill skill missing %q:\n%s", want, distillSkill)
+		}
+	}
 	reviewSkill, err := os.ReadFile(filepath.Join(env.Home, ".codex", "skills", "worktrail-review", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -166,6 +184,10 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 	for _, want := range []string{
 		"worktrail candidates list --semantic --status pending --format json",
 		"Do not include `transcript_notes` evidence or non-semantic operational candidates",
+		"show counts for each group",
+		"commands` array only for `promote`, `merge`, and `discard`",
+		"Do not generate a state-changing command for `needs_human_review`",
+		"accepted batch",
 		"worktrail review --evidence",
 		"worktrail review --all",
 		"worktrail retire <id> --reason <text>",
@@ -204,6 +226,7 @@ func TestInstallClaudeUserAndProject(t *testing.T) {
 	}
 	for _, path := range []string{
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-import", "SKILL.md"),
+		filepath.Join(env.Home, ".claude", "skills", "worktrail-distill", "SKILL.md"),
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-review", "SKILL.md"),
 		filepath.Join(env.ProjectRoot, ".claude", "skills", "worktrail-state", "SKILL.md"),
 	} {
