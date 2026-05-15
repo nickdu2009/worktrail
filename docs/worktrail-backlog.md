@@ -11,7 +11,11 @@ non-goals, behavior, and acceptance criteria.
 
 ## Pending
 
-- No pending stable backlog item.
+- Define release acceptance, scope behavior, maintenance UX, knowledge quality,
+  apply-plan safety, and dogfood feedback requirements before the next
+  implementation round.
+  Requirements:
+  [worktrail-release-acceptance.md](worktrail-release-acceptance.md).
 
 ## Completed
 
