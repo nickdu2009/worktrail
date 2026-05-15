@@ -86,14 +86,16 @@ Evidence lifecycle actions available.
 Next: run `worktrail evidence plan --format json`.
 ```
 
-JSON context output should include stable fields:
+JSON context output should include a stable `maintenance` object:
 
 ```json
 {
-  "pending_evidence_candidates": 0,
-  "pending_semantic_candidates": 0,
-  "evidence_lifecycle_candidates": 0,
-  "next_steps": []
+  "maintenance": {
+    "pending_evidence_candidates": 0,
+    "pending_semantic_candidates": 0,
+    "evidence_lifecycle_candidates": 0,
+    "next_steps": []
+  }
 }
 ```
 
@@ -104,6 +106,9 @@ Requirements:
 - Do not mutate candidate state or formal knowledge from `context`.
 - Counts should respect the same default hiding rules used by review and
   evidence plan.
+- The top-level JSON context contract should remain backward compatible. New
+  fields should be added under `maintenance` rather than scattered across the
+  top-level object.
 
 ### `/worktrail-distill` Skill
 
@@ -112,6 +117,11 @@ Add a new skill template:
 ```text
 templates/skills/worktrail-distill/SKILL.md
 ```
+
+This skill is an agent workflow, not a built-in Worktrail LLM feature. Worktrail
+provides evidence packs, proposal schema validation, and apply/reporting. The
+current AI coding agent is responsible for authoring the semantic proposal and
+the user remains responsible for confirming apply.
 
 Default agent workflow:
 
@@ -134,6 +144,14 @@ Safety requirements:
 - Proposal bodies must be durable semantic knowledge, not transcript summaries.
 - KDD split-source candidates may be used as evidence sources but must not be
   promoted directly.
+- Temporary pack and proposal file names should not include transcript ids,
+  session ids, local user names, or local absolute paths.
+- Prefer a system temporary directory or an ignored workspace-local temporary
+  file. If a workspace-local file is used, the skill must delete it after apply
+  unless the user explicitly asks to keep it.
+- When summarizing a proposal, show candidate ids, target paths, candidate
+  types, operations, warning codes, and error codes. Do not paste transcript
+  evidence bodies.
 
 ### `/worktrail-review` Batch Summary
 
@@ -238,8 +256,10 @@ Non-goals:
 
 - `worktrail context <task>` reports maintenance counts and next steps without
   leaking transcript body.
-- `worktrail context --format json <task>` includes maintenance count fields and
-  `next_steps`.
+- `worktrail context --format json <task>` includes
+  `maintenance.pending_evidence_candidates`,
+  `maintenance.pending_semantic_candidates`,
+  `maintenance.evidence_lifecycle_candidates`, and `maintenance.next_steps`.
 - `/worktrail-distill` can guide an agent through evidence summary, pack
   creation, proposal authoring, validation, apply, and review plan.
 - `/worktrail-review` summarizes `worktrail.review.plan.v1` by recommended
@@ -263,6 +283,19 @@ Non-goals:
 - Add `/worktrail-distill` skill template.
 - Update `/worktrail-review` with batch confirmation guidance.
 - Add validation docs.
+
+Phase 1 explicitly excludes `worktrail review apply-plan`. Batch execution from
+a saved review plan belongs to Phase 2 after the skill-based workflow has been
+validated.
+
+Phase 1 validation boundary:
+
+- CLI: unit or app tests cover context text hints, context JSON `maintenance`
+  fields, and zero-count quiet behavior.
+- Skills: installation tests verify the distill and review skill templates are
+  installed with the expected workflow commands.
+- Docs: fixture-based validation records the low-intervention workflow without
+  transcript body or local absolute paths.
 
 ### Phase 2: Confirmed Review Apply Plan
 
