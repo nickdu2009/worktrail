@@ -38,6 +38,7 @@ var (
 	ErrRestoreUnsupported   = errors.New("restore only supports promoted replace candidates with missing targets")
 	ErrRetireUnsupported    = errors.New("retire only supports promoted or merged candidates with missing targets")
 	ErrRetireReasonRequired = errors.New("retire reason is required")
+	ErrEvidenceUnsupported  = errors.New("evidence lifecycle only supports transcript_notes and KDD split-source lessons")
 )
 
 type Manager struct {
@@ -352,6 +353,74 @@ func (m Manager) Discard(scope, id string) (Record, error) {
 	return rec, nil
 }
 
+func (m Manager) ArchiveEvidence(scope, id, reason string) (Record, error) {
+	rec, err := m.Show(scope, id)
+	if err != nil {
+		return Record{}, err
+	}
+	if !isLifecycleEvidence(rec) {
+		return Record{}, ErrEvidenceUnsupported
+	}
+	if rec.Meta.Status == StatusArchived {
+		return Record{}, fmt.Errorf("candidate %q is already %s", rec.Meta.ID, rec.Meta.Status)
+	}
+	if rec.Meta.Status == StatusDiscarded || rec.Meta.Status == StatusRetired {
+		return Record{}, fmt.Errorf("candidate %q is already %s", rec.Meta.ID, rec.Meta.Status)
+	}
+	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
+	if err != nil {
+		return Record{}, err
+	}
+	previousStatus := rec.Meta.Status
+	rec.Meta.Status = StatusArchived
+	rec.Meta.UpdatedAt = m.now()
+	if err := writeRecord(rec); err != nil {
+		return Record{}, err
+	}
+	if err := wlog.Append(root, "candidate.evidence_archive", rec.Meta.ID, m.actor(), map[string]any{
+		"target_path":     rec.Meta.TargetPath,
+		"previous_status": previousStatus,
+		"reason":          strings.TrimSpace(reason),
+	}); err != nil {
+		return Record{}, err
+	}
+	return rec, nil
+}
+
+func (m Manager) DiscardEvidence(scope, id, reason string) (Record, error) {
+	rec, err := m.Show(scope, id)
+	if err != nil {
+		return Record{}, err
+	}
+	if !isLifecycleEvidence(rec) {
+		return Record{}, ErrEvidenceUnsupported
+	}
+	if rec.Meta.Status == StatusDiscarded {
+		return Record{}, fmt.Errorf("candidate %q is already %s", rec.Meta.ID, rec.Meta.Status)
+	}
+	if rec.Meta.Status == StatusArchived || rec.Meta.Status == StatusRetired {
+		return Record{}, fmt.Errorf("candidate %q is already %s", rec.Meta.ID, rec.Meta.Status)
+	}
+	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
+	if err != nil {
+		return Record{}, err
+	}
+	previousStatus := rec.Meta.Status
+	rec.Meta.Status = StatusDiscarded
+	rec.Meta.UpdatedAt = m.now()
+	if err := writeRecord(rec); err != nil {
+		return Record{}, err
+	}
+	if err := wlog.Append(root, "candidate.evidence_discard", rec.Meta.ID, m.actor(), map[string]any{
+		"target_path":     rec.Meta.TargetPath,
+		"previous_status": previousStatus,
+		"reason":          strings.TrimSpace(reason),
+	}); err != nil {
+		return Record{}, err
+	}
+	return rec, nil
+}
+
 func (m Manager) apply(scope, id, op string) (ApplyResult, error) {
 	rec, err := m.Show(scope, id)
 	if err != nil {
@@ -552,6 +621,24 @@ func normalizeScope(scope string) string {
 
 func terminalStatus(status string) bool {
 	return status == StatusPromoted || status == StatusMerged || status == StatusDiscarded || status == StatusRetired || status == StatusArchived
+}
+
+func isLifecycleEvidence(rec Record) bool {
+	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+		return true
+	}
+	if rec.Meta.CandidateType != "lesson" {
+		return false
+	}
+	if rec.Meta.TargetPath == "lessons/kdd-active-knowledge-log.md" {
+		return true
+	}
+	for _, tag := range rec.Meta.Tags {
+		if tag == "split-source" {
+			return true
+		}
+	}
+	return strings.Contains(rec.Meta.Summary, "Do not promote directly") || strings.Contains(rec.Body, "Do not promote directly")
 }
 
 func blockedError(result redact.Result) error {

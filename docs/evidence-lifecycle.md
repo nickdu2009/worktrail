@@ -191,9 +191,9 @@ Discarded evidence may be included only by future explicit historical or audit
 commands. `worktrail evidence plan --status archived` is for archived evidence,
 not discarded evidence; `--status all` also excludes discarded evidence in v1.
 
-## Future Mutating Commands
+## Mutating Commands
 
-Potential explicit commands:
+Explicit commands:
 
 ```bash
 worktrail evidence archive <candidate-id> --confirm
@@ -208,6 +208,11 @@ Mutating commands must:
   candidates unless a future force flag is explicitly designed
 - write event log entries
 - preserve enough metadata for traceability after archive or discard
+
+The first implementation only runs archive or discard when the current evidence
+plan recommends the same action for the candidate. It refuses evidence still
+required by pending semantic candidates and does not delete candidate files or
+modify formal knowledge.
 
 ## Text and JSON Output
 
@@ -233,10 +238,10 @@ counts, and the next safe command.
 - Evidence referenced by pending semantic candidates is never recommended for
   archive or discard.
 - KDD split-source candidates are not promoted or discarded by default.
-- Future archive or discard commands require explicit confirmation.
-- Future archive commands set evidence candidate status to `archived` without
+- Archive or discard commands require explicit confirmation.
+- Archive commands set evidence candidate status to `archived` without
   deleting candidate files.
-- Future discard commands set evidence candidate status to `discarded` without
+- Discard commands set evidence candidate status to `discarded` without
   deleting candidate files.
 - Existing `worktrail review`, `worktrail context`, and `worktrail distill`
   behavior remains compatible.

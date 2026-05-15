@@ -30,12 +30,16 @@ go test ./internal/app
   discard, and needs-human-review.
 - `worktrail evidence plan --format json` reference counting and
   active/archived/all status filters.
+- `worktrail evidence archive` and `worktrail evidence discard` confirmation
+  boundaries, recommendation matching, status updates, and file preservation.
 
 ## Expected Result
 
 - Source evidence remains a candidate.
 - Distill apply creates pending semantic candidates only.
 - Review plan and evidence plan are read-only.
+- Evidence archive/discard commands mutate only evidence candidate lifecycle
+  status after explicit `--confirm`.
 - KDD split-source lessons are not recommended for direct promote, merge, or
   discard.
 - No formal knowledge changes happen without explicit promote or merge.
@@ -45,7 +49,8 @@ go test ./internal/app
 `go test ./internal/app` passed during implementation. The fixture tests compare
 stable report fields: validity, created/skipped/blocked counts, item statuses,
 warning codes, and error code text. Review and evidence plan tests verify JSON
-schema names, recommended actions, source/reference status, and command safety.
+schema names, recommended actions, source/reference status, command safety, and
+evidence archive/discard lifecycle behavior.
 
 ## Candidate Counts And Apply Counts
 
@@ -70,5 +75,4 @@ framework.
 ## Known Gaps
 
 - This record is fixture-based, not a private real-transcript dogfood pass.
-- Evidence archive/discard mutating commands are not implemented in v1; only
-  the read-only `worktrail.evidence.plan.v1` contract is validated here.
+- This fixture validation does not replace a real-transcript dogfood pass.

@@ -81,9 +81,11 @@ Evidence candidates remain available for source traceability after distillation:
 worktrail evidence plan --format json
 worktrail evidence plan --status archived
 worktrail evidence plan --status all --format json
+worktrail evidence archive <candidate-id> --confirm --reason "covered by applied knowledge"
+worktrail evidence discard <candidate-id> --confirm --reason "empty duplicate evidence"
 ```
 
-`worktrail evidence plan` emits the read-only v1 contract `worktrail.evidence.plan.v1`. It reports `transcript_notes` and KDD split-source `lesson` evidence, counts pending and applied semantic references, and recommends `keep`, `archive`, `discard`, or `needs_human_review`. Version 1 is read-only: archive and discard mutating commands are intentionally not part of this contract.
+`worktrail evidence plan` emits the v1 contract `worktrail.evidence.plan.v1`. It reports `transcript_notes` and KDD split-source `lesson` evidence, counts pending and applied semantic references, and recommends `keep`, `archive`, `discard`, or `needs_human_review`. Archive and discard require `--confirm`, keep candidate files for audit, and only run when the current evidence plan recommends the same action.
 
 ## KDD import
 
