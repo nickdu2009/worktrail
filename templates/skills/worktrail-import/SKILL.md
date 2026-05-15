@@ -1,6 +1,6 @@
 ---
 name: worktrail-import
-description: Discover, sync, and extract pending Worktrail candidates from existing Codex or Claude transcript files, including all current-project Codex conversations when requested.
+description: Discover, sync, and extract pending Worktrail candidates from Codex, Claude, or Cursor transcript files, including all current-project Codex conversations and observed Cursor transcripts when requested.
 ---
 
 # Worktrail Import
@@ -28,12 +28,22 @@ For all current-project Codex conversations:
 7. If validation reports useful valid items, run `worktrail distill apply <proposal.json>` to create pending semantic candidates.
 8. Hand off review to `/worktrail-review`.
 
+For observed Cursor conversations:
+
+1. Run `worktrail import cursor` first and show the dry-run observed, matched, skipped, and blocked counts.
+2. Explain that Cursor import uses explicit `--file` paths or Worktrail-observed `observed-*.metadata.json` registry entries. It does not scan undocumented private Cursor directories.
+3. If the user asked to proceed or already asked for observed Cursor conversations, run `worktrail import cursor --all`.
+4. Summarize observed, synced, extracted, skipped, and blocked counts.
+5. Distill transcript evidence before review, then hand off review to `/worktrail-review`.
+
 For one explicit transcript file:
 
-1. Identify the source as `codex`, `claude`, or `manual`.
+1. Identify the source as `codex`, `claude`, `cursor`, or `manual`.
 2. Run `worktrail sync <source> <transcript-file>`.
 3. Run `worktrail extract --source <source> --session latest`.
 4. Summarize created pending candidates and their target paths.
 5. Hand off review to `/worktrail-review`.
+
+Claude Code currently supports explicit transcript files through `sync claude <file>` and `extract --source claude`; it does not yet have automatic `worktrail import claude` discovery.
 
 Do not promote, merge, discard, restore, retire, or write formal knowledge from this skill. Import, extract, distill, proposal apply, and candidate creation produce pending candidates only. Transcript notes are evidence and must be distilled into semantic candidates before review or promotion.

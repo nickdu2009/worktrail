@@ -7,7 +7,7 @@ import (
 
 // FS contains Worktrail integration assets installed into Codex and Claude Code.
 //
-//go:embed skills/*/SKILL.md root/*.md config/*.json
+//go:embed skills/*/SKILL.md root/*.md root/*.mdc config/*.json
 var FS embed.FS
 
 func Read(path string) (string, error) {

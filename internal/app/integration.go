@@ -20,7 +20,7 @@ func runInstall(_ context.Context, env paths.Env, ioctx IO, args []string) error
 	opts := integrationOptions(flags)
 	target := args[0]
 	if target == "all" {
-		for _, tool := range []integrations.Tool{integrations.ToolCodex, integrations.ToolClaude} {
+		for _, tool := range []integrations.Tool{integrations.ToolCodex, integrations.ToolClaude, integrations.ToolCursor} {
 			report, err := integrations.Install(env, tool, opts)
 			if err != nil {
 				return err
@@ -66,7 +66,7 @@ func runDoctor(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 
 func runHook(ctx context.Context, env paths.Env, ioctx IO, args []string) error {
 	if len(args) < 2 {
-		return errors.New("usage: worktrail hook <codex|claude> <event>")
+		return errors.New("usage: worktrail hook <codex|claude|cursor> <event>")
 	}
 	return hooks.Run(ctx, env, args[0], args[1], ioctx.In, ioctx.Out)
 }

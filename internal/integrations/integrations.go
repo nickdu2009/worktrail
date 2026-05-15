@@ -21,6 +21,7 @@ type Tool string
 const (
 	ToolCodex  Tool = "codex"
 	ToolClaude Tool = "claude"
+	ToolCursor Tool = "cursor"
 )
 
 type Options struct {
@@ -121,16 +122,27 @@ func UninstallClaude(env paths.Env, opts Options) (Report, error) {
 }
 
 type integrationConfig struct {
-	tool             Tool
-	rootTemplate     string
-	userRootFile     string
-	projectRootFile  string
-	userSkillRoot    string
-	projectSkillRoot string
-	userSkills       []string
-	projectSkills    []string
-	projectJSONPath  string
-	projectJSONTmpl  string
+	tool              Tool
+	rootTemplate      string
+	userRootFile      string
+	projectRootFile   string
+	ruleTemplate      string
+	userRuleFile      string
+	projectRuleFile   string
+	userSkillRoot     string
+	projectSkillRoot  string
+	visibleSkillRoots []string
+	userSkills        []string
+	projectSkills     []string
+	projectJSONPath   string
+	projectJSONTmpl   string
+	userJSONs         []jsonTemplate
+	projectJSONs      []jsonTemplate
+}
+
+type jsonTemplate struct {
+	path     string
+	template string
 }
 
 func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
@@ -159,6 +171,34 @@ func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
 			projectJSONPath:  filepath.Join(env.ProjectRoot, ".claude", "settings.json"),
 			projectJSONTmpl:  "config/claude-settings.json",
 		}, nil
+	case ToolCursor:
+		return integrationConfig{
+			tool:             tool,
+			ruleTemplate:     "root/cursor-worktrail.mdc",
+			projectRuleFile:  filepath.Join(env.ProjectRoot, ".cursor", "rules", "worktrail.mdc"),
+			userSkillRoot:    filepath.Join(env.Home, ".cursor", "skills"),
+			projectSkillRoot: filepath.Join(env.ProjectRoot, ".cursor", "skills"),
+			visibleSkillRoots: []string{
+				filepath.Join(env.Home, ".cursor", "skills"),
+				filepath.Join(env.Home, ".agents", "skills"),
+				filepath.Join(env.Home, ".codex", "skills"),
+				filepath.Join(env.Home, ".claude", "skills"),
+				filepath.Join(env.ProjectRoot, ".cursor", "skills"),
+				filepath.Join(env.ProjectRoot, ".agents", "skills"),
+				filepath.Join(env.ProjectRoot, ".codex", "skills"),
+				filepath.Join(env.ProjectRoot, ".claude", "skills"),
+			},
+			userSkills:    []string{"worktrail-context", "worktrail-handoff", "worktrail-import", "worktrail-distill", "worktrail-review", "worktrail-maintain"},
+			projectSkills: []string{"worktrail-context", "worktrail-state", "worktrail-handoff"},
+			userJSONs: []jsonTemplate{
+				{path: filepath.Join(env.Home, ".cursor", "mcp.json"), template: "config/cursor-mcp.json"},
+				{path: filepath.Join(env.Home, ".cursor", "hooks.json"), template: "config/cursor-hooks.json"},
+			},
+			projectJSONs: []jsonTemplate{
+				{path: filepath.Join(env.ProjectRoot, ".cursor", "mcp.json"), template: "config/cursor-mcp.json"},
+				{path: filepath.Join(env.ProjectRoot, ".cursor", "hooks.json"), template: "config/cursor-hooks.json"},
+			},
+		}, nil
 	default:
 		return integrationConfig{}, fmt.Errorf("unknown integration tool %q", tool)
 	}
@@ -183,7 +223,25 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 		}
 		report.Actions = append(report.Actions, Action{Path: rootFile, Action: "managed-block-installed"})
 	}
+	ruleFile := cfg.userRuleFile
+	if scope == "project" {
+		ruleFile = cfg.projectRuleFile
+	}
+	if ruleFile != "" {
+		ruleBody, err := wtmpl.Read(cfg.ruleTemplate)
+		if err != nil {
+			return err
+		}
+		if err := applySkillManaged(ruleFile, ruleBody); err != nil {
+			return err
+		}
+		report.Actions = append(report.Actions, Action{Path: ruleFile, Action: "managed-block-installed"})
+	}
 	for _, skill := range skills {
+		if cfg.tool == ToolCursor && cursorSkillVisible(cfg, skill, skillRoot) {
+			report.Actions = append(report.Actions, Action{Path: cursorVisibleSkillPath(cfg, skill, skillRoot), Action: "skill-visible-via-compatible-root"})
+			continue
+		}
 		body, err := wtmpl.Read("skills/" + skill + "/SKILL.md")
 		if err != nil {
 			return err
@@ -205,6 +263,22 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 		}
 		report.Actions = append(report.Actions, Action{Path: cfg.projectJSONPath, Action: "worktrail-json-merged"})
 	}
+	jsons := cfg.userJSONs
+	if scope == "project" {
+		jsons = cfg.projectJSONs
+		if len(jsons) > 0 {
+			if err := store.EnsureProjectGitignore(paths.Env{ProjectRoot: filepath.Dir(filepath.Dir(jsons[0].path))}); err != nil {
+				return err
+			}
+			report.Actions = append(report.Actions, Action{Path: filepath.Join(filepath.Dir(filepath.Dir(jsons[0].path)), ".gitignore"), Action: "gitignore-managed-block-installed"})
+		}
+	}
+	for _, jt := range jsons {
+		if err := mergeJSONTemplate(jt.path, jt.template); err != nil {
+			return err
+		}
+		report.Actions = append(report.Actions, Action{Path: jt.path, Action: "worktrail-json-merged"})
+	}
 	return nil
 }
 
@@ -223,6 +297,16 @@ func uninstallScope(cfg integrationConfig, scope string, report *Report) error {
 		}
 		report.Actions = append(report.Actions, Action{Path: rootFile, Action: "managed-block-removed"})
 	}
+	ruleFile := cfg.userRuleFile
+	if scope == "project" {
+		ruleFile = cfg.projectRuleFile
+	}
+	if ruleFile != "" {
+		if err := removeSkillManaged(ruleFile); err != nil {
+			return err
+		}
+		report.Actions = append(report.Actions, Action{Path: ruleFile, Action: "managed-block-removed"})
+	}
 	for _, skill := range skills {
 		path := filepath.Join(skillRoot, skill, "SKILL.md")
 		if err := removeSkillManaged(path); err != nil {
@@ -235,6 +319,16 @@ func uninstallScope(cfg integrationConfig, scope string, report *Report) error {
 			return err
 		}
 		report.Actions = append(report.Actions, Action{Path: cfg.projectJSONPath, Action: "worktrail-json-removed"})
+	}
+	jsons := cfg.userJSONs
+	if scope == "project" {
+		jsons = cfg.projectJSONs
+	}
+	for _, jt := range jsons {
+		if err := removeJSONTemplate(jt.path, jt.template); err != nil {
+			return err
+		}
+		report.Actions = append(report.Actions, Action{Path: jt.path, Action: "worktrail-json-removed"})
 	}
 	return nil
 }
@@ -251,15 +345,38 @@ func doctorScope(cfg integrationConfig, scope string, report *Report) {
 	if rootFile != "" {
 		report.Checks = append(report.Checks, managedCheck(scope+" root instructions", rootFile))
 	}
+	ruleFile := cfg.userRuleFile
+	if scope == "project" {
+		ruleFile = cfg.projectRuleFile
+	}
+	if ruleFile != "" {
+		report.Checks = append(report.Checks, skillCheck(scope+" rule worktrail", ruleFile))
+	}
 	for _, skill := range skills {
-		path := filepath.Join(skillRoot, skill, "SKILL.md")
-		report.Checks = append(report.Checks, skillCheck(scope+" skill "+skill, path))
+		if cfg.tool == ToolCursor {
+			report.Checks = append(report.Checks, cursorSkillDoctorCheck(cfg, scope+" skill "+skill, skill, skillRoot))
+		} else {
+			path := filepath.Join(skillRoot, skill, "SKILL.md")
+			report.Checks = append(report.Checks, skillCheck(scope+" skill "+skill, path))
+		}
 	}
 	if scope == "project" && cfg.projectJSONPath != "" {
 		projectRoot := filepath.Dir(filepath.Dir(cfg.projectJSONPath))
 		report.Checks = append(report.Checks, hashManagedCheck(scope+" gitignore", filepath.Join(projectRoot, ".gitignore")))
 		ok, note := jsonHasWorktrail(cfg.projectJSONPath)
 		report.Checks = append(report.Checks, Check{Name: scope + " hooks/settings", Path: cfg.projectJSONPath, OK: ok, Note: note})
+	}
+	jsons := cfg.userJSONs
+	if scope == "project" {
+		jsons = cfg.projectJSONs
+		if len(jsons) > 0 {
+			projectRoot := filepath.Dir(filepath.Dir(jsons[0].path))
+			report.Checks = append(report.Checks, hashManagedCheck(scope+" gitignore", filepath.Join(projectRoot, ".gitignore")))
+		}
+	}
+	for _, jt := range jsons {
+		ok, note := jsonHasTemplate(jt.path, jt.template)
+		report.Checks = append(report.Checks, Check{Name: scope + " " + filepath.Base(jt.path), Path: jt.path, OK: ok, Note: note})
 	}
 }
 
@@ -346,10 +463,20 @@ func mergeJSONTemplate(path, templatePath string) error {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	mergeJSONValue(current, managed)
+	return writeJSONObject(path, current)
+}
+
+func mergeJSONValue(current, managed map[string]any) {
 	for key, value := range managed {
+		managedMap, managedOK := value.(map[string]any)
+		currentMap, currentOK := current[key].(map[string]any)
+		if managedOK && currentOK {
+			mergeJSONValue(currentMap, managedMap)
+			continue
+		}
 		current[key] = value
 	}
-	return writeJSONObject(path, current)
 }
 
 func removeJSONWorktrail(path string) error {
@@ -369,6 +496,78 @@ func removeJSONWorktrail(path string) error {
 	}
 	delete(current, "worktrail")
 	return writeJSONObject(path, current)
+}
+
+func removeJSONTemplate(path, templatePath string) error {
+	body, err := wtmpl.Read(templatePath)
+	if err != nil {
+		return err
+	}
+	var managed map[string]any
+	if err := json.Unmarshal([]byte(body), &managed); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	current := map[string]any{}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(data, &current); err != nil {
+		return err
+	}
+	removeJSONValue(current, managed)
+	return writeJSONObject(path, current)
+}
+
+func removeJSONValue(current, managed map[string]any) {
+	for key, value := range managed {
+		if key == "version" {
+			continue
+		}
+		switch managedValue := value.(type) {
+		case map[string]any:
+			if currentMap, ok := current[key].(map[string]any); ok {
+				removeJSONValue(currentMap, managedValue)
+				if len(currentMap) == 0 {
+					delete(current, key)
+				}
+			}
+		case []any:
+			if currentSlice, ok := current[key].([]any); ok {
+				current[key] = removeJSONSliceItems(currentSlice, managedValue)
+				if len(current[key].([]any)) == 0 {
+					delete(current, key)
+				}
+			}
+		default:
+			delete(current, key)
+		}
+	}
+}
+
+func removeJSONSliceItems(current, managed []any) []any {
+	managedSet := map[string]bool{}
+	for _, item := range managed {
+		managedSet[canonicalJSON(item)] = true
+	}
+	next := current[:0]
+	for _, item := range current {
+		if !managedSet[canonicalJSON(item)] {
+			next = append(next, item)
+		}
+	}
+	return next
+}
+
+func canonicalJSON(value any) string {
+	data, _ := json.Marshal(value)
+	return string(data)
 }
 
 func writeJSONObject(path string, value map[string]any) error {
@@ -447,9 +646,128 @@ func jsonHasWorktrail(path string) (bool, string) {
 	return true, "worktrail key present"
 }
 
+func jsonHasTemplate(path, templatePath string) (bool, string) {
+	body, err := wtmpl.Read(templatePath)
+	if err != nil {
+		return false, err.Error()
+	}
+	var managed map[string]any
+	if err := json.Unmarshal([]byte(body), &managed); err != nil {
+		return false, err.Error()
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err.Error()
+	}
+	current := map[string]any{}
+	if err := json.Unmarshal(data, &current); err != nil {
+		return false, err.Error()
+	}
+	if !jsonContains(current, managed) {
+		return false, "missing worktrail managed JSON entries"
+	}
+	return true, "worktrail managed JSON entries present"
+}
+
+func jsonContains(current, managed map[string]any) bool {
+	for key, value := range managed {
+		currentValue, ok := current[key]
+		if !ok {
+			return false
+		}
+		switch managedValue := value.(type) {
+		case map[string]any:
+			currentMap, ok := currentValue.(map[string]any)
+			if !ok || !jsonContains(currentMap, managedValue) {
+				return false
+			}
+		case []any:
+			currentSlice, ok := currentValue.([]any)
+			if !ok {
+				return false
+			}
+			for _, item := range managedValue {
+				if !jsonSliceContains(currentSlice, item) {
+					return false
+				}
+			}
+		default:
+			if canonicalJSON(currentValue) != canonicalJSON(managedValue) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func jsonSliceContains(slice []any, item any) bool {
+	want := canonicalJSON(item)
+	for _, current := range slice {
+		if canonicalJSON(current) == want {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeOptions(opts Options) Options {
 	if !opts.User && !opts.Project {
 		return Options{User: true}
 	}
 	return opts
+}
+
+func cursorSkillVisible(cfg integrationConfig, skill, nativeRoot string) bool {
+	for _, root := range cfg.visibleSkillRoots {
+		if root == nativeRoot {
+			continue
+		}
+		if isManagedSkill(filepath.Join(root, skill, "SKILL.md")) {
+			return true
+		}
+	}
+	return false
+}
+
+func cursorVisibleSkillPath(cfg integrationConfig, skill, nativeRoot string) string {
+	for _, root := range cfg.visibleSkillRoots {
+		if root == nativeRoot {
+			continue
+		}
+		path := filepath.Join(root, skill, "SKILL.md")
+		if isManagedSkill(path) {
+			return path
+		}
+	}
+	return filepath.Join(nativeRoot, skill, "SKILL.md")
+}
+
+func cursorSkillDoctorCheck(cfg integrationConfig, name, skill, nativeRoot string) Check {
+	var managedPaths []string
+	for _, root := range cfg.visibleSkillRoots {
+		path := filepath.Join(root, skill, "SKILL.md")
+		if isManagedSkill(path) {
+			managedPaths = append(managedPaths, path)
+		}
+	}
+	if len(managedPaths) == 0 {
+		return Check{Name: name, Path: filepath.Join(nativeRoot, skill, "SKILL.md"), OK: false, Note: "missing Cursor-visible Worktrail skill"}
+	}
+	note := "managed skill visible"
+	if len(managedPaths) > 1 {
+		note = "warning: duplicate Cursor-visible Worktrail skills: " + strings.Join(managedPaths, ", ")
+	} else if !strings.HasPrefix(managedPaths[0], nativeRoot+string(os.PathSeparator)) {
+		note = "managed skill visible via compatible root: " + managedPaths[0]
+	}
+	return Check{Name: name, Path: managedPaths[0], OK: true, Note: note}
+}
+
+func isManagedSkill(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	text := string(data)
+	_, _, hasFrontmatter := splitSkillDocument(text)
+	return hasFrontmatter && strings.Contains(text, util.ManagedBegin) && strings.Contains(text, util.ManagedEnd)
 }

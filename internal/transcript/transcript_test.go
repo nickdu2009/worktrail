@@ -37,6 +37,13 @@ func TestParseCodexClaudeJSONLAndMarkdown(t *testing.T) {
 	if len(claudeTranscript.Messages) != 2 || claudeTranscript.Messages[0].Role != "user" {
 		t.Fatalf("unexpected claude transcript: %+v", claudeTranscript)
 	}
+	cursorTranscript, err := ParseCursorJSONL(strings.NewReader(`{"role":"user","content":"Cursor task"}` + "\n" + `{"role":"assistant","content":"Cursor done"}`))
+	if err != nil {
+		t.Fatalf("ParseCursorJSONL() error = %v", err)
+	}
+	if len(cursorTranscript.Messages) != 2 || cursorTranscript.Messages[1].Content != "Cursor done" {
+		t.Fatalf("unexpected cursor transcript: %+v", cursorTranscript)
+	}
 
 	md, err := ParseMarkdown("codex", strings.NewReader("## User\nHello\n\n## Assistant\nHi"))
 	if err != nil {

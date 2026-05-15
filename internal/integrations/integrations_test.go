@@ -284,3 +284,123 @@ func TestInstallClaudeUserAndProject(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallCursorProjectManagesNativeConfigWithoutIgnoringCursor(t *testing.T) {
+	env := testEnv(t)
+	mcpPath := filepath.Join(env.ProjectRoot, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(mcpPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{"existing":{"command":"existing"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Install(env, ToolCursor, Options{Project: true})
+	if err != nil {
+		t.Fatalf("Install cursor: %v", err)
+	}
+	if len(report.Actions) == 0 {
+		t.Fatal("expected install actions")
+	}
+	for _, path := range []string{
+		filepath.Join(env.ProjectRoot, ".cursor", "mcp.json"),
+		filepath.Join(env.ProjectRoot, ".cursor", "hooks.json"),
+		filepath.Join(env.ProjectRoot, ".cursor", "rules", "worktrail.mdc"),
+		filepath.Join(env.ProjectRoot, ".cursor", "skills", "worktrail-state", "SKILL.md"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+		if strings.HasSuffix(path, ".mdc") || strings.HasSuffix(path, "SKILL.md") {
+			if !strings.Contains(string(data), util.ManagedBegin) {
+				t.Fatalf("expected managed block in %s", path)
+			}
+		}
+	}
+	raw, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := map[string]any{}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	servers := cfg["mcpServers"].(map[string]any)
+	if _, ok := servers["existing"]; !ok {
+		t.Fatalf("existing MCP server was not preserved: %s", raw)
+	}
+	if _, ok := servers["worktrail"]; !ok {
+		t.Fatalf("worktrail MCP server missing: %s", raw)
+	}
+	gitignore, err := os.ReadFile(filepath.Join(env.ProjectRoot, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(gitignore), ".cursor/") {
+		t.Fatalf("project .gitignore must not ignore all .cursor: %s", gitignore)
+	}
+
+	doctor, err := Doctor(env, ToolCursor, Options{Project: true})
+	if err != nil {
+		t.Fatalf("Doctor cursor: %v", err)
+	}
+	for _, check := range doctor.Checks {
+		if !check.OK {
+			t.Fatalf("doctor check failed: %+v", check)
+		}
+	}
+}
+
+func TestInstallCursorCoexistsWithCodexClaudeVisibleSkills(t *testing.T) {
+	env := testEnv(t)
+	if _, err := InstallCodex(env, Options{User: true}); err != nil {
+		t.Fatalf("InstallCodex: %v", err)
+	}
+	if _, err := InstallClaude(env, Options{User: true}); err != nil {
+		t.Fatalf("InstallClaude: %v", err)
+	}
+	if _, err := Install(env, ToolCursor, Options{Project: true}); err != nil {
+		t.Fatalf("Install cursor: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.ProjectRoot, ".cursor", "skills", "worktrail-context", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("cursor install should reuse visible managed skills instead of copying duplicates, err=%v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(env.Home, ".codex", "skills", "worktrail-context", "SKILL.md"),
+		filepath.Join(env.Home, ".claude", "skills", "worktrail-context", "SKILL.md"),
+		filepath.Join(env.ProjectRoot, ".cursor", "mcp.json"),
+		filepath.Join(env.ProjectRoot, ".cursor", "hooks.json"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected coexistence file %s: %v", path, err)
+		}
+	}
+	doctor, err := Doctor(env, ToolCursor, Options{Project: true})
+	if err != nil {
+		t.Fatalf("Doctor cursor: %v", err)
+	}
+	hasWarning := false
+	for _, check := range doctor.Checks {
+		if !check.OK {
+			t.Fatalf("duplicate visible skills should not fail doctor: %+v", check)
+		}
+		if strings.Contains(check.Note, "warning: duplicate Cursor-visible Worktrail skills") {
+			hasWarning = true
+		}
+	}
+	if !hasWarning {
+		t.Fatalf("expected duplicate skill warning: %+v", doctor.Checks)
+	}
+	if _, err := Uninstall(env, ToolCursor, Options{Project: true}); err != nil {
+		t.Fatalf("Uninstall cursor: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(env.Home, ".codex", "skills", "worktrail-context", "SKILL.md"),
+		filepath.Join(env.Home, ".claude", "skills", "worktrail-context", "SKILL.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("cursor uninstall removed other tool skill %s: %v", path, err)
+		}
+	}
+}

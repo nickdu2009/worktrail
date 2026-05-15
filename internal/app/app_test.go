@@ -64,6 +64,35 @@ func TestExtractionCandidateIDIncludesSourceAndOrdinal(t *testing.T) {
 	}
 }
 
+func TestInstallAllIncludesCursorAndPreservesCompatibleSkills(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", filepath.Join(home, ".worktrail"))
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	t.Setenv("HOME", home)
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"install", "all", "--project"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run install all: %v stderr=%s", err, errb.String())
+	}
+	for _, path := range []string{
+		filepath.Join(project, ".codex", "hooks.json"),
+		filepath.Join(project, ".claude", "settings.json"),
+		filepath.Join(project, ".cursor", "mcp.json"),
+		filepath.Join(project, ".cursor", "hooks.json"),
+		filepath.Join(project, ".cursor", "rules", "worktrail.mdc"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected install all file %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(project, ".cursor", "skills", "worktrail-state", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatalf("cursor project skills should be skipped when Claude project skills are visible, err=%v", err)
+	}
+}
+
 func TestImportCodexDiscoversAndExtractsProjectSessions(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
@@ -133,6 +162,78 @@ func TestImportCodexDiscoversAndExtractsProjectSessions(t *testing.T) {
 	}
 	if !bytes.Contains(candidateBody, []byte(`"target_path": "imports/transcripts/codex-01-session.md"`)) {
 		t.Fatalf("candidate target is not transcript import path:\n%s", candidateBody)
+	}
+}
+
+func TestImportCursorUsesObservedRegistryAndDoesNotScanLogs(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcriptPath := filepath.Join(t.TempDir(), "cursor-session.jsonl")
+	body := `{"role":"user","content":"Capture Cursor workflow."}` + "\n" +
+		`{"role":"assistant","content":"Keep Cursor evidence pending."}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"init"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run init: %v stderr=%s", err, errb.String())
+	}
+	observedDir := filepath.Join(project, ".worktrail", "raw", "cursor")
+	writeTextFile(t, filepath.Join(observedDir, "observed-test.metadata.json"), `{
+  "schema": "worktrail.cursor_observed_transcript.v1",
+  "id": "observed-test",
+  "source": "cursor",
+  "path": "`+filepath.ToSlash(transcriptPath)+`",
+  "path_basename": "cursor-session.jsonl",
+  "created_at": "2026-05-15T00:00:00Z"
+}
+`)
+	out.Reset()
+	if err := Run(context.Background(), []string{"import", "cursor", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run import cursor dry-run: %v stderr=%s", err, errb.String())
+	}
+	var dry importReport
+	if err := json.Unmarshal(out.Bytes(), &dry); err != nil {
+		t.Fatal(err)
+	}
+	if dry.Matched != 1 || dry.Observed != 1 || !dry.DryRun {
+		t.Fatalf("unexpected cursor dry-run report: %+v", dry)
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"import", "cursor", "--all", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run import cursor --all: %v stderr=%s", err, errb.String())
+	}
+	var report importReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Matched != 1 || report.Synced != 1 || report.Extracted != 1 || report.Blocked != 0 || report.DryRun {
+		t.Fatalf("unexpected cursor import report: %+v", report)
+	}
+	if matches, err := filepath.Glob(filepath.Join(project, ".worktrail", "raw", "cursor", "observed-*.metadata.json")); err != nil || len(matches) != 1 {
+		t.Fatalf("observed metadata should remain distinct, matches=%v err=%v", matches, err)
+	}
+	if matches, err := filepath.Glob(filepath.Join(project, ".worktrail", "raw", "cursor", "cursor-session-*.metadata.json")); err != nil || len(matches) != 1 {
+		t.Fatalf("synced metadata should be distinct, matches=%v err=%v", matches, err)
+	}
+	candidates, err := filepath.Glob(filepath.Join(project, ".worktrail", "candidates", "project", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("candidate files = %d, want 1", len(candidates))
+	}
+	candidateBody, err := os.ReadFile(candidates[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(candidateBody, []byte(`"candidate_type": "transcript_notes"`)) {
+		t.Fatalf("candidate is not transcript notes:\n%s", candidateBody)
 	}
 }
 

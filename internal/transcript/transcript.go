@@ -47,6 +47,10 @@ func ParseClaudeJSONL(r io.Reader) (Transcript, error) {
 	return parseJSONL("claude", r)
 }
 
+func ParseCursorJSONL(r io.Reader) (Transcript, error) {
+	return parseJSONL("cursor", r)
+}
+
 func ParseMarkdown(source string, r io.Reader) (Transcript, error) {
 	b, err := io.ReadAll(r)
 	if err != nil {
@@ -307,6 +311,8 @@ func inferSource(path string) string {
 		return "codex"
 	case strings.Contains(name, "claude"):
 		return "claude"
+	case strings.Contains(name, "cursor"):
+		return "cursor"
 	default:
 		return ""
 	}

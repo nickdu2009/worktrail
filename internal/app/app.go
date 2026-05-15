@@ -106,6 +106,7 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  worktrail context <task>")
 	fmt.Fprintln(out, "  worktrail context --evidence <task>")
 	fmt.Fprintln(out, "  worktrail import codex [--all]")
+	fmt.Fprintln(out, "  worktrail import cursor [--file path] [--all]")
 	fmt.Fprintln(out, "  worktrail distill --pending [--limit N|--all] [--write-pack file]")
 	fmt.Fprintln(out, "  worktrail candidates create --help")
 	fmt.Fprintln(out, "  worktrail review [--semantic|--evidence|--all]")

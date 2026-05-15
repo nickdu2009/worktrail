@@ -150,7 +150,7 @@ func runExtract(_ context.Context, env paths.Env, ioctx IO, args []string) error
 	scope := flagValue(flags, "scope", "project")
 	providerName := flagValue(flags, "provider", "manual")
 	source := flagValue(flags, "source", "")
-	if source == "codex" || source == "claude" {
+	if source == "codex" || source == "claude" || source == "cursor" {
 		providerName = "manual"
 	}
 	root, err := env.ScopeRoot(scope)
@@ -234,6 +234,8 @@ func transcriptText(source, path string) (string, error) {
 		tr, err = transcript.ParseMarkdown(source, f)
 	case source == "claude":
 		tr, err = transcript.ParseClaudeJSONL(f)
+	case source == "cursor":
+		tr, err = transcript.ParseCursorJSONL(f)
 	default:
 		tr, err = transcript.ParseCodexJSONL(f)
 	}
@@ -264,7 +266,7 @@ func latestTranscriptPath(root, source string) (string, error) {
 	var newest os.DirEntry
 	var newestTime int64
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".metadata.json") {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".metadata.json") || strings.HasPrefix(entry.Name(), "observed-") {
 			continue
 		}
 		info, err := entry.Info()

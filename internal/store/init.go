@@ -23,7 +23,7 @@ func InitUser(env paths.Env) error {
 	dirs := []string{
 		"profile", "workflows", "prompts", "lessons",
 		"state/active", "state/checkpoints", "state/archived",
-		"candidates/user", "raw/codex", "raw/claude",
+		"candidates/user", "raw/codex", "raw/claude", "raw/cursor",
 		"exports", "index", "logs",
 	}
 	if err := makeTree(env.UserRoot, dirs); err != nil {
@@ -60,7 +60,7 @@ func InitProject(env paths.Env) error {
 		"architecture", "decisions", "handoffs", "rules", "prompts",
 		"integrations", "validation", "glossary",
 		"state/active", "state/checkpoints", "state/archived",
-		"candidates/project", "raw/codex", "raw/claude",
+		"candidates/project", "raw/codex", "raw/claude", "raw/cursor",
 		"exports", "index", "logs",
 	}
 	if err := makeTree(env.ProjectWT, dirs); err != nil {

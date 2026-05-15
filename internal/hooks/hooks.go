@@ -2,6 +2,8 @@ package hooks
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -40,26 +42,38 @@ func Run(ctx context.Context, env paths.Env, tool, event string, in io.Reader, o
 	if err := ensureWorktrail(root); err != nil {
 		return err
 	}
+	if tool == "cursor" {
+		if observed, err := writeCursorObservedTranscript(env, payload); err != nil {
+			warnings = append(warnings, "cursor transcript registry: "+err.Error())
+			result.Warnings = warnings
+		} else if observed != "" {
+			result.Warnings = warnings
+			result.Warnings = append(result.Warnings, "cursor transcript observed: "+observed)
+		} else {
+			result.Warnings = warnings
+		}
+	}
 	if err := wlog.Append(root, "hook.run", "", actor, map[string]any{"tool": tool, "event": event, "payload": payload}); err != nil {
 		return err
 	}
 
-	switch event {
+	eventKey := normalizeEvent(event)
+	switch eventKey {
 	case "stop", "pre-compact", "post-compact", "session-end":
-		statePath, err := writeState(env, tool, event, payload)
+		statePath, err := writeState(env, tool, eventKey, payload)
 		if err != nil {
 			return err
 		}
 		result.State = statePath
-		if event == "pre-compact" || event == "post-compact" {
-			checkpoint, err := writeCheckpoint(env, tool, event, payload, statePath)
+		if eventKey == "pre-compact" || eventKey == "post-compact" {
+			checkpoint, err := writeCheckpoint(env, tool, eventKey, payload, statePath)
 			if err != nil {
 				return err
 			}
 			result.Checkpoint = checkpoint
 		}
-		if event == "stop" || event == "session-end" {
-			candidate, err := writeHandoffCandidate(env, tool, event, payload)
+		if eventKey == "stop" || eventKey == "session-end" {
+			candidate, err := writeHandoffCandidate(env, tool, eventKey, payload)
 			if err != nil {
 				return err
 			}
@@ -103,6 +117,7 @@ func ensureWorktrail(root string) error {
 		filepath.Join(root, "state", "active"),
 		filepath.Join(root, "state", "checkpoints"),
 		filepath.Join(root, "candidates", "project"),
+		filepath.Join(root, "raw", "cursor"),
 		filepath.Join(root, "logs"),
 	)
 }
@@ -110,7 +125,7 @@ func ensureWorktrail(root string) error {
 func writeState(env paths.Env, tool, event string, payload map[string]any) (string, error) {
 	now := time.Now()
 	title := titleFromPayload(payload, event)
-	session := sessionFromPayload(payload)
+	session := sessionFromPayload(tool, payload)
 	state := model.State{
 		Schema:         model.SchemaState,
 		ID:             "st_" + now.Format("20060102_150405") + "_" + util.Slug(title),
@@ -124,7 +139,7 @@ func writeState(env paths.Env, tool, event string, payload map[string]any) (stri
 		UpdatedAt:      now,
 		Tags:           []string{tool, event},
 	}
-	body := stateBody(title, tool, event, payload)
+	body := stateBody(title, tool, event, durablePayload(tool, payload))
 	data, err := store.RenderMarkdown(state, body)
 	if err != nil {
 		return "", err
@@ -142,6 +157,7 @@ func writeState(env paths.Env, tool, event string, payload map[string]any) (stri
 func writeCheckpoint(env paths.Env, tool, event string, payload map[string]any, statePath string) (string, error) {
 	now := time.Now()
 	title := titleFromPayload(payload, event)
+	safePayload := durablePayload(tool, payload)
 	meta := map[string]any{
 		"schema":      model.SchemaState,
 		"id":          "chk_" + now.Format("20060102_150405") + "_" + util.Slug(title),
@@ -157,7 +173,7 @@ func writeCheckpoint(env paths.Env, tool, event string, payload map[string]any, 
 	body := "# Checkpoint: " + title + "\n\n" +
 		"## Source State\n" + statePath + "\n\n" +
 		"## Event\n" + event + "\n\n" +
-		"## Payload Summary\n" + payloadSummary(payload) + "\n"
+		"## Payload Summary\n" + payloadSummary(safePayload) + "\n"
 	data, err := store.RenderMarkdown(meta, body)
 	if err != nil {
 		return "", err
@@ -175,7 +191,8 @@ func writeCheckpoint(env paths.Env, tool, event string, payload map[string]any, 
 func writeHandoffCandidate(env paths.Env, tool, event string, payload map[string]any) (string, error) {
 	now := time.Now()
 	title := titleFromPayload(payload, event)
-	session := sessionFromPayload(payload)
+	session := sessionFromPayload(tool, payload)
+	safePayload := durablePayload(tool, payload)
 	candidate := model.Candidate{
 		Schema:          model.SchemaCandidate,
 		ID:              "cand_" + now.Format("20060102_150405") + "_" + util.Slug(title),
@@ -195,7 +212,7 @@ func writeHandoffCandidate(env paths.Env, tool, event string, payload map[string
 	body := "# Candidate: " + title + "\n\n" +
 		"## Proposed Content\n" +
 		"Draft handoff generated from the " + tool + " `" + event + "` hook.\n\n" +
-		"## Source Evidence\n" + payloadSummary(payload) + "\n\n" +
+		"## Source Evidence\n" + payloadSummary(safePayload) + "\n\n" +
 		"## Review Required\n" +
 		"This candidate is pending. Hooks never promote, merge, discard, restore, retire, delete, or replace knowledge.\n"
 	data, err := store.RenderMarkdown(candidate, body)
@@ -233,9 +250,12 @@ func titleFromPayload(payload map[string]any, fallback string) string {
 	return "Worktrail " + fallback
 }
 
-func sessionFromPayload(payload map[string]any) string {
+func sessionFromPayload(tool string, payload map[string]any) string {
 	for _, key := range []string{"session_id", "conversation_id", "transcript_id"} {
 		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
+			if tool == "cursor" {
+				return "cursor:" + shortHash(value)
+			}
 			return strings.TrimSpace(value)
 		}
 	}
@@ -243,10 +263,14 @@ func sessionFromPayload(payload map[string]any) string {
 }
 
 func sourceTool(tool string) string {
-	if tool == "claude" {
+	switch tool {
+	case "claude":
 		return "claude-code"
+	case "cursor":
+		return "cursor"
+	default:
+		return "codex"
 	}
-	return "codex"
 }
 
 func optionalList(value string) []string {
@@ -269,9 +293,9 @@ func payloadSummary(payload map[string]any) string {
 
 func Main(ctx context.Context, env paths.Env, args []string, in io.Reader, out io.Writer) error {
 	if len(args) != 2 {
-		return fmt.Errorf("usage: hook <codex|claude> <event>")
+		return fmt.Errorf("usage: hook <codex|claude|cursor> <event>")
 	}
-	if args[0] != "codex" && args[0] != "claude" {
+	if args[0] != "codex" && args[0] != "claude" && args[0] != "cursor" {
 		return fmt.Errorf("unknown hook tool %q", args[0])
 	}
 	if strings.TrimSpace(args[1]) == "" {
@@ -287,4 +311,105 @@ func Main(ctx context.Context, env paths.Env, args []string, in io.Reader, out i
 		return nil
 	}
 	return Run(ctx, env, args[0], args[1], in, out)
+}
+
+func normalizeEvent(event string) string {
+	switch event {
+	case "preCompact":
+		return "pre-compact"
+	case "postCompact":
+		return "post-compact"
+	case "sessionEnd":
+		return "session-end"
+	default:
+		return event
+	}
+}
+
+func durablePayload(tool string, payload map[string]any) map[string]any {
+	if tool != "cursor" {
+		return payload
+	}
+	safe := map[string]any{}
+	for key, value := range payload {
+		switch key {
+		case "user_email":
+			continue
+		case "transcript_path":
+			if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
+				safe[key] = filepath.Base(s)
+			}
+		case "workspace_roots":
+			safe[key] = workspaceRootBasenames(value)
+		case "conversation_id", "session_id", "generation_id", "transcript_id":
+			if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
+				safe[key] = shortHash(s)
+			}
+		default:
+			safe[key] = value
+		}
+	}
+	return safe
+}
+
+func workspaceRootBasenames(value any) any {
+	items, ok := value.([]any)
+	if !ok {
+		return value
+	}
+	roots := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+			roots = append(roots, filepath.Base(s))
+		}
+	}
+	return roots
+}
+
+func writeCursorObservedTranscript(env paths.Env, payload map[string]any) (string, error) {
+	path, _ := payload["transcript_path"].(string)
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil
+	}
+	now := time.Now().UTC()
+	idSource := firstPayloadString(payload, "conversation_id", "session_id", "generation_id", "transcript_id")
+	if idSource == "" {
+		idSource = path
+	}
+	id := "observed-" + shortHash(idSource)
+	meta := map[string]any{
+		"schema":        "worktrail.cursor_observed_transcript.v1",
+		"id":            id,
+		"source":        "cursor",
+		"path":          path,
+		"path_basename": filepath.Base(path),
+		"created_at":    now,
+	}
+	if session := firstPayloadString(payload, "conversation_id", "session_id"); session != "" {
+		meta["source_session"] = "cursor:" + shortHash(session)
+	}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	out := filepath.Join(env.ProjectWT, "raw", "cursor", id+".metadata.json")
+	if err := util.AtomicWrite(out, append(data, '\n'), 0o600); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func firstPayloadString(payload map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func shortHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])[:12]
 }

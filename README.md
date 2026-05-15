@@ -1,6 +1,6 @@
 # Worktrail
 
-`worktrail` is a local-first AI coding session knowledge and state layer for Codex and Claude Code.
+`worktrail` is a local-first AI coding session knowledge and state layer for Codex, Claude Code, and Cursor.
 
 The command name is `worktrail`; the Go module path is `github.com/nickdu2009/worktrail`.
 
@@ -35,6 +35,18 @@ worktrail context "current task"
 `worktrail review plan --format json` emits the read-only agent contract `worktrail.review.plan.v1`. It groups pending semantic candidates into deterministic recommendations: `promote`, `merge`, `discard`, or `needs_human_review`. The command never changes candidate state or formal knowledge; state-changing commands still require explicit user confirmation.
 
 `worktrail context <task>` hides pending transcript evidence by default and reports how many evidence candidates are hidden. Use `worktrail context --evidence <task>` when the raw transcript notes themselves need to be included in the Pending Candidates section.
+
+## Agent integration support
+
+Worktrail supports multiple local agent surfaces in the same repository. `worktrail install all` installs the supported local integrations: Codex, Claude Code, and Cursor. Use explicit targets such as `worktrail install codex` or `worktrail install claude` when only a subset should be installed.
+
+Current capability matrix:
+
+- Codex: install, doctor, uninstall, skills, hooks, MCP config, current-project `import codex` discovery, and explicit transcript `sync`/`extract`.
+- Claude Code: install, doctor, uninstall, skills, hooks/settings, and explicit transcript `sync claude <file>` / `extract --source claude`. There is no automatic `import claude` discovery yet.
+- Cursor: install, doctor, uninstall, MCP, rules, hooks, Cursor-visible skills, safe observed transcript metadata, and `import cursor` from explicit `--file` paths or Worktrail-observed transcript metadata. Cursor import does not scan undocumented private Cursor directories.
+
+Cursor can see Worktrail skills through compatible roots such as `.agents/skills`, `.codex/skills`, and `.claude/skills`. `install cursor` reuses visible managed skills by default and does not duplicate them into `.cursor/skills` unless no visible copy exists; `doctor cursor` reports duplicate visible skills as warnings, not failures.
 
 ## Low-intervention maintenance
 

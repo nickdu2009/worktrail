@@ -102,3 +102,65 @@ func TestClaudePreCompactCreatesCheckpoint(t *testing.T) {
 		t.Fatalf("expected one checkpoint, got %d", len(checkpoints))
 	}
 }
+
+func TestCursorStopSanitizesDurablePayloadAndRecordsObservedTranscript(t *testing.T) {
+	env := hookEnv(t)
+	transcript := filepath.Join(t.TempDir(), "cursor-transcript.jsonl")
+	if err := os.WriteFile(transcript, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{
+  "conversation_id": "cursor-conversation-secret",
+  "generation_id": "cursor-generation-secret",
+  "user_email": "person@example.com",
+  "workspace_roots": ["` + filepath.ToSlash(env.ProjectRoot) + `"],
+  "transcript_path": "` + filepath.ToSlash(transcript) + `",
+  "status": "completed"
+}`
+	var out bytes.Buffer
+	if err := Run(context.Background(), env, "cursor", "stop", strings.NewReader(payload), &out); err != nil {
+		t.Fatalf("Run cursor hook: %v", err)
+	}
+	if !strings.Contains(out.String(), "cursor transcript observed") {
+		t.Fatalf("expected observed transcript warning in output: %s", out.String())
+	}
+	observed, err := filepath.Glob(filepath.Join(env.ProjectWT, "raw", "cursor", "observed-*.metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observed) != 1 {
+		t.Fatalf("observed registry files = %d, want 1", len(observed))
+	}
+	registry, err := os.ReadFile(observed[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(registry), filepath.ToSlash(transcript)) {
+		t.Fatalf("registry should keep private transcript path for local import:\n%s", registry)
+	}
+	candidates, err := filepath.Glob(filepath.Join(env.ProjectWT, "candidates", "project", "cand_*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected one candidate, got %d", len(candidates))
+	}
+	candidate, err := os.ReadFile(candidates[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(candidate)
+	for _, forbidden := range []string{
+		"person@example.com",
+		filepath.ToSlash(transcript),
+		"cursor-conversation-secret",
+		"cursor-generation-secret",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("durable candidate leaked %q:\n%s", forbidden, text)
+		}
+	}
+	if !strings.Contains(text, filepath.Base(transcript)) {
+		t.Fatalf("durable candidate should keep transcript basename only:\n%s", text)
+	}
+}

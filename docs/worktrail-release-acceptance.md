@@ -93,7 +93,8 @@ to the numbered requirement ids.
 Worktrail should be considered release-ready only when the primary workflows are
 validated end to end:
 
-- Fresh install can initialize a repository and install Codex and Claude skills.
+- Fresh install can initialize a repository and install Codex, Claude Code, and
+  Cursor integrations.
 - `doctor` can detect installed user skills and project configuration.
 - `context` can load user and project knowledge without leaking transcript body
   by default.
@@ -107,6 +108,19 @@ validated end to end:
   candidates.
 - `/worktrail-maintain` can guide a read-only maintenance pass and preserve
   scope in follow-up commands.
+
+Agent integration capability matrix:
+
+- Codex supports install/doctor/uninstall, skills, hooks, MCP configuration,
+  current-project `import codex` discovery, and explicit transcript
+  `sync`/`extract`.
+- Claude Code supports install/doctor/uninstall, skills, hooks/settings, and
+  explicit transcript `sync claude <file>` / `extract --source claude`; it does
+  not yet support automatic `worktrail import claude` discovery.
+- Cursor supports install/doctor/uninstall, MCP, rules, hooks, Cursor-visible
+  Worktrail skills, observed transcript metadata, and `import cursor` from
+  explicit `--file` paths or Worktrail-observed registry entries. It does not
+  scan undocumented private Cursor directories.
 
 Acceptance evidence has two layers:
 
