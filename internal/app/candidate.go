@@ -458,6 +458,7 @@ func printReviewHelp(out io.Writer) {
 	fmt.Fprintln(out, "       worktrail review apply-plan <plan.json> --confirm [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "By default, review shows pending semantic candidates and hides transcript_notes evidence plus non-semantic operational candidates.")
+	fmt.Fprintln(out, "Scope defaults to project; pass --scope user for user-level candidates.")
 	fmt.Fprintln(out, "Use review plan for the read-only agent contract grouped by recommended action.")
 	fmt.Fprintln(out, "Use --evidence to inspect transcript evidence, or --all to show every pending candidate.")
 	fmt.Fprintln(out, "When an applied target is missing, review suggests restore for accidental deletion or retire for intentional deletion.")

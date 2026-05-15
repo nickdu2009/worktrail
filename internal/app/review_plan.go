@@ -146,9 +146,20 @@ func runReviewApplyPlan(env wtpaths.Env, ioctx IO, args []string) error {
 	if plan.Schema != reviewPlanSchema {
 		return fmt.Errorf("unsupported review plan schema %q", plan.Schema)
 	}
-	scope := flagValue(flags, "scope", plan.Scope)
-	if scope == "" {
-		scope = "project"
+	planScope := strings.TrimSpace(plan.Scope)
+	if planScope == "" {
+		planScope = "project"
+	}
+	scope := planScope
+	if requestedScope, ok := flags["scope"]; ok {
+		requestedScope = strings.TrimSpace(requestedScope)
+		if requestedScope == "" || requestedScope == "true" {
+			return fmt.Errorf("worktrail review apply-plan --scope must be project or user")
+		}
+		if requestedScope != planScope {
+			return fmt.Errorf("review apply-plan scope mismatch: plan scope is %q but --scope %q was requested; omit --scope or rerun with `--scope %s`", planScope, requestedScope, planScope)
+		}
+		scope = requestedScope
 	}
 	report := applyReviewPlan(env, scope, plan)
 	if flagValue(flags, "format", "text") == "json" {
@@ -359,7 +370,7 @@ func buildReviewPlanItem(env wtpaths.Env, scope string, records []candidate.Reco
 	case "needs_human_review":
 		item.ReasonCodes = appendReviewPlanReasonCodes(item.ReasonCodes, "needs_human_confirmation")
 	}
-	item.Commands = reviewPlanCommands(rec.Meta.ID, item.RecommendedAction)
+	item.Commands = reviewPlanCommands(scope, rec.Meta.ID, item.RecommendedAction)
 	return item, nil
 }
 
@@ -548,15 +559,15 @@ func allReviewPlanSourcesUsable(statuses []reviewPlanSourceStatus) bool {
 	return true
 }
 
-func reviewPlanCommands(id, action string) []string {
-	commands := []string{"worktrail candidates diff " + id}
+func reviewPlanCommands(scope, id, action string) []string {
+	commands := []string{scopeAwareCommand(scope, "worktrail", "candidates", "diff", id)}
 	switch action {
 	case "promote":
-		commands = append(commands, "worktrail promote "+id)
+		commands = append(commands, scopeAwareCommand(scope, "worktrail", "promote", id))
 	case "merge":
-		commands = append(commands, "worktrail merge "+id)
+		commands = append(commands, scopeAwareCommand(scope, "worktrail", "merge", id))
 	case "discard":
-		commands = append(commands, "worktrail discard "+id)
+		commands = append(commands, scopeAwareCommand(scope, "worktrail", "discard", id))
 	}
 	return commands
 }
@@ -784,11 +795,13 @@ func printReviewPlanHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail review plan [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Builds a read-only agent review contract for pending semantic candidates.")
+	fmt.Fprintln(out, "Scope defaults to project; pass --scope user for user-level candidates.")
 }
 
 func printReviewApplyPlanHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail review apply-plan <plan.json> --confirm [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Applies promote, merge, and discard actions from a fresh worktrail.review.plan.v1 file.")
+	fmt.Fprintln(out, "When --scope is omitted, the plan scope is used; an explicit mismatched --scope is rejected.")
 	fmt.Fprintln(out, "Candidates with stale snapshots or needs_human_review are skipped without evidence cleanup.")
 }

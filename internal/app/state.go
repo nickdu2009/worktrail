@@ -226,6 +226,13 @@ func flagValue(flags map[string]string, key, def string) string {
 	return def
 }
 
+func scopeAwareCommand(scope string, parts ...string) string {
+	if scope == "user" {
+		parts = append(parts, "--scope", "user")
+	}
+	return strings.Join(parts, " ")
+}
+
 func firstArg(args []string, fallback string) string {
 	if len(args) > 0 {
 		return args[0]

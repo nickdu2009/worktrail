@@ -11,6 +11,41 @@ import (
 	"github.com/nickdu2009/worktrail/internal/model"
 )
 
+func TestDistillPendingSuggestsOtherScope(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "candidates", "create", "--scope", "user", "--id", "user-note", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/user-note.md", "--title", "User Evidence", "User evidence body.")
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"distill", "--pending", "--summary"}, nil, &out, &errb)
+	if err == nil {
+		t.Fatal("distill --pending without matching project evidence returned nil error")
+	}
+	for _, want := range []string{
+		"no pending transcript_notes candidates found in project scope",
+		"user scope has 1 matching candidate(s)",
+		"worktrail distill --pending --summary --scope user",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("scope hint missing %q in error %q", want, err.Error())
+		}
+	}
+
+	text := runApp(t, &out, &errb, "distill", "--pending", "--summary", "--scope", "user")
+	if !strings.Contains(text, "evidence_candidates: 1") || !strings.Contains(text, "candidate: user-note") {
+		t.Fatalf("user-scope distill summary unexpected:\n%s", text)
+	}
+}
+
 func TestDistillApplyTextGroupsReportItems(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")

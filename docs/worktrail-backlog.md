@@ -11,14 +11,18 @@ non-goals, behavior, and acceptance criteria.
 
 ## Pending
 
-- Define release acceptance, scope behavior, maintenance UX, knowledge quality,
-  apply-plan safety, and dogfood feedback requirements before the next
-  implementation round.
-  Requirements:
-  [worktrail-release-acceptance.md](worktrail-release-acceptance.md).
+No pending stable backlog requirements.
 
 ## Completed
 
+- Define and implement release acceptance, scope behavior, maintenance UX,
+  knowledge quality, apply-plan safety, and dogfood feedback requirements.
+  Requirements:
+  [worktrail-release-acceptance.md](worktrail-release-acceptance.md).
+  Validation:
+  [worktrail-release-validation-2026-05-15.md](worktrail-release-validation-2026-05-15.md)
+  and
+  [worktrail-release-validation-checklist.md](worktrail-release-validation-checklist.md).
 - Reduce user intervention in knowledge distillation by adding context
   maintenance hints, a distillation skill, batch review guidance,
   `review apply-plan --confirm`, and a maintenance workflow.

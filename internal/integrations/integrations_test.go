@@ -173,6 +173,10 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		"worktrail review plan --format json",
 		"Do not paste transcript evidence bodies",
 		"Do not commit the pack or proposal",
+		"rerun the exact suggested `--scope` command",
+		"Candidate summaries should explain reusable value",
+		"`target_path` values must be stable and type-appropriate",
+		"Do not automatically commit git changes",
 	} {
 		if !strings.Contains(string(distillSkill), want) {
 			t.Fatalf("distill skill missing %q:\n%s", want, distillSkill)
@@ -187,11 +191,14 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
+		"Run the read-only discovery chain without asking for confirmation first",
 		"worktrail context \"maintenance\"",
 		"worktrail distill --pending --summary",
 		"worktrail review plan --format json",
 		"worktrail evidence plan --format json",
 		"maintenance.next_steps",
+		"Treat those generated commands as authoritative",
+		"rerun the exact suggested `--scope` command",
 		"If the context suggests `--scope user`, keep that scope.",
 		"Do not automatically commit git changes",
 		"explicit user confirmation",
@@ -205,8 +212,10 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		"Do not include `transcript_notes` evidence or non-semantic operational candidates",
 		"show counts for each group",
 		"commands` array only for `promote`, `merge`, and `discard`",
+		"Preserve any `--scope` flags from the plan commands",
 		"Do not generate a state-changing command for `needs_human_review`",
-		"accepted batch",
+		"accepted batch and scope",
+		"Do not automatically commit git changes",
 		"worktrail review --evidence",
 		"worktrail review --all",
 		"worktrail retire <id> --reason <text>",

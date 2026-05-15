@@ -107,6 +107,45 @@ func TestEvidencePlanReportsReferenceLifecycle(t *testing.T) {
 	}
 }
 
+func TestEvidencePlanTextSuggestsOtherScope(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "candidates", "create", "--scope", "user", "--id", "user-note", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/user-note.md", "--title", "User Evidence", "User evidence body.")
+
+	text := runApp(t, &out, &errb, "evidence", "plan")
+	for _, want := range []string{
+		"Summary: total=0",
+		"No evidence lifecycle candidates matched in project scope",
+		"user scope has 1 matching candidate(s)",
+		"worktrail evidence plan --format json --scope user",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("evidence plan text missing %q:\n%s", want, text)
+		}
+	}
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"evidence", "plan", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run evidence plan JSON: %v stderr=%s", err, errb.String())
+	}
+	var plan evidencePlan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Summary.Total != 0 || strings.Contains(out.String(), "scope has") {
+		t.Fatalf("JSON plan leaked text hint or non-empty project items:\n%s", out.String())
+	}
+}
+
 func TestEvidenceArchiveAndDiscardRequireConfirmationAndPlanRecommendation(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")

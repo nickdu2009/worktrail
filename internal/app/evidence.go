@@ -76,7 +76,11 @@ func runEvidencePlan(env paths.Env, ioctx IO, args []string) error {
 	if flagValue(flags, "format", "text") == "json" {
 		return json.NewEncoder(ioctx.Out).Encode(plan)
 	}
-	return renderEvidencePlanText(ioctx.Out, plan)
+	scopeHint, err := evidencePlanScopeHint(env, scope, status, plan)
+	if err != nil {
+		return err
+	}
+	return renderEvidencePlanText(ioctx.Out, plan, scopeHint)
 }
 
 func runEvidenceAction(env paths.Env, ioctx IO, action string, args []string) error {
@@ -132,7 +136,7 @@ func buildEvidencePlan(scope, statusFilter string, records []candidate.Record, n
 		if !isEvidenceLifecycleCandidate(rec) || !evidencePlanIncludesStatus(rec.Meta.Status, statusFilter) {
 			continue
 		}
-		item := buildEvidencePlanItem(rec, records)
+		item := buildEvidencePlanItem(scope, rec, records)
 		plan.Items = append(plan.Items, item)
 		switch item.RecommendedAction {
 		case "keep":
@@ -149,7 +153,7 @@ func buildEvidencePlan(scope, statusFilter string, records []candidate.Record, n
 	return plan
 }
 
-func buildEvidencePlanItem(rec candidate.Record, records []candidate.Record) evidencePlanItem {
+func buildEvidencePlanItem(scope string, rec candidate.Record, records []candidate.Record) evidencePlanItem {
 	pendingRefs, appliedRefs := evidenceReferenceCounts(rec.Meta.ID, records)
 	item := evidencePlanItem{
 		CandidateID:               rec.Meta.ID,
@@ -160,7 +164,7 @@ func buildEvidencePlanItem(rec candidate.Record, records []candidate.Record) evi
 		PendingSemanticReferences: pendingRefs,
 		AppliedSemanticReferences: appliedRefs,
 		NeededForActiveReview:     pendingRefs > 0,
-		Commands:                  []string{"worktrail candidates show " + rec.Meta.ID + " --format json"},
+		Commands:                  []string{scopeAwareCommand(scope, "worktrail", "candidates", "show", rec.Meta.ID, "--format", "json")},
 	}
 	item.RecommendedAction, item.ReasonCodes = recommendEvidenceAction(rec, item)
 	return item
@@ -171,7 +175,7 @@ func evidencePlanItemByID(records []candidate.Record, id string) (evidencePlanIt
 		if rec.Meta.ID != id || !isEvidenceLifecycleCandidate(rec) || !evidencePlanIncludesStatus(rec.Meta.Status, "active") {
 			continue
 		}
-		return buildEvidencePlanItem(rec, records), true
+		return buildEvidencePlanItem(rec.Meta.Scope, rec, records), true
 	}
 	return evidencePlanItem{}, false
 }
@@ -265,13 +269,36 @@ func sourceIDsContain(ids []string, want string) bool {
 	return false
 }
 
-func renderEvidencePlanText(out io.Writer, plan evidencePlan) error {
+func evidencePlanScopeHint(env paths.Env, scope, status string, plan evidencePlan) (string, error) {
+	if plan.Summary.Total != 0 {
+		return "", nil
+	}
+	otherScope := alternateScope(scope)
+	if otherScope == "" {
+		return "", nil
+	}
+	records, err := (candidate.Manager{Env: env, Actor: "cli:evidence-plan"}).List(otherScope)
+	if err != nil {
+		return "", err
+	}
+	otherPlan := buildEvidencePlan(otherScope, status, records, time.Now().UTC())
+	if otherPlan.Summary.Total == 0 {
+		return "", nil
+	}
+	return fmt.Sprintf("No evidence lifecycle candidates matched in %s scope; %s scope has %d matching candidate(s). Next: run `worktrail evidence plan --format json --scope %s`", scope, otherScope, otherPlan.Summary.Total, otherScope), nil
+}
+
+func renderEvidencePlanText(out io.Writer, plan evidencePlan, scopeHint string) error {
 	fmt.Fprintln(out, "# Worktrail Evidence Plan")
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Schema: %s\n", plan.Schema)
 	fmt.Fprintf(out, "Scope: %s\n", plan.Scope)
 	fmt.Fprintf(out, "Status: %s\n", plan.StatusFilter)
 	fmt.Fprintf(out, "Summary: total=%d keep=%d archive=%d discard=%d needs_human_review=%d\n", plan.Summary.Total, plan.Summary.Keep, plan.Summary.Archive, plan.Summary.Discard, plan.Summary.NeedsHumanReview)
+	if strings.TrimSpace(scopeHint) != "" {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, scopeHint)
+	}
 	for _, group := range []struct {
 		Action string
 		Title  string
@@ -304,9 +331,10 @@ func renderEvidencePlanText(out io.Writer, plan evidencePlan) error {
 
 func printEvidenceHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail evidence plan [--scope project|user] [--status active|archived|all] [--format text|json]")
-	fmt.Fprintln(out, "       worktrail evidence archive <candidate-id> --confirm [--reason text]")
-	fmt.Fprintln(out, "       worktrail evidence discard <candidate-id> --confirm [--reason text]")
+	fmt.Fprintln(out, "       worktrail evidence archive <candidate-id> --confirm [--scope project|user] [--reason text]")
+	fmt.Fprintln(out, "       worktrail evidence discard <candidate-id> --confirm [--scope project|user] [--reason text]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Builds a read-only lifecycle plan for transcript_notes and KDD split-source evidence candidates.")
+	fmt.Fprintln(out, "Scope defaults to project; pass --scope user for user-level evidence.")
 	fmt.Fprintln(out, "Archive and discard require --confirm and only run when evidence plan recommends the same action.")
 }

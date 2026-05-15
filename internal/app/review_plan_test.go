@@ -325,6 +325,112 @@ func TestReviewApplyPlanRejectsStaleSnapshot(t *testing.T) {
 	}
 }
 
+func TestReviewApplyPlanRejectsExplicitScopeMismatchAndUsesPlanScopeByDefault(t *testing.T) {
+	t.Run("project plan rejects user scope", func(t *testing.T) {
+		home := filepath.Join(t.TempDir(), "home")
+		project := filepath.Join(t.TempDir(), "project")
+		if err := os.MkdirAll(project, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("WORKTRAIL_HOME", home)
+		t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+		var out, errb bytes.Buffer
+		runApp(t, &out, &errb, "init")
+		env, err := paths.Discover()
+		if err != nil {
+			t.Fatal(err)
+		}
+		manager := candidate.Manager{Env: env, Actor: "test"}
+		createCandidate(t, manager, candidate.CreateRequest{
+			Scope:         "project",
+			ID:            "note-1",
+			CandidateType: model.CandidateTypeTranscriptNotes,
+			TargetPath:    "imports/transcripts/note-1.md",
+			Title:         "Transcript Notes",
+			Body:          "Evidence body.",
+		})
+		createCandidate(t, manager, candidate.CreateRequest{
+			Scope:              "project",
+			ID:                 "project-promote",
+			CandidateType:      "rule",
+			TargetPath:         "rules/project-promote.md",
+			Title:              "Project Promote",
+			Operation:          candidate.OperationReplace,
+			SourceCandidateIDs: []string{"note-1"},
+			Body:               "# Project Promote\n\nPromote this.",
+		})
+		planPath := writeReviewPlanFile(t, runReviewPlanJSONForScope(t, &out, &errb, "project"))
+
+		out.Reset()
+		err = Run(context.Background(), []string{"review", "apply-plan", planPath, "--confirm", "--scope", "user", "--format", "json"}, nil, &out, &errb)
+		if err == nil || !strings.Contains(err.Error(), "scope mismatch") {
+			t.Fatalf("scope mismatch error = %v stdout=%s", err, out.String())
+		}
+		assertCandidateStatusScoped(t, manager, "project", "project-promote", candidate.StatusPending)
+	})
+
+	t.Run("user plan rejects project scope and succeeds without explicit scope", func(t *testing.T) {
+		home := filepath.Join(t.TempDir(), "home")
+		project := filepath.Join(t.TempDir(), "project")
+		if err := os.MkdirAll(project, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("WORKTRAIL_HOME", home)
+		t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+		var out, errb bytes.Buffer
+		runApp(t, &out, &errb, "init")
+		env, err := paths.Discover()
+		if err != nil {
+			t.Fatal(err)
+		}
+		manager := candidate.Manager{Env: env, Actor: "test"}
+		createCandidate(t, manager, candidate.CreateRequest{
+			Scope:         "user",
+			ID:            "user-note",
+			CandidateType: model.CandidateTypeTranscriptNotes,
+			TargetPath:    "imports/transcripts/user-note.md",
+			Title:         "User Transcript Notes",
+			Body:          "User evidence body.",
+		})
+		createCandidate(t, manager, candidate.CreateRequest{
+			Scope:              "user",
+			ID:                 "user-promote",
+			CandidateType:      "rule",
+			TargetPath:         "rules/user-promote.md",
+			Title:              "User Promote",
+			Operation:          candidate.OperationReplace,
+			SourceCandidateIDs: []string{"user-note"},
+			Body:               "# User Promote\n\nPromote this.",
+		})
+		plan := runReviewPlanJSONForScope(t, &out, &errb, "user")
+		userItem := mapReviewPlanItems(plan.Items)["user-promote"]
+		for _, want := range []string{
+			"worktrail candidates diff user-promote --scope user",
+			"worktrail promote user-promote --scope user",
+		} {
+			if !containsString(userItem.Commands, want) {
+				t.Fatalf("user review plan commands missing %q: %+v", want, userItem.Commands)
+			}
+		}
+		planPath := writeReviewPlanFile(t, plan)
+
+		out.Reset()
+		err = Run(context.Background(), []string{"review", "apply-plan", planPath, "--confirm", "--scope", "project", "--format", "json"}, nil, &out, &errb)
+		if err == nil || !strings.Contains(err.Error(), "scope mismatch") {
+			t.Fatalf("scope mismatch error = %v stdout=%s", err, out.String())
+		}
+		assertCandidateStatusScoped(t, manager, "user", "user-promote", candidate.StatusPending)
+
+		out.Reset()
+		if err := Run(context.Background(), []string{"review", "apply-plan", planPath, "--confirm", "--format", "json"}, nil, &out, &errb); err != nil {
+			t.Fatalf("Run user apply-plan without explicit scope: %v stderr=%s", err, errb.String())
+		}
+		assertCandidateStatusScoped(t, manager, "user", "user-promote", candidate.StatusPromoted)
+	})
+}
+
 func TestReviewPlanSnapshotMismatchesCoverStaleFields(t *testing.T) {
 	base := reviewPlanSnapshot{
 		CandidateStatus:          candidate.StatusPending,
@@ -372,9 +478,14 @@ func createCandidate(t *testing.T, manager candidate.Manager, req candidate.Crea
 
 func runReviewPlanJSON(t *testing.T, out, errb *bytes.Buffer) reviewPlan {
 	t.Helper()
+	return runReviewPlanJSONForScope(t, out, errb, "project")
+}
+
+func runReviewPlanJSONForScope(t *testing.T, out, errb *bytes.Buffer, scope string) reviewPlan {
+	t.Helper()
 	out.Reset()
 	errb.Reset()
-	if err := Run(context.Background(), []string{"review", "plan", "--format", "json"}, nil, out, errb); err != nil {
+	if err := Run(context.Background(), []string{"review", "plan", "--format", "json", "--scope", scope}, nil, out, errb); err != nil {
 		t.Fatalf("Run review plan: %v stderr=%s", err, errb.String())
 	}
 	var plan reviewPlan
@@ -399,7 +510,12 @@ func writeReviewPlanFile(t *testing.T, plan reviewPlan) string {
 
 func assertCandidateStatus(t *testing.T, manager candidate.Manager, id, want string) {
 	t.Helper()
-	rec, err := manager.Show("project", id)
+	assertCandidateStatusScoped(t, manager, "project", id, want)
+}
+
+func assertCandidateStatusScoped(t *testing.T, manager candidate.Manager, scope, id, want string) {
+	t.Helper()
+	rec, err := manager.Show(scope, id)
 	if err != nil {
 		t.Fatalf("Show %s: %v", id, err)
 	}

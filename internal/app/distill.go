@@ -49,17 +49,10 @@ func runDistill(_ context.Context, env paths.Env, ioctx IO, args []string) error
 		if err != nil {
 			return err
 		}
-		all, err := manager.List(scope)
+		includeSplitSources := flagValue(flags, "split-sources", "") == "true"
+		pending, err := pendingDistillSources(manager, scope, includeSplitSources)
 		if err != nil {
 			return err
-		}
-		var pending []candidate.Record
-		includeSplitSources := flagValue(flags, "split-sources", "") == "true"
-		for _, rec := range all {
-			if !wtdistill.IsDistillSource(rec, includeSplitSources) {
-				continue
-			}
-			pending = append(pending, rec)
 		}
 		if offset > len(pending) {
 			offset = len(pending)
@@ -70,10 +63,7 @@ func runDistill(_ context.Context, env paths.Env, ioctx IO, args []string) error
 		}
 		records = pending
 		if len(records) == 0 {
-			if includeSplitSources {
-				return errors.New("no pending distillation source candidates found")
-			}
-			return errors.New("no pending transcript_notes candidates found")
+			return noPendingDistillSourcesError(manager, scope, includeSplitSources)
 		}
 	} else {
 		id := firstArg(positional, flagValue(flags, "id", ""))
@@ -149,6 +139,53 @@ func parsePositiveInt(value string, def int, name string) (int, error) {
 		return 0, fmt.Errorf("%s must be a positive integer", name)
 	}
 	return parsed, nil
+}
+
+func pendingDistillSources(manager candidate.Manager, scope string, includeSplitSources bool) ([]candidate.Record, error) {
+	all, err := manager.List(scope)
+	if err != nil {
+		return nil, err
+	}
+	var pending []candidate.Record
+	for _, rec := range all {
+		if !wtdistill.IsDistillSource(rec, includeSplitSources) {
+			continue
+		}
+		pending = append(pending, rec)
+	}
+	return pending, nil
+}
+
+func noPendingDistillSourcesError(manager candidate.Manager, scope string, includeSplitSources bool) error {
+	message := "no pending transcript_notes candidates found"
+	if includeSplitSources {
+		message = "no pending distillation source candidates found"
+	}
+	otherScope := alternateScope(scope)
+	if otherScope == "" {
+		return errors.New(message)
+	}
+	otherPending, err := pendingDistillSources(manager, otherScope, includeSplitSources)
+	if err != nil || len(otherPending) == 0 {
+		return errors.New(message)
+	}
+	parts := []string{"worktrail", "distill", "--pending", "--summary"}
+	if includeSplitSources {
+		parts = append(parts, "--split-sources")
+	}
+	parts = append(parts, "--scope", otherScope)
+	return fmt.Errorf("%s in %s scope; %s scope has %d matching candidate(s). Next: run `%s`", message, scope, otherScope, len(otherPending), strings.Join(parts, " "))
+}
+
+func alternateScope(scope string) string {
+	switch scope {
+	case "project":
+		return "user"
+	case "user":
+		return "project"
+	default:
+		return ""
+	}
 }
 
 func renderDistillPack(out io.Writer, records []candidate.Record) error {
@@ -322,7 +359,7 @@ func distillFatalProposalError(err error) string {
 
 func printDistillHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail distill <candidate-id>")
-	fmt.Fprintln(out, "       worktrail distill --pending [--limit N|--all] [--offset N] [--summary|--json|--write-pack file]")
+	fmt.Fprintln(out, "       worktrail distill --pending [--scope project|user] [--limit N|--all] [--offset N] [--summary|--json|--write-pack file]")
 	fmt.Fprintln(out, "       worktrail distill validate <proposal.json> [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out, "       worktrail distill apply <proposal.json> [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out)
@@ -330,6 +367,7 @@ func printDistillHelp(out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "bulk options:")
 	fmt.Fprintln(out, "  --pending            select pending transcript_notes")
+	fmt.Fprintln(out, "  --scope <scope>      project or user (default project)")
 	fmt.Fprintln(out, "  --split-sources      include allowed pending split-source lessons with transcript_notes")
 	fmt.Fprintln(out, "  --limit N            output at most N evidence candidates (default 5)")
 	fmt.Fprintln(out, "  --offset N           skip N evidence candidates for paging")
