@@ -8,13 +8,14 @@ description: Summarize Worktrail maintenance state and guide explicit user-confi
 Use this skill when the user asks to clean up or advance Worktrail knowledge with minimal intervention.
 
 1. Run `worktrail context "maintenance"` and summarize only maintenance counts and next steps.
-2. Run `worktrail distill --pending --summary` to check pending transcript evidence. If there is no pending evidence, report that as a no-op.
-3. Run `worktrail review plan --format json` and group pending semantic candidates by `recommended_action`.
-4. Run `worktrail evidence plan --format json` and group evidence lifecycle items by `recommended_action`.
-5. Present one concise maintenance summary: pending evidence, pending review, evidence lifecycle actions, blockers, and commands that would be safe after confirmation.
-6. Ask the user which lane to run: distill proposal workflow, review apply-plan workflow, single candidate command, evidence archive/discard, or no action.
-7. Execute state-changing commands only after explicit user confirmation that identifies the exact candidate id, evidence id, or saved plan file.
-8. After any confirmed action, rerun the relevant read-only plan command and summarize the new counts.
+2. Follow the exact scope-aware commands from `maintenance.next_steps`. If the context suggests `--scope user`, keep that scope.
+3. Run `worktrail distill --pending --summary` or its scoped variant to check pending transcript evidence. If there is no pending evidence for a scope, report that as a no-op.
+4. Run `worktrail review plan --format json` or its scoped variant and group pending semantic candidates by `recommended_action`.
+5. Run `worktrail evidence plan --format json` or its scoped variant and group evidence lifecycle items by `recommended_action`.
+6. Present one concise maintenance summary: pending evidence, pending review, evidence lifecycle actions, blockers, and commands that would be safe after confirmation.
+7. Ask the user which lane to run: distill proposal workflow, review apply-plan workflow, single candidate command, evidence archive/discard, or no action.
+8. Execute state-changing commands only after explicit user confirmation that identifies the exact candidate id, evidence id, saved plan file, and scope.
+9. After any confirmed action, rerun the relevant read-only plan command and summarize the new counts.
 
 Do not automatically commit git changes.
 

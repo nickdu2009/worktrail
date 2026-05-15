@@ -36,6 +36,25 @@ worktrail context "current task"
 
 `worktrail context <task>` hides pending transcript evidence by default and reports how many evidence candidates are hidden. Use `worktrail context --evidence <task>` when the raw transcript notes themselves need to be included in the Pending Candidates section.
 
+## Low-intervention maintenance
+
+`worktrail context <task>` includes a `maintenance` object in JSON output and a short text section when pending maintenance exists. The hints are scope-aware, so user-scope evidence is suggested with commands such as:
+
+```bash
+worktrail distill --pending --summary --scope user
+worktrail evidence plan --format json --scope user
+```
+
+For routine upkeep, use the installed `/worktrail-maintain` skill. It chains `context "maintenance"`, `distill --pending --summary`, `review plan --format json`, and `evidence plan --format json`, then waits for explicit confirmation before any state-changing command.
+
+Saved review plans can be applied only with confirmation:
+
+```bash
+worktrail review apply-plan review-plan.json --confirm
+```
+
+`apply-plan` validates the `worktrail.review.plan.v1` schema and candidate snapshots before running `promote`, `merge`, or `discard`. It skips `needs_human_review`, reports `applied`, `skipped`, `stale`, and `failed`, and does not clean up evidence.
+
 ## Distillation proposals
 
 Transcript evidence and KDD split sources can be distilled into semantic pending candidates with an agent-authored proposal:

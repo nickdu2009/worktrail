@@ -19,6 +19,8 @@ Coverage:
 - `worktrail context` text output reports maintenance hints for pending evidence,
   pending semantic review, and evidence lifecycle actions only when counts are
   non-zero.
+- Maintenance `next_steps` use scope-aware commands when pending work is in
+  user scope.
 - `worktrail context --format json` emits a backward-compatible top-level shape
   with new counts under `maintenance`.
 - Codex and Claude user installs include `/worktrail-distill`.
@@ -48,9 +50,10 @@ Actual result:
 - Isolated CLI smoke passed after seeding one redacted transcript evidence
   candidate and one semantic review candidate in a disposable Worktrail
   environment.
-- The real project workspace currently has no pending transcript evidence, so
-  `worktrail distill --pending --summary` correctly reports no pending evidence
-  there; no project candidate state was changed for this validation.
+- A real project maintenance smoke found user-scope pending evidence. `context`
+  now suggests `--scope user` for the matching distill and evidence lifecycle
+  commands, and the scoped distill summary sees the pending evidence. No project
+  candidate state was changed for this validation.
 
 ## Privacy Notes
 

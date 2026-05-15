@@ -168,6 +168,36 @@ func TestBuildOmitsMaintenanceTextWhenCountsAreZero(t *testing.T) {
 	}
 }
 
+func TestBuildMaintenanceNextStepsIncludeUserScope(t *testing.T) {
+	tmp := t.TempDir()
+	env := paths.Env{
+		UserRoot:  filepath.Join(tmp, "user"),
+		ProjectWT: filepath.Join(tmp, "project", ".worktrail"),
+	}
+	writePackDoc(t, filepath.Join(env.UserRoot, "candidates", "user", "transcript.md"), map[string]any{
+		"id":             "user-transcript",
+		"scope":          "user",
+		"candidate_type": "transcript_notes",
+		"title":          "User Transcript Evidence",
+		"status":         "pending",
+	}, "User transcript evidence content.")
+
+	pack, err := Build(env, Options{Task: "maintain"})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if pack.Maintenance.PendingEvidenceCandidates != 1 {
+		t.Fatalf("pending evidence = %d, want 1", pack.Maintenance.PendingEvidenceCandidates)
+	}
+	if !containsStep(pack.Maintenance.NextSteps, "worktrail distill --pending --summary --scope user") {
+		t.Fatalf("maintenance next steps missing user scope: %+v", pack.Maintenance.NextSteps)
+	}
+	rendered := RenderMarkdown(pack)
+	if !strings.Contains(rendered, "`worktrail distill --pending --summary --scope user`") {
+		t.Fatalf("rendered maintenance hint missing user scope:\n%s", rendered)
+	}
+}
+
 func writePackDoc(t *testing.T, path string, meta any, body string) {
 	t.Helper()
 	b, err := store.RenderMarkdown(meta, body)

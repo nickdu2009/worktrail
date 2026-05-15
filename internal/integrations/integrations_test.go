@@ -191,6 +191,8 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		"worktrail distill --pending --summary",
 		"worktrail review plan --format json",
 		"worktrail evidence plan --format json",
+		"maintenance.next_steps",
+		"If the context suggests `--scope user`, keep that scope.",
 		"Do not automatically commit git changes",
 		"explicit user confirmation",
 	} {

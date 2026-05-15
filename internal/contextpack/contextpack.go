@@ -168,15 +168,15 @@ func RenderMarkdown(pack Pack) string {
 		b.WriteString("## Maintenance\n\n")
 		if pack.Maintenance.PendingEvidenceCandidates > 0 {
 			fmt.Fprintf(&b, "Pending evidence candidates: %d.\n", pack.Maintenance.PendingEvidenceCandidates)
-			b.WriteString("Next: run `worktrail distill --pending --summary` or ask the agent to use /worktrail-distill.\n\n")
+			fmt.Fprintf(&b, "Next: run %s or ask the agent to use /worktrail-distill.\n\n", maintenanceStepList(pack.Maintenance.NextSteps, "worktrail distill"))
 		}
 		if pack.Maintenance.PendingSemanticCandidates > 0 {
 			fmt.Fprintf(&b, "Pending review candidates: %d.\n", pack.Maintenance.PendingSemanticCandidates)
-			b.WriteString("Next: run `worktrail review plan --format json` or ask the agent to use /worktrail-review.\n\n")
+			fmt.Fprintf(&b, "Next: run %s or ask the agent to use /worktrail-review.\n\n", maintenanceStepList(pack.Maintenance.NextSteps, "worktrail review plan"))
 		}
 		if pack.Maintenance.EvidenceLifecycleCandidates > 0 {
 			fmt.Fprintf(&b, "Evidence lifecycle actions available: %d.\n", pack.Maintenance.EvidenceLifecycleCandidates)
-			b.WriteString("Next: run `worktrail evidence plan --format json`.\n\n")
+			fmt.Fprintf(&b, "Next: run %s.\n\n", maintenanceStepList(pack.Maintenance.NextSteps, "worktrail evidence plan"))
 		}
 	}
 	if pack.HiddenEvidenceCandidates > 0 && !pack.EvidenceIncluded {
@@ -267,20 +267,27 @@ func countPendingTranscriptEvidence(entries []index.Entry) int {
 func buildMaintenance(env paths.Env) Maintenance {
 	records := allCandidateRecords(env)
 	maintenance := Maintenance{}
+	pendingEvidenceByScope := map[string]int{}
+	pendingSemanticByScope := map[string]int{}
 	for _, rec := range records {
 		if rec.Meta.Status != candidate.StatusPending {
 			continue
 		}
 		if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
 			maintenance.PendingEvidenceCandidates++
+			pendingEvidenceByScope[rec.Meta.Scope]++
 			continue
 		}
 		if model.IsSemanticCandidateType(rec.Meta.CandidateType) {
 			maintenance.PendingSemanticCandidates++
+			pendingSemanticByScope[rec.Meta.Scope]++
 		}
 	}
-	maintenance.EvidenceLifecycleCandidates = countEvidenceLifecycleActions(records)
-	maintenance.NextSteps = maintenanceNextSteps(maintenance)
+	evidenceLifecycleByScope := countEvidenceLifecycleActionsByScope(records)
+	for _, count := range evidenceLifecycleByScope {
+		maintenance.EvidenceLifecycleCandidates += count
+	}
+	maintenance.NextSteps = maintenanceNextSteps(pendingEvidenceByScope, pendingSemanticByScope, evidenceLifecycleByScope)
 	return maintenance
 }
 
@@ -297,8 +304,8 @@ func allCandidateRecords(env paths.Env) []candidate.Record {
 	return records
 }
 
-func countEvidenceLifecycleActions(records []candidate.Record) int {
-	count := 0
+func countEvidenceLifecycleActionsByScope(records []candidate.Record) map[string]int {
+	counts := map[string]int{}
 	for _, rec := range records {
 		if !isMaintenanceEvidence(rec) || !isActiveEvidenceStatus(rec.Meta.Status) {
 			continue
@@ -308,10 +315,10 @@ func countEvidenceLifecycleActions(records []candidate.Record) int {
 			continue
 		}
 		if appliedRefs > 0 || (!isMaintenanceSplitSource(rec) && strings.TrimSpace(rec.Body) == "") {
-			count++
+			counts[rec.Meta.Scope]++
 		}
 	}
-	return count
+	return counts
 }
 
 func maintenanceReferenceCounts(id string, records []candidate.Record) (int, int) {
@@ -334,18 +341,44 @@ func maintenanceReferenceCounts(id string, records []candidate.Record) (int, int
 	return pending, applied
 }
 
-func maintenanceNextSteps(maintenance Maintenance) []string {
+func maintenanceNextSteps(pendingEvidenceByScope, pendingSemanticByScope, evidenceLifecycleByScope map[string]int) []string {
 	var steps []string
-	if maintenance.PendingEvidenceCandidates > 0 {
-		steps = append(steps, "worktrail distill --pending --summary")
+	for _, scope := range []string{"project", "user"} {
+		if pendingEvidenceByScope[scope] > 0 {
+			steps = append(steps, scopedMaintenanceCommand("worktrail distill --pending --summary", scope))
+		}
 	}
-	if maintenance.PendingSemanticCandidates > 0 {
-		steps = append(steps, "worktrail review plan --format json")
+	for _, scope := range []string{"project", "user"} {
+		if pendingSemanticByScope[scope] > 0 {
+			steps = append(steps, scopedMaintenanceCommand("worktrail review plan --format json", scope))
+		}
 	}
-	if maintenance.EvidenceLifecycleCandidates > 0 {
-		steps = append(steps, "worktrail evidence plan --format json")
+	for _, scope := range []string{"project", "user"} {
+		if evidenceLifecycleByScope[scope] > 0 {
+			steps = append(steps, scopedMaintenanceCommand("worktrail evidence plan --format json", scope))
+		}
 	}
 	return steps
+}
+
+func scopedMaintenanceCommand(command, scope string) string {
+	if scope == "" || scope == "project" {
+		return command
+	}
+	return command + " --scope " + scope
+}
+
+func maintenanceStepList(steps []string, prefix string) string {
+	var matching []string
+	for _, step := range steps {
+		if strings.HasPrefix(step, prefix) {
+			matching = append(matching, "`"+step+"`")
+		}
+	}
+	if len(matching) == 0 {
+		return "`" + prefix + "`"
+	}
+	return strings.Join(matching, " or ")
 }
 
 func hasMaintenance(maintenance Maintenance) bool {

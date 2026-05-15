@@ -11,14 +11,19 @@ non-goals, behavior, and acceptance criteria.
 
 ## Pending
 
-- Reduce user intervention in knowledge distillation by adding context
-  maintenance hints, a distillation skill, batch review guidance, and a
-  periodic maintenance workflow.
-  Requirements:
-  [low-intervention-knowledge-workflow.md](low-intervention-knowledge-workflow.md).
+- No pending stable backlog item.
 
 ## Completed
 
+- Reduce user intervention in knowledge distillation by adding context
+  maintenance hints, a distillation skill, batch review guidance,
+  `review apply-plan --confirm`, and a maintenance workflow.
+  Requirements:
+  [low-intervention-knowledge-workflow.md](low-intervention-knowledge-workflow.md).
+  Validation:
+  [low-intervention-workflow-validation-2026-05-15.md](low-intervention-workflow-validation-2026-05-15.md)
+  and
+  [low-intervention-maintenance-validation-2026-05-15.md](low-intervention-maintenance-validation-2026-05-15.md).
 - Implement read-only `worktrail review plan` as an agent-readable review
   contract for pending semantic candidates.
   Requirements: [review-plan-automation.md](review-plan-automation.md).
