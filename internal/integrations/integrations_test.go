@@ -148,6 +148,7 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-import", "SKILL.md"),
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-distill", "SKILL.md"),
 		filepath.Join(env.Home, ".codex", "skills", "worktrail-review", "SKILL.md"),
+		filepath.Join(env.Home, ".codex", "skills", "worktrail-maintain", "SKILL.md"),
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -180,6 +181,22 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 	reviewSkill, err := os.ReadFile(filepath.Join(env.Home, ".codex", "skills", "worktrail-review", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	maintainSkill, err := os.ReadFile(filepath.Join(env.Home, ".codex", "skills", "worktrail-maintain", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"worktrail context \"maintenance\"",
+		"worktrail distill --pending --summary",
+		"worktrail review plan --format json",
+		"worktrail evidence plan --format json",
+		"Do not automatically commit git changes",
+		"explicit user confirmation",
+	} {
+		if !strings.Contains(string(maintainSkill), want) {
+			t.Fatalf("maintain skill missing %q:\n%s", want, maintainSkill)
+		}
 	}
 	for _, want := range []string{
 		"worktrail candidates list --semantic --status pending --format json",
@@ -228,6 +245,7 @@ func TestInstallClaudeUserAndProject(t *testing.T) {
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-import", "SKILL.md"),
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-distill", "SKILL.md"),
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-review", "SKILL.md"),
+		filepath.Join(env.Home, ".claude", "skills", "worktrail-maintain", "SKILL.md"),
 		filepath.Join(env.ProjectRoot, ".claude", "skills", "worktrail-state", "SKILL.md"),
 	} {
 		data, err := os.ReadFile(path)
