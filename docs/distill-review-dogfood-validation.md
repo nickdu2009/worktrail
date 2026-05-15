@@ -133,6 +133,7 @@ Do not commit private transcript bodies or local absolute machine paths.
 ## Validation Records
 
 - [2026-05-15 fixture-based validation](distill-review-dogfood-validation-2026-05-15.md)
+- [2026-05-15 real transcript validation](distill-review-dogfood-validation-real-2026-05-15.md)
 
 ## Acceptance Criteria
 
