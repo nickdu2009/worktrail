@@ -11,7 +11,10 @@ non-goals, behavior, and acceptance criteria.
 
 ## Pending
 
-No pending stable backlog requirements.
+- Run post-release dogfood passes and convert repeated feedback into numbered
+  follow-up requirements before the next implementation round.
+  Requirements:
+  [post-release-dogfood-feedback.md](post-release-dogfood-feedback.md).
 
 ## Completed
 
