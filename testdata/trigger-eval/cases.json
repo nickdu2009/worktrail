@@ -1,0 +1,222 @@
+[
+  {
+    "id": "codex-context-start-task",
+    "tool": "codex",
+    "skill": "worktrail-context",
+    "prompt": "Use Worktrail context before starting this task: improve the import flow.",
+    "expected_behavior": "must load Worktrail context for the requested task",
+    "expected_commands": ["worktrail context"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-context-resume-previous",
+    "tool": "codex",
+    "skill": "worktrail-context",
+    "prompt": "Load Worktrail context for continuing the previous task, then stop. Do not inspect source files or continue the task.",
+    "expected_behavior": "must load Worktrail context for continuation and stop without extra exploration",
+    "expected_commands": ["worktrail context"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-context-explain-only",
+    "tool": "codex",
+    "skill": "worktrail-context",
+    "prompt": "Explain what Worktrail context is without running anything.",
+    "expected_behavior": "must not run Worktrail commands",
+    "forbidden_patterns": ["worktrail context"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-state-save-progress",
+    "tool": "codex",
+    "skill": "worktrail-state",
+    "prompt": "Save current progress in Worktrail state.",
+    "expected_behavior": "must save or update Worktrail state",
+    "expected_commands": ["worktrail state"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-state-checkpoint",
+    "tool": "codex",
+    "skill": "worktrail-state",
+    "prompt": "Run Worktrail state checkpoint for the current task. If no active state exists, start a Worktrail state first, then create the checkpoint.",
+    "expected_behavior": "must create a Worktrail state checkpoint, starting state first if required",
+    "expected_commands": ["worktrail state checkpoint"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-state-status-only",
+    "tool": "codex",
+    "skill": "worktrail-state",
+    "prompt": "Tell me whether Worktrail has a state feature, but do not save anything.",
+    "expected_behavior": "must not mutate Worktrail state",
+    "forbidden_patterns": ["worktrail state start", "worktrail state update", "worktrail state checkpoint", "worktrail handoff", "candidate_type=handoff"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-handoff-new-conversation",
+    "tool": "codex",
+    "skill": "worktrail-handoff",
+    "prompt": "Prepare a Worktrail handoff. I want to start a new conversation.",
+    "expected_behavior": "must run worktrail handoff or create a handoff candidate",
+    "expected_commands": ["worktrail handoff"],
+    "expected_artifacts": ["candidate_type=handoff"],
+    "forbidden_patterns": ["worktrail promote", "worktrail merge", "worktrail discard"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-handoff-switch-agent",
+    "tool": "codex",
+    "skill": "worktrail-handoff",
+    "prompt": "Make a Worktrail handoff because I am switching agents.",
+    "expected_behavior": "must run worktrail handoff or create a handoff candidate",
+    "expected_commands": ["worktrail handoff"],
+    "expected_artifacts": ["candidate_type=handoff"],
+    "forbidden_patterns": ["worktrail promote", "worktrail merge", "worktrail discard"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-handoff-template-only",
+    "tool": "codex",
+    "skill": "worktrail-handoff",
+    "prompt": "Show me an example handoff template, but do not create a Worktrail handoff.",
+    "expected_behavior": "must not create a Worktrail handoff",
+    "forbidden_patterns": ["worktrail handoff"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-import-transcript",
+    "tool": "codex",
+    "skill": "worktrail-import",
+    "prompt": "Import the latest Codex transcript into Worktrail.",
+    "expected_behavior": "must import Codex transcript evidence",
+    "expected_commands": ["worktrail import codex"],
+    "expected_artifacts": ["candidate_type=transcript_notes"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-import-migrate-kdd",
+    "tool": "codex",
+    "skill": "worktrail-import",
+    "prompt": "Use the official Worktrail KDD migration entry point for legacy KDD docs. Run the migration dry-run first, and only create candidates through Worktrail's migrate kdd command if needed.",
+    "expected_behavior": "must run Worktrail KDD migration through the official migrate kdd command",
+    "expected_commands": ["worktrail migrate kdd"],
+    "expected_artifacts": ["candidate_type=migration_source"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-import-explain-sync",
+    "tool": "codex",
+    "skill": "worktrail-import",
+    "prompt": "Explain the difference between Worktrail import and sync without running them.",
+    "expected_behavior": "must not import or sync transcripts",
+    "forbidden_patterns": ["worktrail import", "worktrail sync", "worktrail migrate kdd"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-distill-pending-summary",
+    "tool": "codex",
+    "skill": "worktrail-distill",
+    "prompt": "Distill pending Worktrail evidence and show a summary.",
+    "expected_behavior": "must distill pending evidence in summary mode",
+    "expected_commands": ["worktrail distill --pending --summary"],
+    "expected_artifacts": ["event_type=candidate.create"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-distill-validate-proposal",
+    "tool": "codex",
+    "skill": "worktrail-distill",
+    "prompt": "Create a temporary minimal worktrail.distill.proposal.v1 JSON proposal file, then validate it with Worktrail before applying it. Do not apply it.",
+    "expected_behavior": "must validate a distill proposal without applying it",
+    "expected_commands": ["worktrail distill validate"],
+    "forbidden_patterns": ["worktrail distill apply"],
+    "negative_case": false,
+    "requires_confirmation": true
+  },
+  {
+    "id": "codex-distill-concept-only",
+    "tool": "codex",
+    "skill": "worktrail-distill",
+    "prompt": "Explain what Worktrail distill does, but do not run any command.",
+    "expected_behavior": "must not distill evidence",
+    "forbidden_patterns": ["worktrail distill"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-review-plan-json",
+    "tool": "codex",
+    "skill": "worktrail-review",
+    "prompt": "Review pending Worktrail candidates and produce a JSON review plan.",
+    "expected_behavior": "must run a read-only review plan",
+    "expected_commands": ["worktrail review plan --format json"],
+    "forbidden_patterns": ["worktrail promote", "worktrail merge", "worktrail discard"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-review-candidates",
+    "tool": "codex",
+    "skill": "worktrail-review",
+    "prompt": "Show me what Worktrail candidates need review.",
+    "expected_behavior": "must inspect or review pending candidates without applying them",
+    "expected_commands": ["worktrail review"],
+    "forbidden_patterns": ["worktrail promote", "worktrail merge", "worktrail discard"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-review-definition-only",
+    "tool": "codex",
+    "skill": "worktrail-review",
+    "prompt": "What does a Worktrail review candidate mean? Do not inspect this repo.",
+    "expected_behavior": "must not run review commands",
+    "forbidden_patterns": ["worktrail review", "worktrail candidates"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-maintain-evidence-plan",
+    "tool": "codex",
+    "skill": "worktrail-maintain",
+    "prompt": "Create a Worktrail evidence lifecycle maintenance plan.",
+    "expected_behavior": "must run an evidence lifecycle review plan",
+    "expected_commands": ["worktrail evidence plan --format json"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-maintain-context-summary",
+    "tool": "codex",
+    "skill": "worktrail-maintain",
+    "prompt": "Use Worktrail to summarize maintenance context for cleanup.",
+    "expected_behavior": "must load maintenance context",
+    "expected_commands": ["worktrail context maintenance"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-maintain-policy-only",
+    "tool": "codex",
+    "skill": "worktrail-maintain",
+    "prompt": "Describe Worktrail maintenance policy without changing or scanning local state.",
+    "expected_behavior": "must not run maintenance commands",
+    "forbidden_patterns": ["worktrail evidence", "worktrail context maintenance"],
+    "negative_case": true,
+    "requires_confirmation": false
+  }
+]
