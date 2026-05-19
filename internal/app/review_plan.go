@@ -20,6 +20,7 @@ import (
 
 const reviewPlanSchema = "worktrail.review.plan.v1"
 const reviewApplyPlanReportSchema = "worktrail.review.apply_plan.report.v1"
+const reviewApplyCandidatesReportSchema = "worktrail.review.apply_candidates.report.v1"
 
 type reviewPlan struct {
 	Schema      string            `json:"schema"`
@@ -53,6 +54,12 @@ type reviewApplyPlanSummary struct {
 	Failed  int `json:"failed"`
 }
 
+type reviewApplyCandidatesSummary struct {
+	Total   int `json:"total"`
+	Applied int `json:"applied"`
+	Failed  int `json:"failed"`
+}
+
 type reviewApplyPlanItem struct {
 	CandidateID   string   `json:"candidate_id"`
 	PlannedAction string   `json:"planned_action"`
@@ -61,6 +68,22 @@ type reviewApplyPlanItem struct {
 	TargetPath    string   `json:"target_path,omitempty"`
 	ReasonCodes   []string `json:"reason_codes,omitempty"`
 	Error         string   `json:"error,omitempty"`
+}
+
+type reviewApplyCandidatesReport struct {
+	Schema       string                       `json:"schema"`
+	Scope        string                       `json:"scope"`
+	Action       string                       `json:"action"`
+	Summary      reviewApplyCandidatesSummary `json:"summary"`
+	Items        []reviewApplyPlanItem        `json:"items"`
+	IndexRebuild *indexRebuildResult          `json:"index_rebuild,omitempty"`
+}
+
+type reviewApplyCandidatesOptions struct {
+	Action string
+	Scope  string
+	Format string
+	IDs    []string
 }
 
 type reviewPlanItem struct {
@@ -166,6 +189,191 @@ func runReviewApplyPlan(env wtpaths.Env, ioctx IO, args []string) error {
 		return json.NewEncoder(ioctx.Out).Encode(report)
 	}
 	return renderReviewApplyPlanText(ioctx.Out, report)
+}
+
+func runReviewApplyCandidates(env wtpaths.Env, ioctx IO, args []string) error {
+	if wantsHelp(args) {
+		printReviewApplyCandidatesHelp(ioctx.Out)
+		return nil
+	}
+	opts, err := parseReviewApplyCandidatesArgs(args)
+	if err != nil {
+		return err
+	}
+	report := applyReviewCandidates(env, opts.Scope, opts.Action, opts.IDs)
+	if opts.Format == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(report)
+	}
+	return renderReviewApplyCandidatesText(ioctx.Out, report)
+}
+
+func parseReviewApplyCandidatesArgs(args []string) (reviewApplyCandidatesOptions, error) {
+	opts := reviewApplyCandidatesOptions{
+		Scope:  "project",
+		Format: "text",
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case strings.HasPrefix(arg, "--scope="):
+			scope := strings.TrimSpace(strings.TrimPrefix(arg, "--scope="))
+			if err := setReviewApplyCandidatesScope(&opts, scope); err != nil {
+				return reviewApplyCandidatesOptions{}, err
+			}
+		case arg == "--scope":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				return reviewApplyCandidatesOptions{}, fmt.Errorf("worktrail review apply-candidates --scope must be project or user")
+			}
+			i++
+			if err := setReviewApplyCandidatesScope(&opts, args[i]); err != nil {
+				return reviewApplyCandidatesOptions{}, err
+			}
+		case strings.HasPrefix(arg, "--format="):
+			format := strings.TrimSpace(strings.TrimPrefix(arg, "--format="))
+			if err := setReviewApplyCandidatesFormat(&opts, format); err != nil {
+				return reviewApplyCandidatesOptions{}, err
+			}
+		case arg == "--format":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				return reviewApplyCandidatesOptions{}, fmt.Errorf("worktrail review apply-candidates --format must be text or json")
+			}
+			i++
+			if err := setReviewApplyCandidatesFormat(&opts, args[i]); err != nil {
+				return reviewApplyCandidatesOptions{}, err
+			}
+		case isReviewApplyCandidatesActionFlag(arg):
+			action, value := splitReviewApplyCandidatesActionFlag(arg)
+			if opts.Action != "" {
+				return reviewApplyCandidatesOptions{}, fmt.Errorf("worktrail review apply-candidates requires exactly one of --promote, --merge, or --discard")
+			}
+			opts.Action = action
+			if strings.TrimSpace(value) != "" {
+				opts.IDs = append(opts.IDs, strings.TrimSpace(value))
+			}
+		case strings.HasPrefix(arg, "--"):
+			return reviewApplyCandidatesOptions{}, fmt.Errorf("unknown review apply-candidates flag %q", arg)
+		default:
+			id := strings.TrimSpace(arg)
+			if id == "" {
+				continue
+			}
+			if opts.Action == "" {
+				return reviewApplyCandidatesOptions{}, fmt.Errorf("worktrail review apply-candidates requires exactly one of --promote, --merge, or --discard before candidate ids")
+			}
+			opts.IDs = append(opts.IDs, id)
+		}
+	}
+	if opts.Action == "" {
+		return reviewApplyCandidatesOptions{}, fmt.Errorf("worktrail review apply-candidates requires exactly one of --promote, --merge, or --discard")
+	}
+	if len(opts.IDs) == 0 {
+		return reviewApplyCandidatesOptions{}, fmt.Errorf("worktrail review apply-candidates requires at least one candidate id")
+	}
+	return opts, nil
+}
+
+func setReviewApplyCandidatesScope(opts *reviewApplyCandidatesOptions, scope string) error {
+	switch scope {
+	case "project", "user":
+		opts.Scope = scope
+		return nil
+	default:
+		return fmt.Errorf("worktrail review apply-candidates --scope must be project or user")
+	}
+}
+
+func setReviewApplyCandidatesFormat(opts *reviewApplyCandidatesOptions, format string) error {
+	switch format {
+	case "text", "json":
+		opts.Format = format
+		return nil
+	default:
+		return fmt.Errorf("worktrail review apply-candidates --format must be text or json")
+	}
+}
+
+func isReviewApplyCandidatesActionFlag(arg string) bool {
+	action, _ := splitReviewApplyCandidatesActionFlag(arg)
+	return action != ""
+}
+
+func splitReviewApplyCandidatesActionFlag(arg string) (string, string) {
+	for _, action := range []string{"promote", "merge", "discard"} {
+		flag := "--" + action
+		if arg == flag {
+			return action, ""
+		}
+		if strings.HasPrefix(arg, flag+"=") {
+			return action, strings.TrimPrefix(arg, flag+"=")
+		}
+	}
+	return "", ""
+}
+
+func applyReviewCandidates(env wtpaths.Env, scope, action string, ids []string) reviewApplyCandidatesReport {
+	report := reviewApplyCandidatesReport{
+		Schema: reviewApplyCandidatesReportSchema,
+		Scope:  scope,
+		Action: action,
+		Items:  []reviewApplyPlanItem{},
+	}
+	manager := candidate.Manager{Env: env, Actor: "cli:review-apply-candidates"}
+	for _, id := range ids {
+		item := applyReviewCandidate(manager, scope, action, id)
+		if item.Result == "applied" {
+			report.Summary.Applied++
+		} else {
+			report.Summary.Failed++
+		}
+		report.Items = append(report.Items, item)
+	}
+	report.Summary.Total = len(report.Items)
+	if report.Summary.Applied > 0 {
+		indexRebuild := rebuildIndexForScope(env, scope)
+		report.IndexRebuild = &indexRebuild
+	}
+	return report
+}
+
+func applyReviewCandidate(manager candidate.Manager, scope, action, id string) reviewApplyPlanItem {
+	item := reviewApplyPlanItem{
+		CandidateID:   id,
+		PlannedAction: action,
+	}
+	rec, err := manager.Show(scope, id)
+	if err != nil {
+		item.Result = "failed"
+		item.Error = err.Error()
+		return item
+	}
+	item.TargetPath = rec.Meta.TargetPath
+	if reviewApplyCandidatesBlocked(rec) {
+		item.Result = "failed"
+		item.Error = "review apply-candidates blocks transcript_notes, migration_source, and KDD split-source lesson candidates; distill semantic candidates before applying"
+		return item
+	}
+	status, err := applyReviewPlanAction(manager, scope, id, action)
+	if err != nil {
+		item.Result = "failed"
+		item.Error = err.Error()
+		return item
+	}
+	item.Result = "applied"
+	item.Status = status
+	return item
+}
+
+func reviewApplyCandidatesBlocked(rec candidate.Record) bool {
+	switch {
+	case rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes:
+		return true
+	case rec.Meta.CandidateType == model.CandidateTypeMigrationSource:
+		return true
+	case isReviewSplitSourceLesson(rec):
+		return true
+	default:
+		return false
+	}
 }
 
 func applyReviewPlan(env wtpaths.Env, scope string, plan reviewPlan) reviewApplyPlanReport {
@@ -774,6 +982,60 @@ func renderReviewApplyPlanText(out io.Writer, report reviewApplyPlanReport) erro
 	return nil
 }
 
+func renderReviewApplyCandidatesText(out io.Writer, report reviewApplyCandidatesReport) error {
+	fmt.Fprintln(out, "# Worktrail Review Apply Candidates")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "Schema: %s\n", report.Schema)
+	fmt.Fprintf(out, "Scope: %s\n", report.Scope)
+	fmt.Fprintf(out, "Action: %s\n", report.Action)
+	fmt.Fprintf(out, "Summary: total=%d applied=%d failed=%d\n", report.Summary.Total, report.Summary.Applied, report.Summary.Failed)
+	for _, group := range []struct {
+		Result string
+		Title  string
+	}{
+		{"applied", "Applied"},
+		{"failed", "Failed"},
+	} {
+		var items []reviewApplyPlanItem
+		for _, item := range report.Items {
+			if item.Result == group.Result {
+				items = append(items, item)
+			}
+		}
+		if len(items) == 0 {
+			continue
+		}
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, group.Title)
+		for _, item := range items {
+			fmt.Fprintf(out, "- `%s` action=%s", item.CandidateID, item.PlannedAction)
+			if item.Status != "" {
+				fmt.Fprintf(out, " status=%s", item.Status)
+			}
+			if item.TargetPath != "" {
+				fmt.Fprintf(out, " target=`%s`", item.TargetPath)
+			}
+			fmt.Fprintln(out)
+			if len(item.ReasonCodes) > 0 {
+				fmt.Fprintf(out, "  reason_codes: %s\n", strings.Join(item.ReasonCodes, ", "))
+			}
+			if item.Error != "" {
+				fmt.Fprintf(out, "  error: %s\n", item.Error)
+			}
+		}
+	}
+	if report.IndexRebuild != nil {
+		fmt.Fprintln(out)
+		if report.IndexRebuild.Error != "" {
+			fmt.Fprintf(out, "index rebuild failed: %s\n", report.IndexRebuild.Error)
+			fmt.Fprintf(out, "next: %s\n", report.IndexRebuild.NextStep)
+		} else {
+			fmt.Fprintf(out, "index rebuilt\t%s\t%d\t%s\n", report.IndexRebuild.Scope, report.IndexRebuild.Entries, report.IndexRebuild.IndexPath)
+		}
+	}
+	return nil
+}
+
 func reviewPlanSourceSummary(item reviewPlanItem) string {
 	if len(item.SourceCandidateIDs) == 0 {
 		return "none"
@@ -806,4 +1068,13 @@ func printReviewApplyPlanHelp(out io.Writer) {
 	fmt.Fprintln(out, "Applies promote, merge, and discard actions from a fresh worktrail.review.plan.v1 file.")
 	fmt.Fprintln(out, "When --scope is omitted, the plan scope is used; an explicit mismatched --scope is rejected.")
 	fmt.Fprintln(out, "Candidates with stale snapshots or needs_human_review are skipped without evidence cleanup.")
+}
+
+func printReviewApplyCandidatesHelp(out io.Writer) {
+	fmt.Fprintln(out, "usage: worktrail review apply-candidates --promote <id...> [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "       worktrail review apply-candidates --merge <id...> [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "       worktrail review apply-candidates --discard <id...> [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Applies exactly one action to one or more candidate ids and rebuilds the same-scope index when at least one item is applied.")
+	fmt.Fprintln(out, "transcript_notes, migration_source, and KDD split-source lesson candidates are blocked in this review automation path.")
 }

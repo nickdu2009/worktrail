@@ -431,6 +431,247 @@ func TestReviewApplyPlanRejectsExplicitScopeMismatchAndUsesPlanScopeByDefault(t 
 	})
 }
 
+func TestReviewApplyCandidatesAppliesBatchActionsAndRebuildsIndex(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "workflows", "merge-target.md"), "# Merge Target\n\nExisting workflow.\n")
+	env, err := paths.Discover()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := candidate.Manager{Env: env, Actor: "test"}
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "batch-promote-1",
+		CandidateType: "rule",
+		TargetPath:    "rules/batch-promote-1.md",
+		Title:         "Batch Promote 1",
+		Body:          "# Batch Promote 1\n\nPromoted body one.",
+	})
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "batch-promote-2",
+		CandidateType: "rule",
+		TargetPath:    "rules/batch-promote-2.md",
+		Title:         "Batch Promote 2",
+		Body:          "# Batch Promote 2\n\nPromoted body two.",
+	})
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "batch-merge",
+		CandidateType: "workflow",
+		TargetPath:    "workflows/merge-target.md",
+		Title:         "Batch Merge",
+		Operation:     candidate.OperationMerge,
+		Body:          "Merged batch body.",
+	})
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "batch-discard",
+		CandidateType: "rule",
+		TargetPath:    "rules/batch-discard.md",
+		Title:         "Batch Discard",
+		Body:          "Discard batch body.",
+	})
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"review", "apply-candidates", "--promote", "batch-promote-1", "batch-promote-2", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run apply-candidates promote: %v stderr=%s", err, errb.String())
+	}
+	var promoteReport reviewApplyCandidatesReport
+	if err := json.Unmarshal(out.Bytes(), &promoteReport); err != nil {
+		t.Fatalf("promote report JSON invalid: %v\nstdout=%s\nstderr=%s", err, out.String(), errb.String())
+	}
+	if promoteReport.Schema != reviewApplyCandidatesReportSchema || promoteReport.Action != "promote" || promoteReport.Summary.Total != 2 || promoteReport.Summary.Applied != 2 || promoteReport.Summary.Failed != 0 {
+		t.Fatalf("promote report unexpected: %+v", promoteReport)
+	}
+	if promoteReport.IndexRebuild == nil || promoteReport.IndexRebuild.Error != "" || promoteReport.IndexRebuild.Scope != "project" {
+		t.Fatalf("promote index rebuild unexpected: %+v", promoteReport.IndexRebuild)
+	}
+	assertCandidateStatus(t, manager, "batch-promote-1", candidate.StatusPromoted)
+	assertCandidateStatus(t, manager, "batch-promote-2", candidate.StatusPromoted)
+	text := runApp(t, &out, &errb, "context", "Promoted body one")
+	if !strings.Contains(text, "Promoted body one.") {
+		t.Fatalf("context did not see promoted doc after apply-candidates rebuild:\n%s", text)
+	}
+
+	text = runApp(t, &out, &errb, "review", "apply-candidates", "--merge", "batch-merge")
+	if !strings.Contains(text, "index rebuilt\tproject") {
+		t.Fatalf("merge text output missing index rebuild:\n%s", text)
+	}
+	assertCandidateStatus(t, manager, "batch-merge", candidate.StatusMerged)
+	merged, err := os.ReadFile(filepath.Join(project, ".worktrail", "workflows", "merge-target.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(merged), "Existing workflow.") || !strings.Contains(string(merged), "Merged batch body.") {
+		t.Fatalf("merge target content unexpected:\n%s", merged)
+	}
+
+	text = runApp(t, &out, &errb, "review", "apply-candidates", "--discard", "batch-discard")
+	if !strings.Contains(text, "index rebuilt\tproject") {
+		t.Fatalf("discard text output missing index rebuild:\n%s", text)
+	}
+	assertCandidateStatus(t, manager, "batch-discard", candidate.StatusDiscarded)
+}
+
+func TestReviewApplyCandidatesRejectsInvalidActionsBeforeMutation(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	env, err := paths.Discover()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := candidate.Manager{Env: env, Actor: "test"}
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "invalid-promote",
+		CandidateType: "rule",
+		TargetPath:    "rules/invalid-promote.md",
+		Title:         "Invalid Promote",
+		Body:          "Invalid promote body.",
+	})
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "invalid-discard",
+		CandidateType: "rule",
+		TargetPath:    "rules/invalid-discard.md",
+		Title:         "Invalid Discard",
+		Body:          "Invalid discard body.",
+	})
+
+	cases := [][]string{
+		{"review", "apply-candidates", "--promote", "invalid-promote", "--discard", "invalid-discard"},
+		{"review", "apply-candidates"},
+		{"review", "apply-candidates", "--promote"},
+	}
+	for _, args := range cases {
+		out.Reset()
+		errb.Reset()
+		if err := Run(context.Background(), args, nil, &out, &errb); err == nil {
+			t.Fatalf("Run %v succeeded unexpectedly stdout=%s", args, out.String())
+		}
+	}
+	assertCandidateStatus(t, manager, "invalid-promote", candidate.StatusPending)
+	assertCandidateStatus(t, manager, "invalid-discard", candidate.StatusPending)
+	if _, err := os.Stat(filepath.Join(project, ".worktrail", "rules", "invalid-promote.md")); !os.IsNotExist(err) {
+		t.Fatalf("invalid action should not promote target, err=%v", err)
+	}
+}
+
+func TestReviewApplyCandidatesReportsFailuresAndBlocksEvidence(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	env, err := paths.Discover()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := candidate.Manager{Env: env, Actor: "test"}
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "ok-promote",
+		CandidateType: "rule",
+		TargetPath:    "rules/ok-promote.md",
+		Title:         "OK Promote",
+		Body:          "OK promote body.",
+	})
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "evidence-note",
+		CandidateType: model.CandidateTypeTranscriptNotes,
+		TargetPath:    "imports/transcripts/evidence-note.md",
+		Title:         "Evidence Note",
+		Body:          "Evidence note body.",
+	})
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "migration-source",
+		CandidateType: model.CandidateTypeMigrationSource,
+		TargetPath:    "imports/kdd/project/active-knowledge-log.md",
+		Title:         "Migration Source",
+		Body:          "Migration source body.",
+	})
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "split-source",
+		CandidateType: "lesson",
+		TargetPath:    "lessons/kdd-active-knowledge-log.md",
+		Title:         "KDD Active Log",
+		Summary:       "Do not promote directly",
+		Tags:          []string{"split-source"},
+		Body:          "Do not promote directly.",
+	})
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"review", "apply-candidates", "--promote", "ok-promote", "missing-candidate", "evidence-note", "migration-source", "split-source", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run apply-candidates mixed failures: %v stderr=%s", err, errb.String())
+	}
+	var report reviewApplyCandidatesReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.Total != 5 || report.Summary.Applied != 1 || report.Summary.Failed != 4 {
+		t.Fatalf("failure report unexpected: %+v", report)
+	}
+	assertCandidateStatus(t, manager, "ok-promote", candidate.StatusPromoted)
+	for _, id := range []string{"evidence-note", "migration-source", "split-source"} {
+		assertCandidateStatus(t, manager, id, candidate.StatusPending)
+	}
+	items := mapApplyCandidateItems(report.Items)
+	for _, id := range []string{"evidence-note", "migration-source", "split-source"} {
+		if items[id].Result != "failed" || !strings.Contains(items[id].Error, "blocks transcript_notes") {
+			t.Fatalf("%s block item unexpected: %+v", id, items[id])
+		}
+	}
+	if items["missing-candidate"].Result != "failed" || items["missing-candidate"].Error == "" {
+		t.Fatalf("missing candidate item unexpected: %+v", items["missing-candidate"])
+	}
+
+	for _, action := range []string{"merge", "discard"} {
+		out.Reset()
+		errb.Reset()
+		if err := Run(context.Background(), []string{"review", "apply-candidates", "--" + action, "evidence-note", "migration-source", "split-source", "--format", "json"}, nil, &out, &errb); err != nil {
+			t.Fatalf("Run apply-candidates %s blocked candidates: %v stderr=%s", action, err, errb.String())
+		}
+		var blocked reviewApplyCandidatesReport
+		if err := json.Unmarshal(out.Bytes(), &blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked.Summary.Applied != 0 || blocked.Summary.Failed != 3 {
+			t.Fatalf("%s blocked candidates report unexpected: %+v", action, blocked)
+		}
+		for _, id := range []string{"evidence-note", "migration-source", "split-source"} {
+			assertCandidateStatus(t, manager, id, candidate.StatusPending)
+		}
+	}
+}
+
 func TestReviewPlanSnapshotMismatchesCoverStaleFields(t *testing.T) {
 	base := reviewPlanSnapshot{
 		CandidateStatus:          candidate.StatusPending,
@@ -526,6 +767,14 @@ func assertCandidateStatusScoped(t *testing.T, manager candidate.Manager, scope,
 
 func mapReviewPlanItems(items []reviewPlanItem) map[string]reviewPlanItem {
 	out := map[string]reviewPlanItem{}
+	for _, item := range items {
+		out[item.CandidateID] = item
+	}
+	return out
+}
+
+func mapApplyCandidateItems(items []reviewApplyPlanItem) map[string]reviewApplyPlanItem {
+	out := map[string]reviewApplyPlanItem{}
 	for _, item := range items {
 		out[item.CandidateID] = item
 	}

@@ -12,8 +12,8 @@ func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 		"worktrail-handoff":  {"worktrail handoff", "new conversation", "end current chat", "Do not only output a copyable text handoff"},
 		"worktrail-import":   {"worktrail import", "worktrail sync", "worktrail migrate kdd"},
 		"worktrail-distill":  {"worktrail distill --pending --summary", "worktrail.distill.proposal.v1"},
-		"worktrail-review":   {"worktrail review plan --format json", "promoted, merged, discarded, restored, or retired"},
-		"worktrail-maintain": {"worktrail context \"maintenance\"", "worktrail evidence plan --format json"},
+		"worktrail-review":   {"worktrail review plan --format json", "worktrail review apply-candidates", "promoted, merged, discarded, restored, or retired", "Do not promote, merge, or discard `transcript_notes`"},
+		"worktrail-maintain": {"worktrail context \"maintenance\"", "worktrail evidence plan --format json", "review apply-candidates"},
 	}
 	seen := map[string]bool{}
 	rendered := RenderSkillTriggerRouting()

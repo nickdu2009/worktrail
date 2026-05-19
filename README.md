@@ -38,15 +38,33 @@ worktrail context "current task"
 
 ## Agent integration support
 
-Worktrail supports multiple local agent surfaces in the same repository. `worktrail install all` installs the supported local integrations: Codex, Claude Code, and Cursor. Use explicit targets such as `worktrail install codex` or `worktrail install claude` when only a subset should be installed.
+Worktrail supports multiple local agent surfaces in the same repository. Install scope is explicit:
+
+- User scope installs the agent capabilities that should follow the human across repositories. The bundled `templates/root/**` and `templates/skills/**` files are user-level instructions, rules, and skills.
+- Project scope installs runtime integration config for the current repository only, such as hooks, MCP/settings files, and the managed `.gitignore` entries needed for those runtime files. `--project` does not install project-level rules or project-level skills from `templates/root/**` or `templates/skills/**`.
+
+By default, `worktrail install <tool>` installs user scope only. For a complete setup, run both scopes in one command:
+
+```bash
+worktrail install <tool> --user --project
+```
+
+You can also install the scopes separately:
+
+```bash
+worktrail install <tool> --user
+worktrail install <tool> --project
+```
+
+Use `worktrail install all --user --project` to set up Codex, Claude Code, and Cursor together, or explicit targets such as `worktrail install codex --user --project` and `worktrail install claude --user --project` when only a subset should be installed.
 
 Current capability matrix:
 
-- Codex: install, doctor, uninstall, skills, hooks, MCP config, current-project `import codex` discovery, and explicit transcript `sync`/`extract`.
-- Claude Code: install, doctor, uninstall, skills, hooks/settings, and explicit transcript `sync claude <file>` / `extract --source claude`. There is no automatic `import claude` discovery yet.
-- Cursor: install, doctor, uninstall, MCP, rules, hooks, Cursor-visible skills, safe observed transcript metadata, and `import cursor` from explicit `--file` paths or Worktrail-observed transcript metadata. Cursor import does not scan undocumented private Cursor directories.
+- Codex: user instructions and skills, project hooks/runtime config, doctor, uninstall, current-project `import codex` discovery, and explicit transcript `sync`/`extract`.
+- Claude Code: user instructions and skills, project hooks/settings runtime config, doctor, uninstall, and explicit transcript `sync claude <file>` / `extract --source claude`. There is no automatic `import claude` discovery yet.
+- Cursor: user-level rule and skills, project MCP/hooks runtime config, doctor, uninstall, safe observed transcript metadata, and `import cursor` from explicit `--file` paths or Worktrail-observed transcript metadata. Cursor user install manages the Cursor-visible Worktrail rule and skills; Cursor project install does not create project rules or project skills. Cursor import does not scan undocumented private Cursor directories.
 
-Cursor can see Worktrail skills through compatible roots such as `.agents/skills`, `.codex/skills`, and `.claude/skills`. `install cursor` reuses visible managed skills by default and does not duplicate them into `.cursor/skills` unless no visible copy exists; `doctor cursor` reports duplicate visible skills as warnings, not failures.
+Cursor can see user-level Worktrail skills through compatible roots such as `$HOME/.agents/skills`, `$HOME/.codex/skills`, and `$HOME/.claude/skills`. Cursor user install reuses visible managed skills by default and installs to `$HOME/.cursor/skills` only when no visible copy exists; `doctor cursor --user` reports duplicate visible skills as warnings, not failures.
 
 ## Low-intervention maintenance
 

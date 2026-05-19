@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "preCompact": [
+      {
+        "command": "worktrail hook cursor preCompact"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "worktrail hook cursor sessionEnd"
+      }
+    ],
+    "sessionStart": [
+      {
+        "command": "worktrail hook cursor sessionStart"
+      }
+    ],
+    "stop": [
+      {
+        "command": "worktrail hook cursor stop"
+      }
+    ]
+  },
+  "version": 1
+}

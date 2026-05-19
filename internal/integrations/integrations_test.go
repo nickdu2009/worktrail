@@ -27,6 +27,16 @@ func testEnv(t *testing.T) paths.Env {
 	}
 }
 
+var allWorktrailSkills = []string{
+	"worktrail-context",
+	"worktrail-state",
+	"worktrail-handoff",
+	"worktrail-import",
+	"worktrail-distill",
+	"worktrail-review",
+	"worktrail-maintain",
+}
+
 func TestInstallCodexProjectManagesHooksAndGitignoreOnly(t *testing.T) {
 	env := testEnv(t)
 	agents := filepath.Join(env.ProjectRoot, "AGENTS.md")
@@ -56,10 +66,7 @@ func TestInstallCodexProjectManagesHooksAndGitignoreOnly(t *testing.T) {
 	if text != "# Local rules\n\nKeep this.\n" {
 		t.Fatalf("project AGENTS.md should not be modified, got:\n%s", text)
 	}
-	skill := filepath.Join(env.ProjectRoot, ".agents", "skills", "worktrail-state", "SKILL.md")
-	if _, err := os.Stat(skill); !os.IsNotExist(err) {
-		t.Fatalf("project skills should not be installed by default project integration, err=%v", err)
-	}
+	assertNoInstalledSkills(t, filepath.Join(env.ProjectRoot, ".agents", "skills"))
 	cfg := map[string]any{}
 	raw, err := os.ReadFile(hooks)
 	if err != nil {
@@ -144,25 +151,7 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		}
 		assertRenderedTriggerRouting(t, path)
 	}
-	for _, path := range []string{
-		filepath.Join(env.Home, ".codex", "skills", "worktrail-context", "SKILL.md"),
-		filepath.Join(env.Home, ".codex", "skills", "worktrail-handoff", "SKILL.md"),
-		filepath.Join(env.Home, ".codex", "skills", "worktrail-import", "SKILL.md"),
-		filepath.Join(env.Home, ".codex", "skills", "worktrail-distill", "SKILL.md"),
-		filepath.Join(env.Home, ".codex", "skills", "worktrail-review", "SKILL.md"),
-		filepath.Join(env.Home, ".codex", "skills", "worktrail-maintain", "SKILL.md"),
-	} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("expected %s: %v", path, err)
-		}
-		if !strings.HasPrefix(string(data), "---\n") {
-			t.Fatalf("skill frontmatter must be first in %s:\n%s", path, data)
-		}
-		if !strings.Contains(string(data), util.ManagedBegin) {
-			t.Fatalf("expected managed block in %s", path)
-		}
-	}
+	assertInstalledSkills(t, filepath.Join(env.Home, ".codex", "skills"))
 	distillSkill, err := os.ReadFile(filepath.Join(env.Home, ".codex", "skills", "worktrail-distill", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -197,6 +186,8 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		"worktrail context \"maintenance\"",
 		"worktrail distill --pending --summary",
 		"worktrail review plan --format json",
+		"review apply-candidates batch command",
+		"worktrail review apply-candidates --promote|--merge|--discard <id...> [--scope ...]",
 		"worktrail evidence plan --format json",
 		"maintenance.next_steps",
 		"Treat those generated commands as authoritative",
@@ -213,14 +204,16 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		"worktrail candidates list --semantic --status pending --format json",
 		"Do not include `transcript_notes` evidence or non-semantic operational candidates",
 		"show counts for each group",
-		"commands` array only for `promote`, `merge`, and `discard`",
+		"plan `commands` array only for `promote`, `merge`, and `discard`",
+		"worktrail review apply-candidates --promote|--merge|--discard <id...> [--scope ...]",
 		"Preserve any `--scope` flags from the plan commands",
 		"Do not generate a state-changing command for `needs_human_review`",
-		"accepted batch and scope",
+		"action, the exact candidate id list, and the scope",
 		"Do not automatically commit git changes",
 		"worktrail review --evidence",
 		"worktrail review --all",
 		"worktrail retire <id> --reason <text>",
+		"Never promote, merge, or discard `transcript_notes` from review actions",
 	} {
 		if !strings.Contains(string(reviewSkill), want) {
 			t.Fatalf("review skill missing %q:\n%s", want, reviewSkill)
@@ -238,7 +231,7 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 	}
 }
 
-func TestInstallClaudeUserAndProject(t *testing.T) {
+func TestInstallClaudeUserInstallsAllSkillsAndProjectRuntimeOnly(t *testing.T) {
 	env := testEnv(t)
 	if _, err := InstallClaude(env, Options{User: true, Project: true}); err != nil {
 		t.Fatalf("InstallClaude: %v", err)
@@ -255,40 +248,29 @@ func TestInstallClaudeUserAndProject(t *testing.T) {
 		}
 		assertRenderedTriggerRouting(t, path)
 	}
+	assertInstalledSkills(t, filepath.Join(env.Home, ".claude", "skills"))
 	for _, path := range []string{
-		filepath.Join(env.Home, ".claude", "skills", "worktrail-import", "SKILL.md"),
-		filepath.Join(env.Home, ".claude", "skills", "worktrail-distill", "SKILL.md"),
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-review", "SKILL.md"),
 		filepath.Join(env.Home, ".claude", "skills", "worktrail-maintain", "SKILL.md"),
-		filepath.Join(env.ProjectRoot, ".claude", "skills", "worktrail-state", "SKILL.md"),
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("expected %s: %v", path, err)
 		}
-		if !strings.HasPrefix(string(data), "---\n") {
-			t.Fatalf("skill frontmatter must be first in %s:\n%s", path, data)
-		}
-		if !strings.Contains(string(data), util.ManagedBegin) {
-			t.Fatalf("expected managed block in %s", path)
+		if !strings.Contains(string(data), "worktrail review apply-candidates") {
+			t.Fatalf("claude skill missing apply-candidates guidance in %s:\n%s", path, data)
 		}
 	}
 	for _, path := range []string{
-		filepath.Join(env.ProjectRoot, "CLAUDE.md"),
 		filepath.Join(env.ProjectRoot, ".gitignore"),
 		filepath.Join(env.ProjectRoot, ".claude", "settings.json"),
 	} {
-		data, err := os.ReadFile(path)
-		if err != nil {
+		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
 		}
-		if strings.HasSuffix(path, ".md") && !strings.Contains(string(data), util.ManagedBegin) {
-			t.Fatalf("expected managed block in %s", path)
-		}
-		if filepath.Base(path) == "CLAUDE.md" {
-			assertRenderedTriggerRouting(t, path)
-		}
 	}
+	assertNoPath(t, filepath.Join(env.ProjectRoot, "CLAUDE.md"))
+	assertNoInstalledSkills(t, filepath.Join(env.ProjectRoot, ".claude", "skills"))
 }
 
 func TestInstallCursorProjectManagesNativeConfigWithoutIgnoringCursor(t *testing.T) {
@@ -311,22 +293,13 @@ func TestInstallCursorProjectManagesNativeConfigWithoutIgnoringCursor(t *testing
 	for _, path := range []string{
 		filepath.Join(env.ProjectRoot, ".cursor", "mcp.json"),
 		filepath.Join(env.ProjectRoot, ".cursor", "hooks.json"),
-		filepath.Join(env.ProjectRoot, ".cursor", "rules", "worktrail.mdc"),
-		filepath.Join(env.ProjectRoot, ".cursor", "skills", "worktrail-state", "SKILL.md"),
 	} {
-		data, err := os.ReadFile(path)
-		if err != nil {
+		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s: %v", path, err)
 		}
-		if strings.HasSuffix(path, ".mdc") || strings.HasSuffix(path, "SKILL.md") {
-			if !strings.Contains(string(data), util.ManagedBegin) {
-				t.Fatalf("expected managed block in %s", path)
-			}
-		}
-		if strings.HasSuffix(path, "worktrail.mdc") {
-			assertRenderedTriggerRouting(t, path)
-		}
 	}
+	assertNoPath(t, filepath.Join(env.ProjectRoot, ".cursor", "rules", "worktrail.mdc"))
+	assertNoInstalledSkills(t, filepath.Join(env.ProjectRoot, ".cursor", "skills"))
 	raw, err := os.ReadFile(mcpPath)
 	if err != nil {
 		t.Fatal(err)
@@ -358,59 +331,235 @@ func TestInstallCursorProjectManagesNativeConfigWithoutIgnoringCursor(t *testing
 		if !check.OK {
 			t.Fatalf("doctor check failed: %+v", check)
 		}
+		if strings.Contains(check.Name, "project rule") || strings.Contains(check.Name, "project skill") {
+			t.Fatalf("project doctor should not check rule or skills: %+v", check)
+		}
 	}
 }
 
-func TestInstallCursorCoexistsWithCodexClaudeVisibleSkills(t *testing.T) {
+func TestInstallCursorUserDoctorChecksRuleAndAllSkills(t *testing.T) {
 	env := testEnv(t)
-	if _, err := InstallCodex(env, Options{User: true}); err != nil {
-		t.Fatalf("InstallCodex: %v", err)
-	}
-	if _, err := InstallClaude(env, Options{User: true}); err != nil {
-		t.Fatalf("InstallClaude: %v", err)
-	}
-	if _, err := Install(env, ToolCursor, Options{Project: true}); err != nil {
+	if _, err := Install(env, ToolCursor, Options{User: true}); err != nil {
 		t.Fatalf("Install cursor: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(env.ProjectRoot, ".cursor", "skills", "worktrail-context", "SKILL.md")); !os.IsNotExist(err) {
-		t.Fatalf("cursor install should reuse visible managed skills instead of copying duplicates, err=%v", err)
-	}
 	for _, path := range []string{
-		filepath.Join(env.Home, ".codex", "skills", "worktrail-context", "SKILL.md"),
-		filepath.Join(env.Home, ".claude", "skills", "worktrail-context", "SKILL.md"),
-		filepath.Join(env.ProjectRoot, ".cursor", "mcp.json"),
-		filepath.Join(env.ProjectRoot, ".cursor", "hooks.json"),
+		filepath.Join(env.Home, ".cursor", "rules", "worktrail.mdc"),
 	} {
 		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("expected coexistence file %s: %v", path, err)
+			t.Fatalf("expected cursor user file %s: %v", path, err)
 		}
 	}
-	doctor, err := Doctor(env, ToolCursor, Options{Project: true})
+	for _, path := range []string{
+		filepath.Join(env.Home, ".cursor", "mcp.json"),
+		filepath.Join(env.Home, ".cursor", "hooks.json"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("cursor user install should not create runtime config %s, err=%v", path, err)
+		}
+	}
+	assertRenderedTriggerRouting(t, filepath.Join(env.Home, ".cursor", "rules", "worktrail.mdc"))
+	assertInstalledSkills(t, filepath.Join(env.Home, ".cursor", "skills"))
+
+	doctor, err := Doctor(env, ToolCursor, Options{User: true})
 	if err != nil {
 		t.Fatalf("Doctor cursor: %v", err)
 	}
-	hasWarning := false
 	for _, check := range doctor.Checks {
 		if !check.OK {
-			t.Fatalf("duplicate visible skills should not fail doctor: %+v", check)
-		}
-		if strings.Contains(check.Note, "warning: duplicate Cursor-visible Worktrail skills") {
-			hasWarning = true
+			t.Fatalf("doctor check failed: %+v", check)
 		}
 	}
-	if !hasWarning {
-		t.Fatalf("expected duplicate skill warning: %+v", doctor.Checks)
+	assertDoctorCheckNamed(t, doctor, "user rule worktrail")
+	for _, skill := range allWorktrailSkills {
+		assertDoctorCheckNamed(t, doctor, "user skill "+skill)
 	}
-	if _, err := Uninstall(env, ToolCursor, Options{Project: true}); err != nil {
-		t.Fatalf("Uninstall cursor: %v", err)
+	for _, check := range doctor.Checks {
+		if strings.Contains(check.Name, "project rule") || strings.Contains(check.Name, "project skill") {
+			t.Fatalf("user doctor should not check project rule or skills: %+v", check)
+		}
 	}
-	for _, path := range []string{
-		filepath.Join(env.Home, ".codex", "skills", "worktrail-context", "SKILL.md"),
-		filepath.Join(env.Home, ".claude", "skills", "worktrail-context", "SKILL.md"),
+}
+
+func TestProjectInstallCleansLegacyManagedRootRuleAndSkills(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		tool       Tool
+		rootFiles  []string
+		ruleFiles  []string
+		skillRoots []string
+	}{
+		{
+			name:      "codex",
+			tool:      ToolCodex,
+			rootFiles: []string{"AGENTS.md"},
+			skillRoots: []string{
+				filepath.Join(".agents", "skills"),
+			},
+		},
+		{
+			name:      "claude",
+			tool:      ToolClaude,
+			rootFiles: []string{"CLAUDE.md"},
+			skillRoots: []string{
+				filepath.Join(".claude", "skills"),
+			},
+		},
+		{
+			name:      "cursor",
+			tool:      ToolCursor,
+			ruleFiles: []string{filepath.Join(".cursor", "rules", "worktrail.mdc")},
+			skillRoots: []string{
+				filepath.Join(".cursor", "skills"),
+			},
+		},
 	} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("cursor uninstall removed other tool skill %s: %v", path, err)
+		t.Run(tc.name, func(t *testing.T) {
+			env := testEnv(t)
+			var seeded []string
+			for _, rel := range tc.rootFiles {
+				path := filepath.Join(env.ProjectRoot, rel)
+				writeLegacyManagedMarkdown(t, path, tc.name+" root")
+				seeded = append(seeded, path)
+			}
+			for _, rel := range tc.ruleFiles {
+				path := filepath.Join(env.ProjectRoot, rel)
+				writeLegacyManagedMarkdown(t, path, tc.name+" rule")
+				seeded = append(seeded, path)
+			}
+			for _, relRoot := range tc.skillRoots {
+				for _, skill := range legacyProjectSkills {
+					path := filepath.Join(env.ProjectRoot, relRoot, skill, "SKILL.md")
+					writeLegacyManagedSkill(t, path, tc.name+" "+skill)
+					seeded = append(seeded, path)
+				}
+			}
+
+			if _, err := Install(env, tc.tool, Options{Project: true}); err != nil {
+				t.Fatalf("Install %s project: %v", tc.tool, err)
+			}
+			for _, path := range seeded {
+				assertLegacyUnmanagedContentOnly(t, path)
+			}
+		})
+	}
+}
+
+func TestProjectInstallDeletesManagedOnlyLegacyAgentFiles(t *testing.T) {
+	env := testEnv(t)
+	paths := []string{
+		filepath.Join(env.ProjectRoot, "AGENTS.md"),
+		filepath.Join(env.ProjectRoot, "CLAUDE.md"),
+		filepath.Join(env.ProjectRoot, ".cursor", "rules", "worktrail.mdc"),
+		filepath.Join(env.ProjectRoot, ".agents", "skills", "worktrail-state", "SKILL.md"),
+		filepath.Join(env.ProjectRoot, ".claude", "skills", "worktrail-state", "SKILL.md"),
+		filepath.Join(env.ProjectRoot, ".cursor", "skills", "worktrail-state", "SKILL.md"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
 		}
+		body := util.ManagedBegin + "\nlegacy managed only\n" + util.ManagedEnd + "\n"
+		if strings.HasSuffix(path, ".mdc") {
+			body = "---\ndescription: legacy cursor rule\n---\n\n" + body
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Install(env, ToolCursor, Options{Project: true}); err != nil {
+		t.Fatalf("Install cursor project: %v", err)
+	}
+	for _, path := range paths {
+		assertNoPath(t, path)
+	}
+}
+
+func assertInstalledSkills(t *testing.T, root string) {
+	t.Helper()
+	for _, skill := range allWorktrailSkills {
+		path := filepath.Join(root, skill, "SKILL.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+		if !strings.HasPrefix(string(data), "---\n") {
+			t.Fatalf("skill frontmatter must be first in %s:\n%s", path, data)
+		}
+		if !strings.Contains(string(data), util.ManagedBegin) {
+			t.Fatalf("expected managed block in %s", path)
+		}
+	}
+}
+
+func assertNoInstalledSkills(t *testing.T, root string) {
+	t.Helper()
+	for _, skill := range allWorktrailSkills {
+		assertNoPath(t, filepath.Join(root, skill, "SKILL.md"))
+	}
+}
+
+func assertNoPath(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected %s to be absent, err=%v", path, err)
+	}
+}
+
+func assertDoctorCheckNamed(t *testing.T, report Report, name string) {
+	t.Helper()
+	for _, check := range report.Checks {
+		if check.Name == name {
+			return
+		}
+	}
+	t.Fatalf("doctor report missing check %q: %+v", name, report.Checks)
+}
+
+func writeLegacyManagedMarkdown(t *testing.T, path, label string) {
+	t.Helper()
+	body := "# " + label + "\n\n" +
+		"unmanaged before\n\n" +
+		util.ManagedBegin + "\n" +
+		"legacy worktrail managed content\n" +
+		util.ManagedEnd + "\n\n" +
+		"unmanaged after\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeLegacyManagedSkill(t *testing.T, path, label string) {
+	t.Helper()
+	body := "---\ndescription: legacy project skill\n---\n\n" +
+		"# " + label + "\n\n" +
+		"unmanaged before\n\n" +
+		util.ManagedBegin + "\n" +
+		"legacy worktrail managed skill content\n" +
+		util.ManagedEnd + "\n\n" +
+		"unmanaged after\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertLegacyUnmanagedContentOnly(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected unmanaged legacy content to remain in %s: %v", path, err)
+	}
+	text := string(data)
+	if strings.Contains(text, util.ManagedBegin) || strings.Contains(text, util.ManagedEnd) || strings.Contains(text, "legacy worktrail managed") {
+		t.Fatalf("managed legacy content remains in %s:\n%s", path, text)
+	}
+	if !strings.Contains(text, "unmanaged before") || !strings.Contains(text, "unmanaged after") {
+		t.Fatalf("unmanaged content was not preserved in %s:\n%s", path, text)
 	}
 }
 

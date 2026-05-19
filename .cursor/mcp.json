@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "worktrail": {
+      "args": [
+        "mcp",
+        "serve",
+        "--stdio"
+      ],
+      "command": "worktrail",
+      "type": "stdio"
+    }
+  }
+}

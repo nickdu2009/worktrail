@@ -55,6 +55,115 @@ func TestInitCreatesUserAndProjectRoots(t *testing.T) {
 	}
 }
 
+func TestTopLevelHelpIncludesCandidateApplyCommands(t *testing.T) {
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"--help"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run help: %v stderr=%s", err, errb.String())
+	}
+	for _, want := range []string{
+		"worktrail promote <candidate-id>",
+		"worktrail merge <candidate-id>",
+		"worktrail discard <candidate-id>",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("top-level help missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestCandidateActionHelpDoesNotLookupCandidates(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	for _, command := range []string{"promote", "merge", "discard"} {
+		t.Run(command, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if err := Run(context.Background(), []string{command, "--help"}, nil, &out, &errb); err != nil {
+				t.Fatalf("Run %s --help: %v stderr=%s", command, err, errb.String())
+			}
+			if strings.Contains(out.String(), "candidate not found") || strings.Contains(errb.String(), "candidate not found") {
+				t.Fatalf("%s --help performed candidate lookup:\nstdout=%s\nstderr=%s", command, out.String(), errb.String())
+			}
+			if !strings.Contains(out.String(), "usage: worktrail "+command) {
+				t.Fatalf("%s --help missing usage:\n%s", command, out.String())
+			}
+		})
+	}
+}
+
+func TestReviewHelpIncludesApplyCandidates(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"review", "--help"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review --help: %v stderr=%s", err, errb.String())
+	}
+	for _, want := range []string{
+		"worktrail review apply-candidates --promote <id...>",
+		"worktrail review apply-candidates --merge <id...>",
+		"worktrail review apply-candidates --discard <id...>",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("review help missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestCandidateActionIndexRebuildFailureReportsNextStep(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "json-promote", "--type", "rule", "--target", "rules/json-promote.md", "--title", "JSON Promote", "JSON promote body.")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "text-discard", "--type", "rule", "--target", "rules/text-discard.md", "--title", "Text Discard", "Text discard body.")
+	if err := os.RemoveAll(filepath.Join(project, ".worktrail", "index")); err != nil {
+		t.Fatal(err)
+	}
+	writeTextFile(t, filepath.Join(project, ".worktrail", "index"), "not a directory\n")
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"promote", "json-promote", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run promote json: %v stderr=%s", err, errb.String())
+	}
+	var result candidate.ApplyResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("promote JSON stdout invalid: %v\nstdout=%s\nstderr=%s", err, out.String(), errb.String())
+	}
+	if strings.Contains(out.String(), "next:") {
+		t.Fatalf("JSON stdout was polluted by next-step:\n%s", out.String())
+	}
+	if !strings.Contains(errb.String(), "next: worktrail index rebuild --scope project") {
+		t.Fatalf("JSON stderr missing rebuild next-step:\n%s", errb.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"discard", "text-discard"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run discard text: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "next: worktrail index rebuild --scope project") {
+		t.Fatalf("text stdout missing rebuild next-step:\nstdout=%s\nstderr=%s", out.String(), errb.String())
+	}
+}
+
 func TestExtractionCandidateIDIncludesSourceAndOrdinal(t *testing.T) {
 	got := extractionCandidateID("codex", "/tmp/session.jsonl", 1, "user")
 	if got != "codex-02-user" {
@@ -84,14 +193,22 @@ func TestInstallAllIncludesCursorAndPreservesCompatibleSkills(t *testing.T) {
 		filepath.Join(project, ".claude", "settings.json"),
 		filepath.Join(project, ".cursor", "mcp.json"),
 		filepath.Join(project, ".cursor", "hooks.json"),
-		filepath.Join(project, ".cursor", "rules", "worktrail.mdc"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected install all file %s: %v", path, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(project, ".cursor", "skills", "worktrail-state", "SKILL.md")); !os.IsNotExist(err) {
-		t.Fatalf("cursor project skills should be skipped when Claude project skills are visible, err=%v", err)
+	for _, path := range []string{
+		filepath.Join(project, "AGENTS.md"),
+		filepath.Join(project, "CLAUDE.md"),
+		filepath.Join(project, ".cursor", "rules", "worktrail.mdc"),
+		filepath.Join(project, ".agents", "skills", "worktrail-state", "SKILL.md"),
+		filepath.Join(project, ".claude", "skills", "worktrail-state", "SKILL.md"),
+		filepath.Join(project, ".cursor", "skills", "worktrail-state", "SKILL.md"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("project install should not create agent instruction file %s, err=%v", path, err)
+		}
 	}
 }
 

@@ -123,6 +123,7 @@ func UninstallClaude(env paths.Env, opts Options) (Report, error) {
 
 type integrationConfig struct {
 	tool              Tool
+	projectRoot       string
 	rootTemplate      string
 	userRootFile      string
 	projectRootFile   string
@@ -140,6 +141,22 @@ type integrationConfig struct {
 	projectJSONs      []jsonTemplate
 }
 
+var worktrailUserSkills = []string{
+	"worktrail-context",
+	"worktrail-state",
+	"worktrail-handoff",
+	"worktrail-import",
+	"worktrail-distill",
+	"worktrail-review",
+	"worktrail-maintain",
+}
+
+var legacyProjectSkills = []string{
+	"worktrail-context",
+	"worktrail-state",
+	"worktrail-handoff",
+}
+
 type jsonTemplate struct {
 	path     string
 	template string
@@ -150,32 +167,33 @@ func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
 	case ToolCodex:
 		return integrationConfig{
 			tool:             tool,
+			projectRoot:      env.ProjectRoot,
 			rootTemplate:     "root/AGENTS.md",
 			userRootFile:     filepath.Join(env.Home, ".codex", "AGENTS.md"),
 			userSkillRoot:    filepath.Join(env.Home, ".codex", "skills"),
 			projectSkillRoot: filepath.Join(env.ProjectRoot, ".agents", "skills"),
-			userSkills:       []string{"worktrail-context", "worktrail-handoff", "worktrail-import", "worktrail-distill", "worktrail-review", "worktrail-maintain"},
+			userSkills:       worktrailUserSkills,
 			projectJSONPath:  filepath.Join(env.ProjectRoot, ".codex", "hooks.json"),
 			projectJSONTmpl:  "config/codex-hooks.json",
 		}, nil
 	case ToolClaude:
 		return integrationConfig{
 			tool:             tool,
+			projectRoot:      env.ProjectRoot,
 			rootTemplate:     "root/CLAUDE.md",
 			userRootFile:     filepath.Join(env.Home, ".claude", "CLAUDE.md"),
-			projectRootFile:  filepath.Join(env.ProjectRoot, "CLAUDE.md"),
 			userSkillRoot:    filepath.Join(env.Home, ".claude", "skills"),
 			projectSkillRoot: filepath.Join(env.ProjectRoot, ".claude", "skills"),
-			userSkills:       []string{"worktrail-context", "worktrail-handoff", "worktrail-import", "worktrail-distill", "worktrail-review", "worktrail-maintain"},
-			projectSkills:    []string{"worktrail-context", "worktrail-state", "worktrail-handoff"},
+			userSkills:       worktrailUserSkills,
 			projectJSONPath:  filepath.Join(env.ProjectRoot, ".claude", "settings.json"),
 			projectJSONTmpl:  "config/claude-settings.json",
 		}, nil
 	case ToolCursor:
 		return integrationConfig{
 			tool:             tool,
+			projectRoot:      env.ProjectRoot,
 			ruleTemplate:     "root/cursor-worktrail.mdc",
-			projectRuleFile:  filepath.Join(env.ProjectRoot, ".cursor", "rules", "worktrail.mdc"),
+			userRuleFile:     filepath.Join(env.Home, ".cursor", "rules", "worktrail.mdc"),
 			userSkillRoot:    filepath.Join(env.Home, ".cursor", "skills"),
 			projectSkillRoot: filepath.Join(env.ProjectRoot, ".cursor", "skills"),
 			visibleSkillRoots: []string{
@@ -183,17 +201,8 @@ func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
 				filepath.Join(env.Home, ".agents", "skills"),
 				filepath.Join(env.Home, ".codex", "skills"),
 				filepath.Join(env.Home, ".claude", "skills"),
-				filepath.Join(env.ProjectRoot, ".cursor", "skills"),
-				filepath.Join(env.ProjectRoot, ".agents", "skills"),
-				filepath.Join(env.ProjectRoot, ".codex", "skills"),
-				filepath.Join(env.ProjectRoot, ".claude", "skills"),
 			},
-			userSkills:    []string{"worktrail-context", "worktrail-handoff", "worktrail-import", "worktrail-distill", "worktrail-review", "worktrail-maintain"},
-			projectSkills: []string{"worktrail-context", "worktrail-state", "worktrail-handoff"},
-			userJSONs: []jsonTemplate{
-				{path: filepath.Join(env.Home, ".cursor", "mcp.json"), template: "config/cursor-mcp.json"},
-				{path: filepath.Join(env.Home, ".cursor", "hooks.json"), template: "config/cursor-hooks.json"},
-			},
+			userSkills: worktrailUserSkills,
 			projectJSONs: []jsonTemplate{
 				{path: filepath.Join(env.ProjectRoot, ".cursor", "mcp.json"), template: "config/cursor-mcp.json"},
 				{path: filepath.Join(env.ProjectRoot, ".cursor", "hooks.json"), template: "config/cursor-hooks.json"},
@@ -209,6 +218,9 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 	skills := cfg.userSkills
 	rootFile := cfg.userRootFile
 	if scope == "project" {
+		if err := cleanupLegacyProjectAgentFiles(cfg, report); err != nil {
+			return err
+		}
 		rootFile = cfg.projectRootFile
 		skillRoot = cfg.projectSkillRoot
 		skills = cfg.projectSkills
@@ -289,6 +301,9 @@ func uninstallScope(cfg integrationConfig, scope string, report *Report) error {
 	skills := cfg.userSkills
 	rootFile := cfg.userRootFile
 	if scope == "project" {
+		if err := cleanupLegacyProjectAgentFiles(cfg, report); err != nil {
+			return err
+		}
 		rootFile = cfg.projectRootFile
 		skillRoot = cfg.projectSkillRoot
 		skills = cfg.projectSkills
@@ -421,11 +436,91 @@ func removeSkillManaged(path string) error {
 		return err
 	}
 	next := util.RemoveManagedBlock(string(data))
+	if strings.TrimSpace(next) == "" {
+		return os.Remove(path)
+	}
 	_, rest, ok := splitSkillDocument(next)
 	if ok && strings.TrimSpace(rest) == "" {
 		return os.Remove(path)
 	}
 	return util.AtomicWrite(path, []byte(next), 0o644)
+}
+
+func cleanupLegacyProjectAgentFiles(cfg integrationConfig, report *Report) error {
+	if cfg.projectRoot == "" {
+		return nil
+	}
+	for _, path := range []string{
+		filepath.Join(cfg.projectRoot, "AGENTS.md"),
+		filepath.Join(cfg.projectRoot, "CLAUDE.md"),
+	} {
+		changed, err := removeManagedIfPresent(path)
+		if err != nil {
+			return err
+		}
+		if changed {
+			report.Actions = append(report.Actions, Action{Path: path, Action: "legacy-managed-block-removed"})
+		}
+	}
+	rulePath := filepath.Join(cfg.projectRoot, ".cursor", "rules", "worktrail.mdc")
+	changed, err := removeSkillManagedIfPresent(rulePath)
+	if err != nil {
+		return err
+	}
+	if changed {
+		report.Actions = append(report.Actions, Action{Path: rulePath, Action: "legacy-managed-block-removed"})
+	}
+	for _, root := range []string{
+		filepath.Join(cfg.projectRoot, ".agents", "skills"),
+		filepath.Join(cfg.projectRoot, ".claude", "skills"),
+		filepath.Join(cfg.projectRoot, ".cursor", "skills"),
+	} {
+		for _, skill := range legacyProjectSkills {
+			path := filepath.Join(root, skill, "SKILL.md")
+			changed, err := removeSkillManagedIfPresent(path)
+			if err != nil {
+				return err
+			}
+			if changed {
+				report.Actions = append(report.Actions, Action{Path: path, Action: "legacy-managed-block-removed"})
+			}
+		}
+	}
+	return nil
+}
+
+func removeManagedIfPresent(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	text := string(data)
+	if !strings.Contains(text, util.ManagedBegin) || !strings.Contains(text, util.ManagedEnd) {
+		return false, nil
+	}
+	next := util.RemoveManagedBlock(text)
+	if strings.TrimSpace(next) == "" {
+		return true, os.Remove(path)
+	}
+	return true, util.AtomicWrite(path, []byte(next), 0o644)
+}
+
+func removeSkillManagedIfPresent(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	text := string(data)
+	if !strings.Contains(text, util.ManagedBegin) || !strings.Contains(text, util.ManagedEnd) {
+		return false, nil
+	}
+	return true, removeSkillManaged(path)
 }
 
 func splitSkillDocument(body string) (frontmatter string, content string, ok bool) {

@@ -114,6 +114,9 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  worktrail candidates create --help")
 	fmt.Fprintln(out, "  worktrail review [--semantic|--evidence|--all]")
 	fmt.Fprintln(out, "  worktrail evidence plan [--status active|archived|all]")
+	fmt.Fprintln(out, "  worktrail promote <candidate-id>")
+	fmt.Fprintln(out, "  worktrail merge <candidate-id>")
+	fmt.Fprintln(out, "  worktrail discard <candidate-id>")
 	fmt.Fprintln(out, "  worktrail restore <candidate-id>")
 	fmt.Fprintln(out, "  worktrail retire <candidate-id> --reason <text>")
 }

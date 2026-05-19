@@ -13,6 +13,7 @@ var mutatingCommandPrefixes = []string{
 	"worktrail restore",
 	"worktrail retire",
 	"worktrail distill apply",
+	"worktrail review apply-candidates",
 	"worktrail evidence archive",
 	"worktrail evidence discard",
 }

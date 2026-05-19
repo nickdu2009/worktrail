@@ -91,12 +91,12 @@ var skillTriggers = []SkillTrigger{
 		},
 		RequiredActions: []string{
 			"Run `worktrail review plan --format json` for pending semantic candidates.",
-			"Group items by `recommended_action`, show counts and source traceability, and use plan `commands` only for promote, merge, and discard.",
+			"Group items by `recommended_action`, show counts and source traceability, and use plan `commands` or `worktrail review apply-candidates` only after explicit confirmation.",
 			"Wait for explicit confirmation identifying the candidate id or accepted batch before any state-changing command.",
 		},
 		Never: []string{
 			"Do not generate state-changing commands for `needs_human_review`.",
-			"Do not promote or merge `transcript_notes` or migration-source evidence directly.",
+			"Do not promote, merge, or discard `transcript_notes`, `migration_source`, or KDD split-source evidence directly from review actions.",
 		},
 	},
 	{
@@ -107,7 +107,7 @@ var skillTriggers = []SkillTrigger{
 		RequiredActions: []string{
 			"Run the read-only discovery chain first: `worktrail context \"maintenance\"`, then the exact scope-aware commands from `maintenance.next_steps`.",
 			"Use `worktrail distill --pending --summary`, `worktrail review plan --format json`, and `worktrail evidence plan --format json` as indicated by maintenance hints.",
-			"Ask which lane to run and require explicit confirmation before distill apply, review apply-plan, promote, merge, discard, archive, restore, or retire.",
+			"Ask which lane to run and require explicit confirmation before distill apply, review apply-plan, review apply-candidates, promote, merge, discard, archive, restore, or retire.",
 		},
 		Never: []string{
 			"Do not automatically commit git changes.",

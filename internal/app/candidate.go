@@ -129,6 +129,9 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	if len(args) > 0 && args[0] == "apply-plan" {
 		return runReviewApplyPlan(env, ioctx, args[1:])
 	}
+	if len(args) > 0 && args[0] == "apply-candidates" {
+		return runReviewApplyCandidates(env, ioctx, args[1:])
+	}
 	if wantsHelp(args) {
 		printReviewHelp(ioctx.Out)
 		return nil
@@ -310,23 +313,46 @@ func missingAppliedCandidateTargets(env paths.Env, records []candidate.Record) (
 }
 
 func runCandidateAction(_ context.Context, env paths.Env, ioctx IO, action string, args []string) error {
+	if wantsHelp(args) {
+		printCandidateActionHelp(ioctx.Out, action)
+		return nil
+	}
 	flags, positional := splitFlags(args)
 	scope := flagValue(flags, "scope", "project")
 	id := firstArg(positional, flagValue(flags, "id", ""))
 	manager := candidate.Manager{Env: env, Actor: "cli:" + action}
+	format := flagValue(flags, "format", "text")
 	switch action {
 	case "promote":
 		result, err := manager.Promote(scope, id)
 		if err != nil {
 			return err
 		}
-		return printApplyResult(ioctx, result, flagValue(flags, "format", "text"))
+		if err := printApplyResult(ioctx, result, format); err != nil {
+			return err
+		}
+		indexResult := rebuildIndexForScope(env, result.Candidate.Scope)
+		if format != "json" {
+			printIndexRebuildResult(ioctx, indexResult)
+		} else if indexResult.Error != "" {
+			printIndexRebuildFailure(ioctx, indexResult)
+		}
+		return nil
 	case "discard":
 		rec, err := manager.Discard(scope, id)
 		if err != nil {
 			return err
 		}
-		return printCandidate(ioctx, rec, flagValue(flags, "format", "text"))
+		if err := printCandidate(ioctx, rec, format); err != nil {
+			return err
+		}
+		indexResult := rebuildIndexForScope(env, rec.Meta.Scope)
+		if format != "json" {
+			printIndexRebuildResult(ioctx, indexResult)
+		} else if indexResult.Error != "" {
+			printIndexRebuildFailure(ioctx, indexResult)
+		}
+		return nil
 	case "restore":
 		result, err := manager.Restore(scope, id)
 		if err != nil {
@@ -349,9 +375,14 @@ func runCandidateAction(_ context.Context, env paths.Env, ioctx IO, action strin
 }
 
 func runMerge(_ context.Context, env paths.Env, ioctx IO, args []string) error {
+	if wantsHelp(args) {
+		printMergeHelp(ioctx.Out)
+		return nil
+	}
 	flags, positional := splitFlags(args)
 	scope := flagValue(flags, "scope", "project")
 	id := firstArg(positional, flagValue(flags, "id", ""))
+	format := flagValue(flags, "format", "text")
 	manager := candidate.Manager{Env: env, Actor: "cli:merge"}
 	rec, err := manager.Show(scope, id)
 	if err != nil {
@@ -364,7 +395,16 @@ func runMerge(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	return printApplyResult(ioctx, result, flagValue(flags, "format", "text"))
+	if err := printApplyResult(ioctx, result, format); err != nil {
+		return err
+	}
+	indexResult := rebuildIndexForScope(env, result.Candidate.Scope)
+	if format != "json" {
+		printIndexRebuildResult(ioctx, indexResult)
+	} else if indexResult.Error != "" {
+		printIndexRebuildFailure(ioctx, indexResult)
+	}
+	return nil
 }
 
 func runRedact(_ context.Context, env paths.Env, ioctx IO, args []string) error {
@@ -455,10 +495,37 @@ func printCandidatesHelp(out io.Writer, subcommand string) {
 	}
 }
 
+func printCandidateActionHelp(out io.Writer, action string) {
+	switch action {
+	case "promote":
+		fmt.Fprintln(out, "usage: worktrail promote <candidate-id> [--scope project|user] [--format text|json]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Promotes a pending replace candidate into formal knowledge and rebuilds the same-scope index.")
+		fmt.Fprintln(out, "transcript_notes and migration_source evidence must be distilled before promote.")
+	case "discard":
+		fmt.Fprintln(out, "usage: worktrail discard <candidate-id> [--scope project|user] [--format text|json]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Marks a non-terminal candidate discarded and rebuilds the same-scope index.")
+	default:
+		fmt.Fprintf(out, "usage: worktrail %s <candidate-id> [--scope project|user]\n", action)
+	}
+}
+
+func printMergeHelp(out io.Writer) {
+	fmt.Fprintln(out, "usage: worktrail merge <candidate-id> [target-path] [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Merges a pending candidate into its formal knowledge target and rebuilds the same-scope index.")
+	fmt.Fprintln(out, "When target-path is provided, it must match the candidate target_path.")
+	fmt.Fprintln(out, "transcript_notes and migration_source evidence must be distilled before merge.")
+}
+
 func printReviewHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail review [--semantic|--evidence|--all] [--scope project|user]")
 	fmt.Fprintln(out, "       worktrail review plan [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out, "       worktrail review apply-plan <plan.json> --confirm [--format text|json]")
+	fmt.Fprintln(out, "       worktrail review apply-candidates --promote <id...> [--scope project|user]")
+	fmt.Fprintln(out, "       worktrail review apply-candidates --merge <id...> [--scope project|user]")
+	fmt.Fprintln(out, "       worktrail review apply-candidates --discard <id...> [--scope project|user]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "By default, review shows pending semantic candidates and hides transcript_notes evidence plus non-semantic operational candidates.")
 	fmt.Fprintln(out, "Scope defaults to project; pass --scope user for user-level candidates.")

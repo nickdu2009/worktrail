@@ -64,6 +64,48 @@ func runIndex(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 	}
 }
 
+type indexRebuildResult struct {
+	Scope     string `json:"scope"`
+	Entries   int    `json:"entries,omitempty"`
+	IndexPath string `json:"index_path,omitempty"`
+	NextStep  string `json:"next_step,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+func rebuildIndexForScope(env paths.Env, scope string) indexRebuildResult {
+	if scope == "" {
+		scope = "project"
+	}
+	nextStep := fmt.Sprintf("worktrail index rebuild --scope %s", scope)
+	manifest, err := index.RebuildEnv(env, scope)
+	if err != nil {
+		return indexRebuildResult{
+			Scope:    scope,
+			NextStep: nextStep,
+			Error:    err.Error(),
+		}
+	}
+	return indexRebuildResult{
+		Scope:     manifest.Scope,
+		Entries:   manifest.Entries,
+		IndexPath: manifest.IndexPath,
+	}
+}
+
+func printIndexRebuildResult(ioctx IO, result indexRebuildResult) {
+	if result.Error != "" {
+		fmt.Fprintf(ioctx.Err, "index rebuild failed: %s\n", result.Error)
+		fmt.Fprintf(ioctx.Out, "next: %s\n", result.NextStep)
+		return
+	}
+	fmt.Fprintf(ioctx.Out, "index rebuilt\t%s\t%d\t%s\n", result.Scope, result.Entries, result.IndexPath)
+}
+
+func printIndexRebuildFailure(ioctx IO, result indexRebuildResult) {
+	fmt.Fprintf(ioctx.Err, "index rebuild failed: %s\n", result.Error)
+	fmt.Fprintf(ioctx.Err, "next: %s\n", result.NextStep)
+}
+
 func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 	flags, positional := splitFlags(args)
 	query := joinArgs(positional)
