@@ -14,13 +14,24 @@ func TestRebuildStatusSearch(t *testing.T) {
 	root := t.TempDir()
 	mustWriteJSON(t, filepath.Join(root, "config.json"), map[string]any{"scope": "project"})
 	mustWriteDoc(t, filepath.Join(root, "decisions", "api.md"), map[string]any{
-		"id":         "decision-api",
-		"scope":      "project",
-		"type":       "decision",
-		"title":      "API Decision",
-		"tags":       []string{"api", "search"},
-		"updated_at": "2026-05-01T00:00:00Z",
+		"id":              "decision-api",
+		"scope":           "project",
+		"type":            "decision",
+		"title":           "API Decision",
+		"stage":           "decision",
+		"topic":           "api",
+		"source_of_truth": true,
+		"supersedes":      []string{"architecture/old-api.md"},
+		"updated_at":      "2026-05-01T00:00:00Z",
+		"tags":            []string{"api", "search"},
 	}, "needle in an older decision")
+	mustWriteDoc(t, filepath.Join(root, "requirements", "prd.md"), map[string]any{
+		"id":         "requirement-prd",
+		"scope":      "project",
+		"title":      "PRD",
+		"stage":      "requirements",
+		"updated_at": "2026-05-01T12:00:00Z",
+	}, "Primary user scope and MVP boundary.")
 	mustWriteDoc(t, filepath.Join(root, "state", "active", "today.md"), map[string]any{
 		"id":         "active-state",
 		"scope":      "project",
@@ -43,8 +54,8 @@ func TestRebuildStatusSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Rebuild() error = %v", err)
 	}
-	if manifest.Entries != 3 {
-		t.Fatalf("manifest entries = %d, want 3", manifest.Entries)
+	if manifest.Entries != 4 {
+		t.Fatalf("manifest entries = %d, want 4", manifest.Entries)
 	}
 	if _, err := os.Stat(filepath.Join(root, "index", DBFile)); err != nil {
 		t.Fatalf("index db missing: %v", err)
@@ -57,7 +68,7 @@ func TestRebuildStatusSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if !status.Exists || status.Entries != 3 || status.Scope != "project" {
+	if !status.Exists || status.Entries != 4 || status.Scope != "project" {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 
@@ -78,6 +89,21 @@ func TestRebuildStatusSearch(t *testing.T) {
 	}
 	if len(candidates) != 1 || candidates[0].Entry.CandidateType != "rule" {
 		t.Fatalf("candidate result = %+v", candidates)
+	}
+
+	requirements, err := Search(root, Query{Type: "requirement"})
+	if err != nil {
+		t.Fatalf("Search(requirement) error = %v", err)
+	}
+	if len(requirements) != 1 || requirements[0].Entry.Stage != "requirements" {
+		t.Fatalf("requirement metadata not indexed: %+v", requirements)
+	}
+	decisions, err := Search(root, Query{Type: "decision"})
+	if err != nil {
+		t.Fatalf("Search(decision) error = %v", err)
+	}
+	if len(decisions) != 1 || !decisions[0].Entry.SourceOfTruth || decisions[0].Entry.Topic != "api" || len(decisions[0].Entry.Supersedes) != 1 {
+		t.Fatalf("decision governance metadata not indexed: %+v", decisions)
 	}
 }
 

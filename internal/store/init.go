@@ -57,7 +57,7 @@ func InitUser(env paths.Env) error {
 
 func InitProject(env paths.Env) error {
 	dirs := []string{
-		"architecture", "decisions", "handoffs", "rules", "prompts",
+		"requirements", "architecture", "decisions", "handoffs", "rules", "prompts",
 		"integrations", "validation", "glossary",
 		"state/active", "state/checkpoints", "state/archived",
 		"candidates/project", "raw/codex", "raw/claude", "raw/cursor",

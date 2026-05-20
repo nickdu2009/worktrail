@@ -143,6 +143,8 @@ type integrationConfig struct {
 
 var worktrailUserSkills = []string{
 	"worktrail-context",
+	"worktrail-doc-preview",
+	"worktrail-init",
 	"worktrail-state",
 	"worktrail-handoff",
 	"worktrail-import",

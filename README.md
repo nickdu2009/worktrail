@@ -36,6 +36,23 @@ worktrail context "current task"
 
 `worktrail context <task>` hides pending transcript evidence by default and reports how many evidence candidates are hidden. Use `worktrail context --evidence <task>` when the raw transcript notes themselves need to be included in the Pending Candidates section.
 
+Project knowledge can use `.worktrail/requirements/` for PRDs, user goals, persona or primary-user scope, workflow problems, MVP boundaries, out-of-scope notes, requirement-level acceptance criteria, business capability requirements, failure exits, and requirement-stage open questions. This complements, rather than replaces, `architecture/`, `decisions/`, `validation/`, and `workflows/`.
+
+Formal Markdown frontmatter can optionally declare governance metadata:
+
+```json
+{
+  "stage": "requirements",
+  "topic": "delivery-expert-workbench",
+  "source_of_truth": true,
+  "supersedes": ["architecture/old-doc.md"]
+}
+```
+
+Allowed stages are `requirements`, `design`, `decision`, `implementation`, `validation`, `historical`, and `retired`. Existing documents without this metadata continue to work. Use `worktrail context --stage requirements <task>`, `--stage design`, or `--stage implementation` to bias context section order and item priority for the current work stage.
+
+`worktrail doctor knowledge` checks for knowledge governance drift such as requirements content in `architecture/` or `decisions/`, decisions without a clear Decision section, multiple `source_of_truth` documents for the same topic, superseded documents still referenced from `index.md`, and invalid stage metadata.
+
 ## Agent integration support
 
 Worktrail supports multiple local agent surfaces in the same repository. Install scope is explicit:

@@ -29,6 +29,35 @@ var skillTriggers = []SkillTrigger{
 		},
 	},
 	{
+		Skill: "worktrail-doc-preview",
+		UseWhen: []string{
+			"the user asks to preview Worktrail docs, render Worktrail knowledge, open a Worktrail candidate, handoff, workflow, profile, rule, lesson, or says 预览 Worktrail 文档",
+		},
+		RequiredActions: []string{
+			"Run `worktrail preview <path> --scope <scope> --open` or `worktrail preview --candidate <id> --scope <scope> --open`.",
+			"Use browser verification when available and report the preview URL, source, and validation result.",
+		},
+		Never: []string{
+			"Do not use the target project's dev server, docs site, package manager, or framework for Worktrail document preview.",
+			"Do not preview non-Worktrail content or modify target project business files.",
+		},
+	},
+	{
+		Skill: "worktrail-init",
+		UseWhen: []string{
+			"the user asks to initialize Worktrail, set up Worktrail, install Worktrail for Cursor, Codex, Claude, or all agents, configure Worktrail hooks, MCP, rules, or skills",
+		},
+		RequiredActions: []string{
+			"Run `worktrail init` for Worktrail user and project initialization.",
+			"Run `worktrail install cursor|codex|claude|all --user|--project` as requested and verify with `worktrail doctor <tool> --user|--project`.",
+			"Report the Worktrail-managed files affected, including `.worktrail`, `.gitignore`, agent hooks, MCP config, rules, and skills as applicable.",
+		},
+		Never: []string{
+			"Do not initialize the target application's language, framework, package manager, or git repository.",
+			"Do not require the target project to have any specific technology stack or overwrite non-Worktrail configuration.",
+		},
+	},
+	{
 		Skill: "worktrail-state",
 		UseWhen: []string{
 			"the task is long, risky, multi-step, likely to compact, needs a checkpoint, or the user asks to record current state, update state, create a checkpoint, inject state, or save progress",

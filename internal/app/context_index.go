@@ -150,6 +150,7 @@ func runContextPack(_ context.Context, env paths.Env, ioctx IO, args []string) e
 	flags, positional := splitFlagsWithBooleans(args, map[string]bool{"evidence": true})
 	pack, err := contextpack.Build(env, contextpack.Options{
 		Task:            joinArgs(positional),
+		Stage:           flagValue(flags, "stage", ""),
 		IncludeEvidence: flagValue(flags, "evidence", "") == "true",
 	})
 	if err != nil {
@@ -364,6 +365,8 @@ func defaultCandidateTarget(cand model.Candidate) string {
 	switch typ {
 	case "decision", "adr":
 		return filepath.ToSlash(filepath.Join("decisions", "ADR-"+cand.ID+".md"))
+	case "requirement":
+		return filepath.ToSlash(filepath.Join("requirements", cand.ID+".md"))
 	case "handoff":
 		return filepath.ToSlash(filepath.Join("handoffs", cand.ID+".md"))
 	case "prompt":

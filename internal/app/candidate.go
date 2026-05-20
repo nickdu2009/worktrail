@@ -470,7 +470,7 @@ func printCandidatesHelp(out io.Writer, subcommand string) {
 		fmt.Fprintln(out, "options:")
 		fmt.Fprintln(out, "  --id <id>              optional stable candidate id")
 		fmt.Fprintln(out, "  --scope <scope>        project or user (default project)")
-		fmt.Fprintln(out, "  --type <type>          semantic type such as rule, decision, architecture, validation, or transcript_notes")
+		fmt.Fprintln(out, "  --type <type>          semantic type such as rule, requirement, decision, architecture, validation, or transcript_notes")
 		fmt.Fprintln(out, "  --target <path>        target knowledge path, for example rules/testing.md")
 		fmt.Fprintln(out, "  --title <title>        candidate title")
 		fmt.Fprintln(out, "  --summary <text>       short review summary")

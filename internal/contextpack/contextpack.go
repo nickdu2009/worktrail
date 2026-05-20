@@ -17,21 +17,26 @@ import (
 
 type Options struct {
 	Task            string
+	Stage           string
 	Limit           int
 	Now             time.Time
 	IncludeEvidence bool
 }
 
 type Item struct {
-	Scope      string    `json:"scope"`
-	Type       string    `json:"type"`
-	Title      string    `json:"title"`
-	Path       string    `json:"path"`
-	Status     string    `json:"status,omitempty"`
-	Tags       []string  `json:"tags,omitempty"`
-	Content    string    `json:"content"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	Unapproved bool      `json:"unapproved,omitempty"`
+	Scope         string    `json:"scope"`
+	Type          string    `json:"type"`
+	Title         string    `json:"title"`
+	Path          string    `json:"path"`
+	Status        string    `json:"status,omitempty"`
+	Stage         string    `json:"stage,omitempty"`
+	Topic         string    `json:"topic,omitempty"`
+	SourceOfTruth bool      `json:"source_of_truth,omitempty"`
+	SupersededBy  []string  `json:"superseded_by,omitempty"`
+	Tags          []string  `json:"tags,omitempty"`
+	Content       string    `json:"content"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Unapproved    bool      `json:"unapproved,omitempty"`
 }
 
 type Section struct {
@@ -65,6 +70,10 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 	if limit <= 0 {
 		limit = 12
 	}
+	stage := strings.ToLower(strings.TrimSpace(opts.Stage))
+	if stage != "" && !validStage(stage) {
+		return Pack{}, fmt.Errorf("invalid context stage %q", opts.Stage)
+	}
 	var entries []index.Entry
 	for _, rootScope := range []struct {
 		root  string
@@ -79,6 +88,7 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 		}
 		entries = append(entries, es...)
 	}
+	supersededBy := supersededByMap(entries)
 	pack := Pack{
 		Schema:                   "worktrail.context_pack.v1",
 		Task:                     opts.Task,
@@ -87,31 +97,18 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 		Maintenance:              buildMaintenance(env),
 		EvidenceIncluded:         opts.IncludeEvidence,
 	}
-	sectionSpecs := []struct {
-		title string
-		keep  func(index.Entry) bool
-	}{
-		{"User Knowledge", func(e index.Entry) bool { return e.Scope == "user" && isKnowledge(e.Type) }},
-		{"Project Knowledge", func(e index.Entry) bool { return e.Scope == "project" && isProjectKnowledge(e.Type) }},
-		{"Architecture", func(e index.Entry) bool { return e.Type == "architecture" }},
-		{"Integrations", func(e index.Entry) bool { return e.Type == "integration" }},
-		{"Validation", func(e index.Entry) bool { return e.Type == "validation" }},
-		{"Glossary", func(e index.Entry) bool { return e.Type == "glossary" }},
-		{"Workflows", func(e index.Entry) bool { return e.Type == "workflow" }},
-		{"Active State", func(e index.Entry) bool { return e.Type == "state" && (e.Active || e.Status == "active") }},
-		{"Decisions", func(e index.Entry) bool { return e.Type == "decision" }},
-		{"Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }},
-		{"Rules", func(e index.Entry) bool { return e.Type == "rule" }},
-		{"Pending Candidates", func(e index.Entry) bool { return pendingCandidateVisible(e, opts.IncludeEvidence) }},
-	}
+	sectionSpecs := sectionSpecsForStage(stage, opts.IncludeEvidence)
 	for _, spec := range sectionSpecs {
 		var items []Item
 		for _, entry := range entries {
 			if spec.keep(entry) {
-				items = append(items, itemFromEntry(entry))
+				items = append(items, itemFromEntry(entry, supersededBy[filepath.ToSlash(entry.Path)]))
 			}
 		}
 		sort.SliceStable(items, func(i, j int) bool {
+			if itemPriority(items[i], stage) != itemPriority(items[j], stage) {
+				return itemPriority(items[i], stage) > itemPriority(items[j], stage)
+			}
 			return items[i].UpdatedAt.After(items[j].UpdatedAt)
 		})
 		if len(items) > limit {
@@ -153,6 +150,24 @@ func RenderMarkdown(pack Pack) string {
 			if item.Status != "" {
 				b.WriteString(" [")
 				b.WriteString(item.Status)
+				b.WriteString("]")
+			}
+			if item.Stage != "" {
+				b.WriteString(" [stage:")
+				b.WriteString(item.Stage)
+				b.WriteString("]")
+			}
+			if item.Topic != "" {
+				b.WriteString(" [topic:")
+				b.WriteString(item.Topic)
+				b.WriteString("]")
+			}
+			if item.SourceOfTruth {
+				b.WriteString(" [source_of_truth]")
+			}
+			if len(item.SupersededBy) > 0 {
+				b.WriteString(" [superseded_by:")
+				b.WriteString(strings.Join(item.SupersededBy, ","))
 				b.WriteString("]")
 			}
 			b.WriteString("\n")
@@ -208,18 +223,73 @@ func loadOrRebuild(root, scope string) ([]index.Entry, error) {
 	return db.Entries, nil
 }
 
-func itemFromEntry(entry index.Entry) Item {
+func itemFromEntry(entry index.Entry, supersededBy []string) Item {
 	return Item{
-		Scope:      entry.Scope,
-		Type:       entry.Type,
-		Title:      entry.Title,
-		Path:       filepath.ToSlash(entry.Path),
-		Status:     entry.Status,
-		Tags:       entry.Tags,
-		Content:    trimContent(entry.Content),
-		UpdatedAt:  entry.UpdatedAt,
-		Unapproved: entry.Type == "candidate" && entry.Status == "pending",
+		Scope:         entry.Scope,
+		Type:          entry.Type,
+		Title:         entry.Title,
+		Path:          filepath.ToSlash(entry.Path),
+		Status:        entry.Status,
+		Stage:         entry.Stage,
+		Topic:         entry.Topic,
+		SourceOfTruth: entry.SourceOfTruth,
+		SupersededBy:  append([]string{}, supersededBy...),
+		Tags:          entry.Tags,
+		Content:       trimContent(entry.Content),
+		UpdatedAt:     entry.UpdatedAt,
+		Unapproved:    entry.Type == "candidate" && entry.Status == "pending",
 	}
+}
+
+type sectionSpec struct {
+	title string
+	keep  func(index.Entry) bool
+}
+
+func sectionSpecsForStage(stage string, includeEvidence bool) []sectionSpec {
+	specs := map[string]sectionSpec{
+		"user":         {"User Knowledge", func(e index.Entry) bool { return e.Scope == "user" && isKnowledge(e.Type) }},
+		"project":      {"Project Knowledge", func(e index.Entry) bool { return e.Scope == "project" && isProjectKnowledge(e.Type) }},
+		"requirements": {"Requirements", func(e index.Entry) bool { return e.Type == "requirement" }},
+		"architecture": {"Architecture", func(e index.Entry) bool { return e.Type == "architecture" }},
+		"integrations": {"Integrations", func(e index.Entry) bool { return e.Type == "integration" }},
+		"validation":   {"Validation", func(e index.Entry) bool { return e.Type == "validation" }},
+		"glossary":     {"Glossary", func(e index.Entry) bool { return e.Type == "glossary" }},
+		"workflows":    {"Workflows", func(e index.Entry) bool { return e.Type == "workflow" }},
+		"state":        {"Active State", func(e index.Entry) bool { return e.Type == "state" && (e.Active || e.Status == "active") }},
+		"decisions":    {"Decisions", func(e index.Entry) bool { return e.Type == "decision" }},
+		"handoffs":     {"Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }},
+		"rules":        {"Rules", func(e index.Entry) bool { return e.Type == "rule" }},
+		"pending":      {"Pending Candidates", func(e index.Entry) bool { return pendingCandidateVisible(e, includeEvidence) }},
+	}
+	order := []string{"user", "project", "requirements", "architecture", "integrations", "validation", "glossary", "workflows", "state", "decisions", "handoffs", "rules", "pending"}
+	switch stage {
+	case "requirements":
+		order = []string{"user", "project", "requirements", "decisions", "glossary", "architecture", "validation", "workflows", "rules", "integrations", "state", "handoffs", "pending"}
+	case "design":
+		order = []string{"user", "project", "requirements", "architecture", "decisions", "glossary", "integrations", "validation", "rules", "workflows", "state", "handoffs", "pending"}
+	case "implementation":
+		order = []string{"user", "project", "architecture", "validation", "rules", "workflows", "decisions", "requirements", "integrations", "glossary", "state", "handoffs", "pending"}
+	}
+	out := make([]sectionSpec, 0, len(order))
+	for _, key := range order {
+		out = append(out, specs[key])
+	}
+	return out
+}
+
+func itemPriority(item Item, requestedStage string) int {
+	score := 0
+	if len(item.SupersededBy) == 0 && item.Stage != "historical" && item.Stage != "retired" {
+		score += 100
+	}
+	if item.SourceOfTruth {
+		score += 50
+	}
+	if requestedStage != "" && item.Stage == requestedStage {
+		score += 25
+	}
+	return score
 }
 
 func isKnowledge(typ string) bool {
@@ -234,6 +304,44 @@ func isKnowledge(typ string) bool {
 func isProjectKnowledge(typ string) bool {
 	switch typ {
 	case "project", "knowledge", "prompt":
+		return true
+	default:
+		return false
+	}
+}
+
+func supersededByMap(entries []index.Entry) map[string][]string {
+	out := map[string][]string{}
+	for _, entry := range entries {
+		path := filepath.ToSlash(entry.Path)
+		for _, old := range entry.Supersedes {
+			old = filepath.ToSlash(strings.TrimSpace(old))
+			if old != "" {
+				out[old] = appendUnique(out[old], path)
+			}
+		}
+		for _, by := range entry.SupersededBy {
+			by = filepath.ToSlash(strings.TrimSpace(by))
+			if by != "" {
+				out[path] = appendUnique(out[path], by)
+			}
+		}
+	}
+	return out
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func validStage(stage string) bool {
+	switch stage {
+	case "requirements", "design", "decision", "implementation", "validation", "historical", "retired":
 		return true
 	default:
 		return false

@@ -47,6 +47,31 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 		"type":  "decision",
 		"title": "Index Decision",
 	}, "Use a JSON text index.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "architecture", "discovery.md"), map[string]any{
+		"id":    "discovery",
+		"scope": "project",
+		"type":  "architecture",
+		"title": "Discovery Architecture",
+		"stage": "requirements",
+	}, "Clarify user problem before design.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "requirements", "old.md"), map[string]any{
+		"id":         "old-requirement",
+		"scope":      "project",
+		"title":      "Old Requirement",
+		"stage":      "historical",
+		"topic":      "delivery",
+		"updated_at": "2026-05-03T00:00:00Z",
+	}, "Older PRD.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "requirements", "new.md"), map[string]any{
+		"id":              "new-requirement",
+		"scope":           "project",
+		"title":           "New Requirement",
+		"stage":           "requirements",
+		"topic":           "delivery",
+		"source_of_truth": true,
+		"supersedes":      []string{"requirements/old.md"},
+		"updated_at":      "2026-05-01T00:00:00Z",
+	}, "Current PRD.")
 	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "next.md"), map[string]any{
 		"id":    "handoff",
 		"scope": "project",
@@ -95,10 +120,14 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	if !containsStep(pack.Maintenance.NextSteps, "worktrail distill --pending --summary") || !containsStep(pack.Maintenance.NextSteps, "worktrail review plan --format json") {
 		t.Fatalf("maintenance next steps unexpected: %+v", pack.Maintenance.NextSteps)
 	}
-	for _, title := range []string{"User Knowledge", "Workflows", "Active State", "Decisions", "Handoffs", "Rules", "Pending Candidates"} {
+	for _, title := range []string{"User Knowledge", "Requirements", "Architecture", "Workflows", "Active State", "Decisions", "Handoffs", "Rules", "Pending Candidates"} {
 		if !hasSection(pack, title) {
 			t.Fatalf("missing section %q in %+v", title, pack.Sections)
 		}
+	}
+	requirements := section(pack, "Requirements")
+	if len(requirements.Items) != 2 || requirements.Items[0].Title != "New Requirement" || len(requirements.Items[1].SupersededBy) != 1 {
+		t.Fatalf("requirements priority or superseded marker unexpected: %+v", requirements.Items)
 	}
 	workflows := section(pack, "Workflows")
 	if len(workflows.Items) != 1 || workflows.Items[0].Title != "Release Workflow" {
@@ -115,6 +144,9 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	if rendered == "" || !strings.Contains(rendered, "unapproved") {
 		t.Fatalf("rendered pack missing unapproved marker:\n%s", rendered)
 	}
+	if !strings.Contains(rendered, "[stage:requirements] [topic:delivery] [source_of_truth]") || !strings.Contains(rendered, "[superseded_by:requirements/new.md]") {
+		t.Fatalf("rendered pack missing governance metadata:\n%s", rendered)
+	}
 	if !strings.Contains(rendered, "Hidden transcript evidence candidates: 1") || !strings.Contains(rendered, "worktrail context --evidence <task>") {
 		t.Fatalf("rendered pack missing hidden evidence guidance:\n%s", rendered)
 	}
@@ -123,6 +155,14 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	}
 	if strings.Contains(rendered, "Raw transcript evidence content.") || strings.Contains(rendered, "Pending non-semantic candidate content.") {
 		t.Fatalf("default rendered pack leaked hidden candidates:\n%s", rendered)
+	}
+
+	implementationPack, err := Build(env, Options{Task: "ship packages", Stage: "implementation"})
+	if err != nil {
+		t.Fatalf("Build(Stage implementation) error = %v", err)
+	}
+	if sectionIndex(implementationPack, "Architecture") > sectionIndex(implementationPack, "Requirements") {
+		t.Fatalf("implementation stage should prioritize architecture before requirements: %+v", implementationPack.Sections)
 	}
 
 	withEvidence, err := Build(env, Options{Task: "ship packages", IncludeEvidence: true})
@@ -232,6 +272,15 @@ func hasItem(section Section, title string) bool {
 		}
 	}
 	return false
+}
+
+func sectionIndex(pack Pack, title string) int {
+	for i, section := range pack.Sections {
+		if section.Title == title {
+			return i
+		}
+	}
+	return len(pack.Sections)
 }
 
 func containsStep(values []string, want string) bool {

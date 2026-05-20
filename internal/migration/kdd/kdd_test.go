@@ -104,6 +104,7 @@ func TestMapPathAndLocalPathDetectionCoverMigrationEdges(t *testing.T) {
 		{"project/active-knowledge-log.md", "project", model.CandidateTypeMigrationSource, ProjectActiveLogTarget, ""},
 		{"local/active-knowledge-log.md", "user", model.CandidateTypeMigrationSource, LocalActiveLogTarget, ""},
 		{"local/notes/private.md", "user", "lesson", "lessons/kdd-local-notes-private.md", "local_scope_only"},
+		{"project/requirements/prd.md", "project", "requirement", "requirements/prd.md", ""},
 		{"project/runbooks/release.md", "project", "workflow", "workflows/release.md", ""},
 		{"project/unknown/source.md", "project", model.CandidateTypeMigrationSource, "imports/kdd/project/source.md", "needs_classification"},
 	}

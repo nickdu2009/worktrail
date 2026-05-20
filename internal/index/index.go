@@ -29,6 +29,11 @@ type Entry struct {
 	Path           string    `json:"path"`
 	Title          string    `json:"title"`
 	Status         string    `json:"status,omitempty"`
+	Stage          string    `json:"stage,omitempty"`
+	Topic          string    `json:"topic,omitempty"`
+	SourceOfTruth  bool      `json:"source_of_truth,omitempty"`
+	Supersedes     []string  `json:"supersedes,omitempty"`
+	SupersededBy   []string  `json:"superseded_by,omitempty"`
 	Tags           []string  `json:"tags,omitempty"`
 	Content        string    `json:"content"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -271,17 +276,22 @@ func buildEntry(root, path, rel, scope string) (Entry, bool, error) {
 		}
 	}
 	entry := Entry{
-		Schema:    "worktrail.index.entry.v1",
-		ID:        stringMeta(meta, "id", util.Slug(strings.TrimSuffix(rel, filepath.Ext(rel)))),
-		Scope:     stringMeta(meta, "scope", scope),
-		Type:      inferType(rel, meta),
-		Path:      rel,
-		Title:     stringMeta(meta, "title", inferTitle(rel, body)),
-		Status:    stringMeta(meta, "status", ""),
-		Tags:      stringSliceMeta(meta, "tags"),
-		Content:   strings.TrimSpace(body),
-		UpdatedAt: timeMeta(meta, "updated_at", info.ModTime().UTC()),
-		Active:    strings.HasPrefix(rel, "state/active/") || stringMeta(meta, "status", "") == "active",
+		Schema:        "worktrail.index.entry.v1",
+		ID:            stringMeta(meta, "id", util.Slug(strings.TrimSuffix(rel, filepath.Ext(rel)))),
+		Scope:         stringMeta(meta, "scope", scope),
+		Type:          inferType(rel, meta),
+		Path:          rel,
+		Title:         stringMeta(meta, "title", inferTitle(rel, body)),
+		Status:        stringMeta(meta, "status", ""),
+		Stage:         stringMeta(meta, "stage", ""),
+		Topic:         stringMeta(meta, "topic", ""),
+		SourceOfTruth: boolMeta(meta, "source_of_truth"),
+		Supersedes:    stringListMeta(meta, "supersedes"),
+		SupersededBy:  stringListMeta(meta, "superseded_by"),
+		Tags:          stringSliceMeta(meta, "tags"),
+		Content:       strings.TrimSpace(body),
+		UpdatedAt:     timeMeta(meta, "updated_at", info.ModTime().UTC()),
+		Active:        strings.HasPrefix(rel, "state/active/") || stringMeta(meta, "status", "") == "active",
 	}
 	entry.SourceSessions = stringSliceMeta(meta, "source_sessions")
 	entry.CandidateType = stringMeta(meta, "candidate_type", "")
@@ -328,6 +338,8 @@ func inferType(rel string, meta map[string]any) string {
 		return "state"
 	case strings.HasPrefix(rel, "architecture/"):
 		return "architecture"
+	case strings.HasPrefix(rel, "requirements/"):
+		return "requirement"
 	case strings.HasPrefix(rel, "decisions/"):
 		return "decision"
 	case strings.HasPrefix(rel, "glossary/"):
@@ -359,6 +371,10 @@ func inferType(rel string, meta map[string]any) string {
 	default:
 		return "knowledge"
 	}
+}
+
+func InferType(rel string, meta map[string]any) string {
+	return inferType(rel, meta)
 }
 
 func inferTitle(rel, body string) string {
@@ -411,6 +427,55 @@ func stringSliceMeta(meta map[string]any, key string) []string {
 	}
 }
 
+func stringListMeta(meta map[string]any, key string) []string {
+	v, ok := meta[key]
+	if !ok {
+		return nil
+	}
+	switch x := v.(type) {
+	case string:
+		if strings.TrimSpace(x) == "" {
+			return nil
+		}
+		return []string{filepath.ToSlash(strings.TrimSpace(x))}
+	case []string:
+		out := make([]string, 0, len(x))
+		for _, item := range x {
+			if s := strings.TrimSpace(item); s != "" {
+				out = append(out, filepath.ToSlash(s))
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, item := range x {
+			if s, ok := item.(string); ok {
+				if s = strings.TrimSpace(s); s != "" {
+					out = append(out, filepath.ToSlash(s))
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func boolMeta(meta map[string]any, key string) bool {
+	v, ok := meta[key]
+	if !ok {
+		return false
+	}
+	switch x := v.(type) {
+	case bool:
+		return x
+	case string:
+		return strings.EqualFold(strings.TrimSpace(x), "true")
+	default:
+		return false
+	}
+}
+
 func timeMeta(meta map[string]any, key string, fallback time.Time) time.Time {
 	s := stringMeta(meta, key, "")
 	if s == "" {
@@ -451,6 +516,12 @@ func scoreEntry(entry Entry, needle string) float64 {
 	}
 	if entry.Type == "state" && entry.Status == "active" {
 		score += 3
+	}
+	if entry.SourceOfTruth {
+		score += 5
+	}
+	if len(entry.SupersededBy) > 0 || entry.Stage == "historical" || entry.Stage == "retired" {
+		score -= 5
 	}
 	age := time.Since(entry.UpdatedAt)
 	if age < 0 {

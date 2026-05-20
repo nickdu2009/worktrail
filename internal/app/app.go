@@ -70,6 +70,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 		return runSearch(ctx, env, ioctx, args[1:])
 	case "context":
 		return runContextPack(ctx, env, ioctx, args[1:])
+	case "preview":
+		return runPreview(ctx, env, ioctx, args[1:])
 	case "sync":
 		return runSync(ctx, env, ioctx, args[1:])
 	case "extract":
@@ -106,13 +108,16 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "common commands:")
 	fmt.Fprintln(out, "  worktrail context <task>")
+	fmt.Fprintln(out, "  worktrail context --stage requirements <task>")
 	fmt.Fprintln(out, "  worktrail context --evidence <task>")
+	fmt.Fprintln(out, "  worktrail preview <target> [--open]")
 	fmt.Fprintln(out, "  worktrail import codex [--all]")
 	fmt.Fprintln(out, "  worktrail import cursor [--file path] [--all]")
 	fmt.Fprintln(out, "  worktrail migrate kdd [--write-candidates]")
 	fmt.Fprintln(out, "  worktrail distill --pending [--limit N|--all] [--write-pack file]")
 	fmt.Fprintln(out, "  worktrail candidates create --help")
 	fmt.Fprintln(out, "  worktrail review [--semantic|--evidence|--all]")
+	fmt.Fprintln(out, "  worktrail doctor knowledge")
 	fmt.Fprintln(out, "  worktrail evidence plan [--status active|archived|all]")
 	fmt.Fprintln(out, "  worktrail promote <candidate-id>")
 	fmt.Fprintln(out, "  worktrail merge <candidate-id>")

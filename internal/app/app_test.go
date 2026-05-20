@@ -33,6 +33,7 @@ func TestInitCreatesUserAndProjectRoots(t *testing.T) {
 		filepath.Join(home, "config.json"),
 		filepath.Join(home, "logs", "events.jsonl"),
 		filepath.Join(project, ".worktrail", "config.json"),
+		filepath.Join(project, ".worktrail", "requirements"),
 		filepath.Join(project, ".worktrail", "logs", "events.jsonl"),
 		filepath.Join(project, ".gitignore"),
 		filepath.Join(project, ".codex", "hooks.json"),
@@ -51,6 +52,112 @@ func TestInitCreatesUserAndProjectRoots(t *testing.T) {
 	} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("did not expect init to create %s, err=%v", path, err)
+		}
+	}
+}
+
+func TestPreviewRenderOnlyRendersProjectDocument(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", filepath.Join(home, ".worktrail"))
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"init"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run init: %v stderr=%s", err, errb.String())
+	}
+	out.Reset()
+	errb.Reset()
+	renderDir := filepath.Join(t.TempDir(), "preview")
+	if err := Run(context.Background(), []string{"preview", "project.md", "--render-only", "--out", renderDir, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run preview render-only: %v stderr=%s", err, errb.String())
+	}
+	var result previewJSON
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("preview JSON invalid: %v\n%s", err, out.String())
+	}
+	if result.Source.Path != "project.md" || result.IndexPath != filepath.Join(renderDir, "index.html") {
+		t.Fatalf("preview result unexpected: %+v", result)
+	}
+	body, err := os.ReadFile(result.IndexPath)
+	if err != nil {
+		t.Fatalf("read preview HTML: %v", err)
+	}
+	if !bytes.Contains(body, []byte("Worktrail Preview")) || !bytes.Contains(body, []byte("Project")) {
+		t.Fatalf("preview HTML missing content:\n%s", body)
+	}
+}
+
+func TestPreviewRenderOnlyRendersCandidate(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", filepath.Join(home, ".worktrail"))
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "note-1", "--type", "rule", "--target", "rules/note-1.md", "--title", "Candidate Preview", "# Candidate Body")
+	out.Reset()
+	errb.Reset()
+	renderDir := filepath.Join(t.TempDir(), "preview")
+	if err := Run(context.Background(), []string{"preview", "--candidate", "note-1", "--render-only", "--out", renderDir, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run preview candidate: %v stderr=%s", err, errb.String())
+	}
+	body, err := os.ReadFile(filepath.Join(renderDir, "index.html"))
+	if err != nil {
+		t.Fatalf("read preview HTML: %v", err)
+	}
+	for _, want := range []string{"Candidate Preview", "candidate_id", "target_path", "Candidate Body"} {
+		if !bytes.Contains(body, []byte(want)) {
+			t.Fatalf("candidate preview missing %q:\n%s", want, body)
+		}
+	}
+	if bytes.Contains(body, []byte("---worktrail")) {
+		t.Fatalf("candidate preview leaked frontmatter:\n%s", body)
+	}
+}
+
+func TestPreviewFlagParsingAndErrors(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", filepath.Join(home, ".worktrail"))
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"preview", "--render-only", "project.md", "--out", filepath.Join(t.TempDir(), "preview")}, nil, &out, &errb); err != nil {
+		t.Fatalf("boolean render-only should not consume target: %v stderr=%s", err, errb.String())
+	}
+	for _, args := range [][]string{
+		{"preview", "--open", "project.md", "--render-only"},
+		{"preview", "project.md", "--render-only", "--open"},
+	} {
+		out.Reset()
+		errb.Reset()
+		err := Run(context.Background(), args, nil, &out, &errb)
+		if err == nil || !strings.Contains(err.Error(), "--render-only cannot be used with --open") {
+			t.Fatalf("Run %v expected open/render conflict, got err=%v stdout=%s stderr=%s", args, err, out.String(), errb.String())
+		}
+	}
+	for _, args := range [][]string{
+		{"preview", "missing.md", "--render-only"},
+		{"preview", "../outside.md", "--render-only"},
+	} {
+		out.Reset()
+		errb.Reset()
+		if err := Run(context.Background(), args, nil, &out, &errb); err == nil {
+			t.Fatalf("Run %v expected error", args)
 		}
 	}
 }
@@ -635,6 +742,72 @@ func TestDoctorMigrationReportsTrackedRuntimeState(t *testing.T) {
 	}
 }
 
+func TestDoctorKnowledgeDetectsGovernanceRisks(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	writeTextFile(t, filepath.Join(project, ".worktrail", "index.md"), "# Worktrail Project Index\n\n- `architecture/old.md`\n")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "architecture", "old.md"), "# Old Architecture\n\nPRD notes, MVP boundary, user problem, and acceptance criteria mixed into architecture.")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "requirements", "new.md"), `---worktrail
+{
+  "stage": "requirements",
+  "topic": "delivery",
+  "source_of_truth": true,
+  "supersedes": ["architecture/old.md"]
+}
+---
+
+# New Requirement
+
+Current requirement-level source of truth.
+`)
+	writeTextFile(t, filepath.Join(project, ".worktrail", "requirements", "other.md"), `---worktrail
+{
+  "stage": "requirements",
+  "topic": "delivery",
+  "source_of_truth": true
+}
+---
+
+# Other Requirement
+
+Conflicting source of truth.
+`)
+	writeTextFile(t, filepath.Join(project, ".worktrail", "decisions", "mixed.md"), `---worktrail
+{
+  "stage": "planning"
+}
+---
+
+# Mixed Decision
+
+This PRD describes MVP boundary, out-of-scope behavior, user goal, and acceptance criteria but has no decision section.
+`)
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"doctor", "knowledge", "--format", "json"}, nil, &out, &errb)
+	if err == nil {
+		t.Fatalf("doctor knowledge unexpectedly passed:\n%s", out.String())
+	}
+	var report knowledgeDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"SOT001", "STAGE001", "ARCH001", "DEC001", "REQ001", "SUPER001"} {
+		if !hasKnowledgeFinding(report, code) {
+			t.Fatalf("doctor knowledge report missing %s: %+v", code, report.Findings)
+		}
+	}
+}
+
 func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
@@ -1152,6 +1325,15 @@ func hasCandidateID(records []candidate.Record, id string) bool {
 }
 
 func hasMigrationFinding(report migrationDoctorReport, code string) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasKnowledgeFinding(report knowledgeDoctorReport, code string) bool {
 	for _, finding := range report.Findings {
 		if finding.Code == code {
 			return true

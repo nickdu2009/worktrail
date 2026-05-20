@@ -226,6 +226,8 @@ func MapPath(rel string) (Item, bool) {
 	switch category {
 	case "architecture":
 		return newItem(rel, "project", "architecture", filepath.ToSlash(filepath.Join("architecture", slug+".md")), candidate.OperationReplace, titleFromPath(rel), "Imported KDD architecture knowledge."), true
+	case "requirements":
+		return newItem(rel, "project", "requirement", filepath.ToSlash(filepath.Join("requirements", slug+".md")), candidate.OperationReplace, titleFromPath(rel), "Imported KDD requirements knowledge."), true
 	case "decisions":
 		return newItem(rel, "project", "decision", filepath.ToSlash(filepath.Join("decisions", slug+".md")), candidate.OperationReplace, titleFromPath(rel), "Imported KDD decision knowledge."), true
 	case "runbooks":
@@ -293,7 +295,7 @@ func NextSteps(dryRun bool) []string {
 func GitGuidance() []string {
 	return []string{
 		".worktrail/raw, .worktrail/index, .worktrail/logs, .worktrail/state, and .worktrail/candidates are runtime/import artifacts unless your team explicitly tracks them",
-		".worktrail/rules, .worktrail/decisions, .worktrail/prompts, .worktrail/workflows, .worktrail/integrations, .worktrail/validation, .worktrail/glossary, and project .gitignore changes are the usual review targets after promotion",
+		".worktrail/requirements, .worktrail/rules, .worktrail/decisions, .worktrail/prompts, .worktrail/workflows, .worktrail/integrations, .worktrail/validation, .worktrail/glossary, and project .gitignore changes are the usual review targets after promotion",
 	}
 }
 

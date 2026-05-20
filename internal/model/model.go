@@ -20,6 +20,11 @@ type Knowledge struct {
 	Type           string    `json:"type"`
 	Title          string    `json:"title"`
 	Status         string    `json:"status"`
+	Stage          string    `json:"stage,omitempty"`
+	Topic          string    `json:"topic,omitempty"`
+	SourceOfTruth  bool      `json:"source_of_truth,omitempty"`
+	Supersedes     []string  `json:"supersedes,omitempty"`
+	SupersededBy   []string  `json:"superseded_by,omitempty"`
 	SourceSessions []string  `json:"source_sessions,omitempty"`
 	SourceFiles    []string  `json:"source_files,omitempty"`
 	Tags           []string  `json:"tags,omitempty"`

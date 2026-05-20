@@ -9,6 +9,7 @@ var semanticTargetPrefixes = map[string]string{
 	"integration":  "integrations/",
 	"lesson":       "lessons/",
 	"prompt":       "prompts/",
+	"requirement":  "requirements/",
 	"rule":         "rules/",
 	"validation":   "validation/",
 	"workflow":     "workflows/",
