@@ -11,8 +11,19 @@ type metadataItem struct {
 }
 
 type pageData struct {
+	Title       string
+	Source      Source
+	Metadata    []metadataItem
+	Content     template.HTML
+	IsDirectory bool
+	Documents   []documentItem
+}
+
+type documentItem struct {
 	Title    string
-	Source   Source
+	Path     string
+	Anchor   string
+	Depth    int
 	Metadata []metadataItem
 	Content  template.HTML
 }
@@ -57,7 +68,7 @@ var pageTemplate = template.Must(template.New("preview").Parse(`<!doctype html>
       margin: 0 auto;
       padding: 40px 24px 64px;
     }
-    header {
+    header.hero {
       margin-bottom: 24px;
       padding: 24px;
       background: var(--panel);
@@ -87,12 +98,49 @@ var pageTemplate = template.Must(template.New("preview").Parse(`<!doctype html>
     }
     dt { font-weight: 700; color: var(--fg); }
     dd { margin: 0; overflow-wrap: anywhere; }
+    .directory,
     article {
       padding: 32px;
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 16px;
     }
+    .directory { margin-bottom: 24px; }
+    .directory h2 { margin: 0 0 12px; }
+    .directory ol {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .directory li {
+      margin: 4px 0;
+      padding-left: calc(var(--depth) * 18px);
+    }
+    .directory a {
+      display: inline-block;
+      padding: 3px 0;
+      text-decoration: none;
+    }
+    .directory a:hover { text-decoration: underline; }
+    .path,
+    .document-path {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+    .document { margin-top: 24px; }
+    .document-header {
+      margin: 0 0 20px;
+      padding: 0 0 16px;
+      border-bottom: 1px solid var(--border);
+      background: transparent;
+      border-radius: 0;
+    }
+    .document-header h2 {
+      margin: 4px 0 0;
+      font-size: 1.6rem;
+    }
+    .document-path { margin: 0; }
     article > :first-child { margin-top: 0; }
     article > :last-child { margin-bottom: 0; }
     h2, h3, h4 { line-height: 1.25; margin-top: 1.8em; }
@@ -135,7 +183,7 @@ var pageTemplate = template.Must(template.New("preview").Parse(`<!doctype html>
 </head>
 <body>
   <main>
-    <header>
+    <header class="hero">
       <p class="eyebrow">Worktrail Preview</p>
       <h1>{{ .Title }}</h1>
       <dl>
@@ -147,9 +195,37 @@ var pageTemplate = template.Must(template.New("preview").Parse(`<!doctype html>
         {{- end }}
       </dl>
     </header>
+    {{- if .IsDirectory }}
+    {{- if .Documents }}
+    <nav class="directory" aria-label="Directory">
+      <h2>Directory</h2>
+      <ol>
+        {{- range .Documents }}
+        <li style="--depth: {{ .Depth }}"><a href="#{{ .Anchor }}"><span class="path">{{ .Path }}</span></a></li>
+        {{- end }}
+      </ol>
+    </nav>
+    {{- range .Documents }}
+    <article id="{{ .Anchor }}" class="document">
+      <header class="document-header">
+        <p class="document-path">{{ .Path }}</p>
+        <h2>{{ .Title }}</h2>
+      </header>
+      <div class="document-content">
+        {{ .Content }}
+      </div>
+    </article>
+    {{- end }}
+    {{- else }}
+    <article>
+      <p>No Markdown files found in this directory.</p>
+    </article>
+    {{- end }}
+    {{- else }}
     <article>
       {{ .Content }}
     </article>
+    {{- end }}
   </main>
 </body>
 </html>

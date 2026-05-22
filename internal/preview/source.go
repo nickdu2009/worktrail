@@ -3,8 +3,10 @@ package preview
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
@@ -17,6 +19,7 @@ type SourceKind string
 const (
 	SourceDocument  SourceKind = "document"
 	SourceCandidate SourceKind = "candidate"
+	SourceDirectory SourceKind = "directory"
 )
 
 var (
@@ -32,6 +35,7 @@ type Source struct {
 	Path     string            `json:"path"`
 	Body     string            `json:"-"`
 	Metadata map[string]string `json:"metadata,omitempty"`
+	Children []Source          `json:"children,omitempty"`
 }
 
 type ResolveRequest struct {
@@ -108,9 +112,6 @@ func resolveDocument(env paths.Env, scope, target string) (Source, error) {
 	if filepath.IsAbs(target) {
 		return Source{}, fmt.Errorf("%w: absolute paths are outside Worktrail roots", ErrUnsupportedFileType)
 	}
-	if filepath.Ext(target) != ".md" {
-		return Source{}, fmt.Errorf("%w: %s", ErrUnsupportedFileType, filepath.Ext(target))
-	}
 	root, err := env.ScopeRoot(scope)
 	if err != nil {
 		return Source{}, err
@@ -119,6 +120,67 @@ func resolveDocument(env paths.Env, scope, target string) (Source, error) {
 	if err != nil {
 		return Source{}, err
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return Source{}, err
+	}
+	if info.IsDir() {
+		return resolveDirectory(scope, root, path)
+	}
+	if filepath.Ext(target) != ".md" {
+		return Source{}, fmt.Errorf("%w: %s", ErrUnsupportedFileType, filepath.Ext(target))
+	}
+	return readDocumentSource(scope, root, path)
+}
+
+func resolveDirectory(scope, root, dir string) (Source, error) {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return Source{}, err
+	}
+	rel = filepath.ToSlash(rel)
+	var docs []Source
+	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if filepath.Ext(entry.Name()) != ".md" {
+			return nil
+		}
+		src, err := readDocumentSource(scope, root, path)
+		if err != nil {
+			return err
+		}
+		docs = append(docs, src)
+		return nil
+	})
+	if err != nil {
+		return Source{}, err
+	}
+	sort.Slice(docs, func(i, j int) bool {
+		return docs[i].Path < docs[j].Path
+	})
+	title := strings.TrimSuffix(filepath.Base(dir), filepath.Ext(dir))
+	if rel == "." {
+		title = "Worktrail Documents"
+	}
+	return Source{
+		Kind:     SourceDirectory,
+		Scope:    scope,
+		Title:    title,
+		Path:     rel,
+		Children: docs,
+		Metadata: map[string]string{
+			"source_path": rel,
+			"file_count":  fmt.Sprintf("%d", len(docs)),
+		},
+	}, nil
+}
+
+func readDocumentSource(scope, root, path string) (Source, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Source{}, err

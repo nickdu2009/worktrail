@@ -101,7 +101,7 @@ func printPreviewRenderOnly(ioctx IO, rendered wtpreview.RenderResult, format st
 }
 
 func printPreviewHelp(out interface{ Write([]byte) (int, error) }) {
-	fmt.Fprintln(out, "usage: worktrail preview <target> [--scope project|user] [--open]")
+	fmt.Fprintln(out, "usage: worktrail preview <file-or-directory> [--scope project|user] [--open]")
 	fmt.Fprintln(out, "       worktrail preview --candidate <id> [--scope project|user] [--open]")
-	fmt.Fprintln(out, "       worktrail preview <target> --render-only [--out dir] [--format json]")
+	fmt.Fprintln(out, "       worktrail preview <file-or-directory> --render-only [--out dir] [--format json]")
 }

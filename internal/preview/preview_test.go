@@ -86,6 +86,37 @@ Visible content.
 	}
 }
 
+func TestResolveDirectoryIncludesMarkdownTree(t *testing.T) {
+	env := previewTestEnv(t)
+	if err := os.MkdirAll(filepath.Join(env.ProjectWT, "docs", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.ProjectWT, "docs", "intro.md"), []byte("# Intro\n\nFirst body."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.ProjectWT, "docs", "nested", "detail.md"), []byte("# Detail\n\nNested body."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.ProjectWT, "docs", "ignored.txt"), []byte("ignored"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source, err := Resolve(ResolveRequest{Env: env, Scope: "project", Target: "docs"})
+	if err != nil {
+		t.Fatalf("Resolve directory: %v", err)
+	}
+	if source.Kind != SourceDirectory || source.Path != "docs" || source.Metadata["file_count"] != "2" {
+		t.Fatalf("directory source unexpected: %+v", source)
+	}
+	got := make([]string, 0, len(source.Children))
+	for _, child := range source.Children {
+		got = append(got, child.Path)
+	}
+	want := []string{"docs/intro.md", "docs/nested/detail.md"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("children = %v, want %v", got, want)
+	}
+}
+
 func TestResolveRejectsEscapingAndUnsupportedPaths(t *testing.T) {
 	env := previewTestEnv(t)
 	if _, err := Resolve(ResolveRequest{Env: env, Scope: "project", Target: "../outside.md"}); err == nil {
@@ -93,6 +124,44 @@ func TestResolveRejectsEscapingAndUnsupportedPaths(t *testing.T) {
 	}
 	if _, err := Resolve(ResolveRequest{Env: env, Scope: "project", Target: "logs/events.jsonl"}); !errors.Is(err, ErrUnsupportedFileType) {
 		t.Fatalf("expected unsupported type error, got %v", err)
+	}
+}
+
+func TestRenderDirectoryIncludesDirectoryNavigation(t *testing.T) {
+	env := previewTestEnv(t)
+	if err := os.MkdirAll(filepath.Join(env.ProjectWT, "docs", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.ProjectWT, "docs", "intro.md"), []byte(`---worktrail
+{
+  "stage": "note"
+}
+---
+
+# Intro
+
+First body.`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.ProjectWT, "docs", "nested", "detail.md"), []byte("# Detail\n\nNested body."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source, err := Resolve(ResolveRequest{Env: env, Scope: "project", Target: "docs"})
+	if err != nil {
+		t.Fatalf("Resolve directory: %v", err)
+	}
+	result, err := Render(source, t.TempDir())
+	if err != nil {
+		t.Fatalf("Render directory: %v", err)
+	}
+	body := string(result.HTML)
+	for _, want := range []string{"Directory", "docs/intro.md", "docs/nested/detail.md", "First body.", "Nested body."} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("directory preview missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "---worktrail") || strings.Contains(body, `"stage"`) {
+		t.Fatalf("directory preview leaked frontmatter:\n%s", body)
 	}
 }
 

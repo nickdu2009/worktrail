@@ -5,6 +5,8 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -23,23 +25,42 @@ func Render(src Source, outDir string) (RenderResult, error) {
 		return RenderResult{}, err
 	}
 
-	var rendered bytes.Buffer
 	md := goldmark.New(goldmark.WithExtensions(extension.GFM))
-	if err := md.Convert([]byte(src.Body), &rendered); err != nil {
-		return RenderResult{}, err
-	}
 
 	title := src.Title
 	if title == "" {
 		title = "Untitled Worktrail Document"
 	}
 	var page bytes.Buffer
-	if err := pageTemplate.Execute(&page, pageData{
+	data := pageData{
 		Title:    title,
 		Source:   src,
 		Metadata: sortedMetadata(src.Metadata),
-		Content:  template.HTML(rendered.String()),
-	}); err != nil {
+	}
+	if src.Kind == SourceDirectory {
+		data.IsDirectory = true
+		for _, child := range src.Children {
+			rendered, err := renderMarkdown(md, child.Body)
+			if err != nil {
+				return RenderResult{}, err
+			}
+			data.Documents = append(data.Documents, documentItem{
+				Title:    child.Title,
+				Path:     child.Path,
+				Anchor:   anchorFromPath(child.Path),
+				Depth:    strings.Count(child.Path, "/"),
+				Metadata: sortedMetadata(child.Metadata),
+				Content:  rendered,
+			})
+		}
+	} else {
+		rendered, err := renderMarkdown(md, src.Body)
+		if err != nil {
+			return RenderResult{}, err
+		}
+		data.Content = rendered
+	}
+	if err := pageTemplate.Execute(&page, data); err != nil {
 		return RenderResult{}, err
 	}
 
@@ -54,4 +75,28 @@ func Render(src Source, outDir string) (RenderResult, error) {
 		IndexPath: indexPath,
 		Temporary: temporary,
 	}, nil
+}
+
+func renderMarkdown(md goldmark.Markdown, body string) (template.HTML, error) {
+	var rendered bytes.Buffer
+	if err := md.Convert([]byte(body), &rendered); err != nil {
+		return "", err
+	}
+	return template.HTML(rendered.String()), nil
+}
+
+func anchorFromPath(path string) string {
+	var b strings.Builder
+	b.WriteString("doc-")
+	for _, r := range path {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			b.WriteRune(unicode.ToLower(r))
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	return strings.TrimRight(b.String(), "-")
 }
