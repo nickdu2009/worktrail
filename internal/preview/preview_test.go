@@ -1,7 +1,6 @@
 package preview
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,27 +11,36 @@ import (
 	"github.com/nickdu2009/worktrail/internal/store"
 )
 
-func TestResolveProjectAndUserDocuments(t *testing.T) {
+func TestResolveProjectAndUserCollections(t *testing.T) {
 	env := previewTestEnv(t)
-	projectSource, err := Resolve(ResolveRequest{Env: env, Scope: "project", Target: "project.md"})
+	projectSource, err := Resolve(ResolveRequest{Env: env, Scope: "project"})
 	if err != nil {
-		t.Fatalf("Resolve project document: %v", err)
+		t.Fatalf("Resolve project collection: %v", err)
 	}
-	if projectSource.Kind != SourceDocument || projectSource.Title != "Project" || projectSource.Path != "project.md" {
+	if projectSource.Kind != SourceCollection || projectSource.Title != "Project Knowledge" || projectSource.Path != "." {
 		t.Fatalf("project source unexpected: %+v", projectSource)
 	}
-
-	userSource, err := Resolve(ResolveRequest{Env: env, Scope: "user", Target: "workflows/project-bootstrap.md"})
-	if err != nil {
-		t.Fatalf("Resolve user document: %v", err)
+	if !hasSourcePath(projectSource.Children, "project.md") {
+		t.Fatalf("project collection missing project.md: %+v", projectSource.Children)
 	}
-	if userSource.Kind != SourceDocument || userSource.Title != "Project Bootstrap" || userSource.Path != "workflows/project-bootstrap.md" {
+
+	userSource, err := Resolve(ResolveRequest{Env: env, Scope: "user"})
+	if err != nil {
+		t.Fatalf("Resolve user collection: %v", err)
+	}
+	if userSource.Kind != SourceCollection || userSource.Title != "User Knowledge" || userSource.Path != "." {
 		t.Fatalf("user source unexpected: %+v", userSource)
+	}
+	if !hasSourcePath(userSource.Children, "workflows/project-bootstrap.md") {
+		t.Fatalf("user collection missing bootstrap workflow: %+v", userSource.Children)
 	}
 }
 
-func TestResolveCandidateUsesBodyWithoutFrontmatter(t *testing.T) {
+func TestResolveSkipsRuntimeArtifactsAndCollectsPendingCandidates(t *testing.T) {
 	env := previewTestEnv(t)
+	writePreviewFile(t, filepath.Join(env.ProjectWT, "rules", "visible.md"), "# Visible\n\nRule body.")
+	writePreviewFile(t, filepath.Join(env.ProjectWT, "raw", "hidden.md"), "# Hidden Raw\n\nShould stay hidden.")
+	writePreviewFile(t, filepath.Join(env.ProjectWT, "imports", "hidden.md"), "# Hidden Import\n\nShould stay hidden.")
 	rec, err := (candidate.Manager{Env: env, Actor: "test"}).Create(candidate.CreateRequest{
 		Scope:         "project",
 		ID:            "note-1",
@@ -44,22 +52,40 @@ func TestResolveCandidateUsesBodyWithoutFrontmatter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create candidate: %v", err)
 	}
-	source, err := Resolve(ResolveRequest{Env: env, Scope: "project", CandidateID: rec.Meta.ID})
+	if _, err := (candidate.Manager{Env: env, Actor: "test"}).Create(candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "discard-me",
+		CandidateType: "rule",
+		TargetPath:    "rules/discard-me.md",
+		Title:         "Discard Me",
+		Body:          "# Discarded\n\nHidden candidate.",
+	}); err != nil {
+		t.Fatalf("Create discard candidate: %v", err)
+	}
+	if _, err := (candidate.Manager{Env: env, Actor: "test"}).Discard("project", "discard-me"); err != nil {
+		t.Fatalf("Discard candidate: %v", err)
+	}
+	source, err := Resolve(ResolveRequest{Env: env, Scope: "project"})
 	if err != nil {
-		t.Fatalf("Resolve candidate: %v", err)
+		t.Fatalf("Resolve project collection: %v", err)
 	}
-	if source.Kind != SourceCandidate || source.ID != "note-1" {
-		t.Fatalf("candidate source unexpected: %+v", source)
+	if !hasSourcePath(source.Children, "rules/visible.md") {
+		t.Fatalf("visible formal document missing: %+v", source.Children)
 	}
-	if strings.Contains(source.Body, store.Marker) {
-		t.Fatalf("candidate body includes Worktrail frontmatter:\n%s", source.Body)
+	for _, hidden := range []string{"raw/hidden.md", "imports/hidden.md"} {
+		if hasSourcePath(source.Children, hidden) {
+			t.Fatalf("runtime/import document should be hidden: %s", hidden)
+		}
 	}
-	if source.Metadata["target_path"] != "rules/note-1.md" {
-		t.Fatalf("candidate metadata missing target path: %+v", source.Metadata)
+	if len(source.PendingCandidates) != 1 || source.PendingCandidates[0].ID != rec.Meta.ID {
+		t.Fatalf("pending candidates unexpected: %+v", source.PendingCandidates)
+	}
+	if strings.Contains(source.PendingCandidates[0].Body, store.Marker) {
+		t.Fatalf("pending candidate leaked frontmatter:\n%s", source.PendingCandidates[0].Body)
 	}
 }
 
-func TestResolveDocumentHidesWorktrailFrontmatter(t *testing.T) {
+func TestResolveCollectionHidesWorktrailFrontmatter(t *testing.T) {
 	env := previewTestEnv(t)
 	path := filepath.Join(env.ProjectWT, "decisions", "frontmatter.md")
 	if err := os.WriteFile(path, []byte(`---worktrail
@@ -74,128 +100,85 @@ Visible content.
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	source, err := Resolve(ResolveRequest{Env: env, Scope: "project", Target: "decisions/frontmatter.md"})
+	source, err := Resolve(ResolveRequest{Env: env, Scope: "project"})
 	if err != nil {
-		t.Fatalf("Resolve document: %v", err)
+		t.Fatalf("Resolve collection: %v", err)
 	}
-	if strings.Contains(source.Body, store.Marker) || strings.Contains(source.Body, `"stage"`) {
-		t.Fatalf("document body includes Worktrail frontmatter:\n%s", source.Body)
+	doc := sourceByPath(source.Children, "decisions/frontmatter.md")
+	if doc == nil {
+		t.Fatalf("frontmatter document missing from collection: %+v", source.Children)
 	}
-	if source.Title != "Decision Body" {
-		t.Fatalf("title = %q", source.Title)
+	if strings.Contains(doc.Body, store.Marker) || strings.Contains(doc.Body, `"stage"`) {
+		t.Fatalf("document body includes Worktrail frontmatter:\n%s", doc.Body)
+	}
+	if doc.Title != "Decision Body" {
+		t.Fatalf("title = %q", doc.Title)
 	}
 }
 
-func TestResolveDirectoryIncludesMarkdownTree(t *testing.T) {
+func TestRenderBuildsStableKnowledgePage(t *testing.T) {
 	env := previewTestEnv(t)
-	if err := os.MkdirAll(filepath.Join(env.ProjectWT, "docs", "nested"), 0o755); err != nil {
+	writePreviewFile(t, filepath.Join(env.ProjectWT, "decisions", "choice.md"), "# Choice\n\nDecision body.")
+	writePreviewFile(t, filepath.Join(env.ProjectWT, "workflows", "release.md"), "# Release\n\nWorkflow body.")
+	if _, err := (candidate.Manager{Env: env, Actor: "test"}).Create(candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "pending-rule",
+		CandidateType: "rule",
+		TargetPath:    "rules/pending-rule.md",
+		Title:         "Pending Rule",
+		Body:          "# Pending Rule\n\n<script>alert(1)</script>\n\nCandidate body.",
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(env.ProjectWT, "docs", "intro.md"), []byte("# Intro\n\nFirst body."), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(env.ProjectWT, "docs", "nested", "detail.md"), []byte("# Detail\n\nNested body."), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(env.ProjectWT, "docs", "ignored.txt"), []byte("ignored"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source, err := Resolve(ResolveRequest{Env: env, Scope: "project", Target: "docs"})
+	source, err := Resolve(ResolveRequest{Env: env, Scope: "project"})
 	if err != nil {
-		t.Fatalf("Resolve directory: %v", err)
+		t.Fatalf("Resolve collection: %v", err)
 	}
-	if source.Kind != SourceDirectory || source.Path != "docs" || source.Metadata["file_count"] != "2" {
-		t.Fatalf("directory source unexpected: %+v", source)
-	}
-	got := make([]string, 0, len(source.Children))
-	for _, child := range source.Children {
-		got = append(got, child.Path)
-	}
-	want := []string{"docs/intro.md", "docs/nested/detail.md"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("children = %v, want %v", got, want)
-	}
-}
-
-func TestResolveRejectsEscapingAndUnsupportedPaths(t *testing.T) {
-	env := previewTestEnv(t)
-	if _, err := Resolve(ResolveRequest{Env: env, Scope: "project", Target: "../outside.md"}); err == nil {
-		t.Fatalf("expected path escape error")
-	}
-	if _, err := Resolve(ResolveRequest{Env: env, Scope: "project", Target: "logs/events.jsonl"}); !errors.Is(err, ErrUnsupportedFileType) {
-		t.Fatalf("expected unsupported type error, got %v", err)
-	}
-}
-
-func TestRenderDirectoryIncludesDirectoryNavigation(t *testing.T) {
-	env := previewTestEnv(t)
-	if err := os.MkdirAll(filepath.Join(env.ProjectWT, "docs", "nested"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(env.ProjectWT, "docs", "intro.md"), []byte(`---worktrail
-{
-  "stage": "note"
-}
----
-
-# Intro
-
-First body.`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(env.ProjectWT, "docs", "nested", "detail.md"), []byte("# Detail\n\nNested body."), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source, err := Resolve(ResolveRequest{Env: env, Scope: "project", Target: "docs"})
+	cacheDir := t.TempDir()
+	first, err := Render(source, cacheDir)
 	if err != nil {
-		t.Fatalf("Resolve directory: %v", err)
+		t.Fatalf("Render first: %v", err)
 	}
-	result, err := Render(source, t.TempDir())
+	second, err := Render(source, cacheDir)
 	if err != nil {
-		t.Fatalf("Render directory: %v", err)
+		t.Fatalf("Render second: %v", err)
 	}
-	body := string(result.HTML)
-	for _, want := range []string{"Directory", "docs/intro.md", "docs/nested/detail.md", "First body.", "Nested body."} {
+	if first.IndexPath != second.IndexPath {
+		t.Fatalf("stable cache path mismatch: %s vs %s", first.IndexPath, second.IndexPath)
+	}
+	body := string(first.HTML)
+	for _, want := range []string{"Worktrail Preview", "Decisions", "Workflows", "Pending Candidates", "Decision body.", "Workflow body.", "Pending Rule"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("directory preview missing %q:\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, "---worktrail") || strings.Contains(body, `"stage"`) {
-		t.Fatalf("directory preview leaked frontmatter:\n%s", body)
-	}
-}
-
-func TestRenderIncludesMetadataAndOmitsRawHTML(t *testing.T) {
-	dir := t.TempDir()
-	result, err := Render(Source{
-		Kind:  SourceCandidate,
-		Scope: "project",
-		ID:    "note-1",
-		Title: "Preview Title",
-		Path:  "candidates/project/note-1.md",
-		Body:  "# Preview Title\n\n<script>alert(1)</script>\n\n| A | B |\n| - | - |\n| 1 | 2 |",
-		Metadata: map[string]string{
-			"status":      "pending",
-			"target_path": "rules/note-1.md",
-		},
-	}, dir)
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if result.IndexPath != filepath.Join(dir, "index.html") {
-		t.Fatalf("index path = %s", result.IndexPath)
-	}
-	body := string(result.HTML)
-	for _, want := range []string{"Worktrail Preview", "Preview Title", "target_path", "rules/note-1.md", "<table>"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("rendered HTML missing %q:\n%s", want, body)
+			t.Fatalf("knowledge preview missing %q:\n%s", want, body)
 		}
 	}
 	if strings.Contains(body, "<script>") {
 		t.Fatalf("rendered HTML includes raw script:\n%s", body)
 	}
-	if _, err := os.Stat(result.IndexPath); err != nil {
-		t.Fatalf("expected index.html: %v", err)
+	if _, err := os.Stat(first.IndexPath); err != nil {
+		t.Fatalf("expected preview file: %v", err)
+	}
+}
+
+func TestClearCacheRemovesPreviewDirectory(t *testing.T) {
+	env := previewTestEnv(t)
+	dir, err := CacheDir(env, "project")
+	if err != nil {
+		t.Fatalf("CacheDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePreviewFile(t, filepath.Join(dir, "stale.html"), "<html>old</html>")
+	cleared, err := ClearCache(env, "project")
+	if err != nil {
+		t.Fatalf("ClearCache: %v", err)
+	}
+	if cleared != dir {
+		t.Fatalf("cleared dir = %s, want %s", cleared, dir)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("cache dir still exists: %v", err)
 	}
 }
 
@@ -219,4 +202,27 @@ func previewTestEnv(t *testing.T) paths.Env {
 		t.Fatalf("InitProject: %v", err)
 	}
 	return env
+}
+
+func hasSourcePath(items []Source, want string) bool {
+	return sourceByPath(items, want) != nil
+}
+
+func sourceByPath(items []Source, want string) *Source {
+	for i := range items {
+		if items[i].Path == want {
+			return &items[i]
+		}
+	}
+	return nil
+}
+
+func writePreviewFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

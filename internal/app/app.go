@@ -114,7 +114,7 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  worktrail context <task>")
 	fmt.Fprintln(out, "  worktrail context --stage requirements <task>")
 	fmt.Fprintln(out, "  worktrail context --evidence <task>")
-	fmt.Fprintln(out, "  worktrail preview <file-or-directory> [--open]")
+	fmt.Fprintln(out, "  worktrail preview [--scope project|user] [--no-open]")
 	fmt.Fprintln(out, "  worktrail import codex [--since 14d|--limit N] [--all]")
 	fmt.Fprintln(out, "  worktrail import cursor [--file path] [--limit N] [--all]")
 	fmt.Fprintln(out, "  worktrail migrate kdd [--write-candidates]")

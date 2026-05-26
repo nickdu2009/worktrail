@@ -8,7 +8,7 @@ import (
 func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 	expected := map[string][]string{
 		"worktrail-context":     {"worktrail context", "continue a previous task"},
-		"worktrail-doc-preview": {"worktrail preview", "preview URL", "Do not use the target project's dev server"},
+		"worktrail-doc-preview": {"worktrail preview", "preview file path", "--no-open", "Do not use the target project's dev server"},
 		"worktrail-init":        {"worktrail init", "worktrail install cursor|codex|claude|all", "worktrail doctor <tool>", "worktrail` is available in `PATH", "Do not initialize the target application's language"},
 		"worktrail-state":       {"worktrail state", "save progress"},
 		"worktrail-handoff":     {"worktrail handoff", "new conversation", "end current chat", "Do not only output a copyable text handoff"},
@@ -108,7 +108,7 @@ func TestPlaceholderIsOnlyUsedByRootRuleTemplates(t *testing.T) {
 func TestSkillTemplatesExposeTriggerIntent(t *testing.T) {
 	expected := map[string][]string{
 		"worktrail-context":     {"description:", "Use this skill when", "starting", "resuming", "continuing", ".worktrail/"},
-		"worktrail-doc-preview": {"description:", "Use this skill when", "preview", "Worktrail-managed", "candidate", ".worktrail/"},
+		"worktrail-doc-preview": {"description:", "Use this skill when", "preview", "overall", "candidate", ".worktrail/"},
 		"worktrail-init":        {"description:", "Use this skill when", "initialize Worktrail", "install", "doctor", "worktrail --help", ".worktrail/"},
 		"worktrail-state":       {"description:", "Use this skill when", "long", "risky", "checkpoint", ".worktrail/"},
 		"worktrail-handoff":     {"description:", "Use this skill", "new conversation", "end current chat", "worktrail handoff", "do not only output", ".worktrail/"},

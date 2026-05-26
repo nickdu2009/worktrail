@@ -16,6 +16,34 @@ Hard boundaries:
 
 Formal knowledge is Markdown with JSON frontmatter. Local indexes are rebuildable acceleration data, not source of truth.
 
+## User Manual
+
+- [`docs/manual/README.md`](docs/manual/README.md) - `Worktrail 使用手册`
+- [`docs/manual/QUICK-START.md`](docs/manual/QUICK-START.md) - `快速开始`
+- [`docs/manual/DESIGN-PHILOSOPHY.md`](docs/manual/DESIGN-PHILOSOPHY.md) - `设计理念`
+- [`docs/manual/AUTOMATION.md`](docs/manual/AUTOMATION.md) - `自动化`
+- [`docs/manual/FAQ.md`](docs/manual/FAQ.md) - `常见问题`
+- [`docs/user-guide.md`](docs/user-guide.md) - 用户指南入口
+
+Preview the manual locally with:
+
+```bash
+make docs-manual-serve
+```
+
+This preview uses `npx docsify-cli`, so Node.js/npm must be available.
+
+Preview the overall Worktrail knowledge library with:
+
+```bash
+worktrail preview
+worktrail preview --scope user
+```
+
+`worktrail preview` renders a local HTML file for the selected scope and opens it in the browser. It does not start a long-running HTTP preview service.
+
+If you already installed Worktrail-managed skills or rules for Cursor, Codex, or Claude, rerun `worktrail install <tool> --user` (and `--project` where applicable) after upgrading so agents pick up the new preview contract.
+
 ## Minimal workflow
 
 ```bash

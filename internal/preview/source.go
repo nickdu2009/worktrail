@@ -1,7 +1,6 @@
 package preview
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -17,32 +16,26 @@ import (
 type SourceKind string
 
 const (
-	SourceDocument  SourceKind = "document"
-	SourceCandidate SourceKind = "candidate"
-	SourceDirectory SourceKind = "directory"
-)
-
-var (
-	ErrTargetRequired      = errors.New("preview target is required")
-	ErrUnsupportedFileType = errors.New("unsupported Worktrail document type")
+	SourceCollection SourceKind = "collection"
+	SourceDocument   SourceKind = "document"
+	SourceCandidate  SourceKind = "candidate"
 )
 
 type Source struct {
-	Kind     SourceKind        `json:"kind"`
-	Scope    string            `json:"scope"`
-	ID       string            `json:"id,omitempty"`
-	Title    string            `json:"title"`
-	Path     string            `json:"path"`
-	Body     string            `json:"-"`
-	Metadata map[string]string `json:"metadata,omitempty"`
-	Children []Source          `json:"children,omitempty"`
+	Kind              SourceKind        `json:"kind"`
+	Scope             string            `json:"scope"`
+	ID                string            `json:"id,omitempty"`
+	Title             string            `json:"title"`
+	Path              string            `json:"path"`
+	Body              string            `json:"-"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+	Children          []Source          `json:"children,omitempty"`
+	PendingCandidates []Source          `json:"pending_candidates,omitempty"`
 }
 
 type ResolveRequest struct {
-	Env         paths.Env
-	Scope       string
-	Target      string
-	CandidateID string
+	Env   paths.Env
+	Scope string
 }
 
 type RenderResult struct {
@@ -50,12 +43,6 @@ type RenderResult struct {
 	HTML      []byte `json:"-"`
 	OutputDir string `json:"output_dir"`
 	IndexPath string `json:"index_path"`
-	Temporary bool   `json:"temporary"`
-}
-
-type ServeResult struct {
-	URL  string
-	Stop func() error
 }
 
 func Resolve(req ResolveRequest) (Source, error) {
@@ -63,91 +50,55 @@ func Resolve(req ResolveRequest) (Source, error) {
 	if scope == "" {
 		scope = "project"
 	}
-	if strings.TrimSpace(req.CandidateID) != "" {
-		return resolveCandidate(req.Env, scope, req.CandidateID)
-	}
-
-	target := strings.TrimSpace(req.Target)
-	if target == "" {
-		return Source{}, ErrTargetRequired
-	}
-	if shouldTryCandidate(target) {
-		if src, err := resolveCandidate(req.Env, scope, target); err == nil {
-			return src, nil
-		} else if !errors.Is(err, candidate.ErrNotFound) {
-			return Source{}, err
-		}
-	}
-	return resolveDocument(req.Env, scope, target)
-}
-
-func resolveCandidate(env paths.Env, scope, id string) (Source, error) {
-	rec, err := (candidate.Manager{Env: env, Actor: "cli:preview"}).Show(scope, id)
+	root, err := req.Env.ScopeRoot(scope)
 	if err != nil {
 		return Source{}, err
 	}
-	title := strings.TrimSpace(rec.Meta.Title)
-	if title == "" {
-		title = rec.Meta.ID
+
+	docs, err := resolveDocuments(scope, root)
+	if err != nil {
+		return Source{}, err
 	}
+	pending, err := resolvePendingCandidates(req.Env, scope)
+	if err != nil {
+		return Source{}, err
+	}
+
 	return Source{
-		Kind:  SourceCandidate,
-		Scope: rec.Meta.Scope,
-		ID:    rec.Meta.ID,
-		Title: title,
-		Path:  filepath.ToSlash(filepath.Join("candidates", rec.Meta.Scope, rec.Meta.ID+".md")),
-		Body:  rec.Body,
+		Kind:              SourceCollection,
+		Scope:             scope,
+		Title:             titleForScope(scope),
+		Path:              ".",
+		Children:          docs,
+		PendingCandidates: pending,
 		Metadata: map[string]string{
-			"candidate_id":     rec.Meta.ID,
-			"status":           rec.Meta.Status,
-			"candidate_type":   rec.Meta.CandidateType,
-			"operation":        rec.Meta.Operation,
-			"target_path":      rec.Meta.TargetPath,
-			"redaction_status": rec.Meta.RedactionStatus,
+			"source_path":             ".",
+			"file_count":              fmt.Sprintf("%d", len(docs)),
+			"pending_candidate_count": fmt.Sprintf("%d", len(pending)),
 		},
 	}, nil
 }
 
-func resolveDocument(env paths.Env, scope, target string) (Source, error) {
-	if filepath.IsAbs(target) {
-		return Source{}, fmt.Errorf("%w: absolute paths are outside Worktrail roots", ErrUnsupportedFileType)
-	}
-	root, err := env.ScopeRoot(scope)
-	if err != nil {
-		return Source{}, err
-	}
-	path, err := paths.SafeJoin(root, target)
-	if err != nil {
-		return Source{}, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return Source{}, err
-	}
-	if info.IsDir() {
-		return resolveDirectory(scope, root, path)
-	}
-	if filepath.Ext(target) != ".md" {
-		return Source{}, fmt.Errorf("%w: %s", ErrUnsupportedFileType, filepath.Ext(target))
-	}
-	return readDocumentSource(scope, root, path)
-}
-
-func resolveDirectory(scope, root, dir string) (Source, error) {
-	rel, err := filepath.Rel(root, dir)
-	if err != nil {
-		return Source{}, err
-	}
-	rel = filepath.ToSlash(rel)
+func resolveDocuments(scope, root string) ([]Source, error) {
 	var docs []Source
-	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
+			if path != root && shouldSkipPreviewDir(entry.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if filepath.Ext(entry.Name()) != ".md" {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if shouldSkipPreviewPath(filepath.ToSlash(rel)) {
 			return nil
 		}
 		src, err := readDocumentSource(scope, root, path)
@@ -158,26 +109,46 @@ func resolveDirectory(scope, root, dir string) (Source, error) {
 		return nil
 	})
 	if err != nil {
-		return Source{}, err
+		return nil, err
 	}
 	sort.Slice(docs, func(i, j int) bool {
 		return docs[i].Path < docs[j].Path
 	})
-	title := strings.TrimSuffix(filepath.Base(dir), filepath.Ext(dir))
-	if rel == "." {
-		title = "Worktrail Documents"
+	return docs, nil
+}
+
+func resolvePendingCandidates(env paths.Env, scope string) ([]Source, error) {
+	records, err := (candidate.Manager{Env: env, Actor: "cli:preview"}).List(scope)
+	if err != nil {
+		return nil, err
 	}
-	return Source{
-		Kind:     SourceDirectory,
-		Scope:    scope,
-		Title:    title,
-		Path:     rel,
-		Children: docs,
-		Metadata: map[string]string{
-			"source_path": rel,
-			"file_count":  fmt.Sprintf("%d", len(docs)),
-		},
-	}, nil
+	pending := make([]Source, 0, len(records))
+	for _, rec := range records {
+		if rec.Meta.Status != candidate.StatusPending {
+			continue
+		}
+		title := strings.TrimSpace(rec.Meta.Title)
+		if title == "" {
+			title = rec.Meta.ID
+		}
+		pending = append(pending, Source{
+			Kind:  SourceCandidate,
+			Scope: rec.Meta.Scope,
+			ID:    rec.Meta.ID,
+			Title: title,
+			Path:  filepath.ToSlash(filepath.Join("candidates", rec.Meta.Scope, rec.Meta.ID+".md")),
+			Body:  rec.Body,
+			Metadata: map[string]string{
+				"candidate_id":     rec.Meta.ID,
+				"status":           rec.Meta.Status,
+				"candidate_type":   rec.Meta.CandidateType,
+				"operation":        rec.Meta.Operation,
+				"target_path":      rec.Meta.TargetPath,
+				"redaction_status": rec.Meta.RedactionStatus,
+			},
+		})
+	}
+	return pending, nil
 }
 
 func readDocumentSource(scope, root, path string) (Source, error) {
@@ -210,8 +181,28 @@ func readDocumentSource(scope, root, path string) (Source, error) {
 	}, nil
 }
 
-func shouldTryCandidate(target string) bool {
-	return !strings.ContainsAny(target, `/\`) && filepath.Ext(target) == ""
+func shouldSkipPreviewDir(name string) bool {
+	switch name {
+	case "index", "logs", "raw", "exports", "candidates", "state", "imports", ".cache":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldSkipPreviewPath(rel string) bool {
+	rel = filepath.ToSlash(strings.TrimSpace(rel))
+	if rel == "" || strings.HasPrefix(rel, ".cache/") {
+		return true
+	}
+	return false
+}
+
+func titleForScope(scope string) string {
+	if scope == "user" {
+		return "User Knowledge"
+	}
+	return "Project Knowledge"
 }
 
 func titleFromMarkdown(body string) string {

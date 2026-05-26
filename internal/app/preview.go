@@ -2,106 +2,88 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 
-	"github.com/nickdu2009/worktrail/internal/candidate"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	wtpreview "github.com/nickdu2009/worktrail/internal/preview"
 )
 
-type previewJSON struct {
-	Source    wtpreview.Source `json:"source"`
-	OutputDir string           `json:"output_dir"`
-	IndexPath string           `json:"index_path"`
-	URL       string           `json:"url,omitempty"`
-	Temporary bool             `json:"temporary"`
-}
-
 func runPreview(ctx context.Context, env paths.Env, ioctx IO, args []string) error {
+	_ = ctx
 	if wantsHelp(args) {
 		printPreviewHelp(ioctx.Out)
 		return nil
 	}
 	flags, positional := splitFlagsWithBooleans(args, map[string]bool{
-		"open":        true,
-		"render-only": true,
+		"no-open":     true,
+		"clear-cache": true,
 	})
+	if err := validatePreviewFlags(flags); err != nil {
+		return err
+	}
+	if len(positional) > 0 {
+		return errors.New("worktrail preview no longer accepts a target; use `worktrail preview` or `worktrail preview --scope user`")
+	}
 	scope := flagValue(flags, "scope", "project")
-	target := firstArg(positional, "")
-	req := wtpreview.ResolveRequest{
-		Env:         env,
-		Scope:       scope,
-		Target:      target,
-		CandidateID: flagValue(flags, "candidate", ""),
-	}
-	if req.Target == "" && req.CandidateID == "" {
-		return errors.New("usage: worktrail preview <target> [--scope project|user]")
-	}
-	open := flagValue(flags, "open", "") == "true"
-	renderOnly := flagValue(flags, "render-only", "") == "true"
-	if renderOnly && open {
-		return errors.New("worktrail preview: --render-only cannot be used with --open")
-	}
-
-	src, err := wtpreview.Resolve(req)
-	if err != nil {
-		if errors.Is(err, candidate.ErrNotFound) {
-			return fmt.Errorf("%w; next: worktrail candidates list --scope %s", err, scope)
+	if flagValue(flags, "clear-cache", "") == "true" {
+		dir, err := wtpreview.ClearCache(env, scope)
+		if err != nil {
+			return err
 		}
-		return err
+		fmt.Fprintf(ioctx.Out, "scope\t%s\n", scope)
+		fmt.Fprintf(ioctx.Out, "cleared\t%s\n", dir)
+		return nil
 	}
-	rendered, err := wtpreview.Render(src, flagValue(flags, "out", ""))
+
+	src, err := wtpreview.Resolve(wtpreview.ResolveRequest{
+		Env:   env,
+		Scope: scope,
+	})
 	if err != nil {
 		return err
 	}
-
-	if renderOnly {
-		return printPreviewRenderOnly(ioctx, rendered, flagValue(flags, "format", "text"))
-	}
-
-	defer func() {
-		if rendered.Temporary {
-			_ = os.RemoveAll(rendered.OutputDir)
-		}
-	}()
-	served, err := wtpreview.Serve(ctx, rendered.OutputDir)
+	cacheDir, err := wtpreview.CacheDir(env, scope)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = served.Stop()
-	}()
-	if open {
-		if err := wtpreview.Open(served.URL); err != nil {
+	rendered, err := wtpreview.Render(src, cacheDir)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(ioctx.Out, "scope\t%s\n", scope)
+	fmt.Fprintf(ioctx.Out, "index\t%s\n", rendered.IndexPath)
+	if flagValue(flags, "no-open", "") != "true" {
+		if err := wtpreview.Open(rendered.IndexPath); err != nil {
 			fmt.Fprintf(ioctx.Err, "open failed: %v\n", err)
+		} else {
+			fmt.Fprintf(ioctx.Out, "opened\t%s\n", rendered.IndexPath)
 		}
 	}
-	fmt.Fprintf(ioctx.Out, "source\t%s\n", rendered.Source.Path)
-	fmt.Fprintf(ioctx.Out, "url\t%s\n", served.URL)
-	fmt.Fprintln(ioctx.Out, "stop\tpress Ctrl-C to stop preview")
-	<-ctx.Done()
 	return nil
 }
 
-func printPreviewRenderOnly(ioctx IO, rendered wtpreview.RenderResult, format string) error {
-	if format == "json" {
-		return json.NewEncoder(ioctx.Out).Encode(previewJSON{
-			Source:    rendered.Source,
-			OutputDir: rendered.OutputDir,
-			IndexPath: rendered.IndexPath,
-			Temporary: rendered.Temporary,
-		})
+func validatePreviewFlags(flags map[string]string) error {
+	allowed := map[string]bool{
+		"scope":       true,
+		"no-open":     true,
+		"clear-cache": true,
 	}
-	fmt.Fprintf(ioctx.Out, "source\t%s\n", rendered.Source.Path)
-	fmt.Fprintf(ioctx.Out, "index\t%s\n", rendered.IndexPath)
+	for key := range flags {
+		if allowed[key] {
+			continue
+		}
+		switch key {
+		case "open", "candidate", "render-only", "format", "out":
+			return fmt.Errorf("worktrail preview no longer supports --%s", key)
+		default:
+			return fmt.Errorf("worktrail preview: unknown flag --%s", key)
+		}
+	}
 	return nil
 }
 
 func printPreviewHelp(out interface{ Write([]byte) (int, error) }) {
-	fmt.Fprintln(out, "usage: worktrail preview <file-or-directory> [--scope project|user] [--open]")
-	fmt.Fprintln(out, "       worktrail preview --candidate <id> [--scope project|user] [--open]")
-	fmt.Fprintln(out, "       worktrail preview <file-or-directory> --render-only [--out dir] [--format json]")
+	fmt.Fprintln(out, "usage: worktrail preview [--scope project|user] [--no-open]")
+	fmt.Fprintln(out, "       worktrail preview --clear-cache [--scope project|user]")
 }

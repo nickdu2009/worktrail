@@ -34,8 +34,8 @@ var skillTriggers = []SkillTrigger{
 			"the user asks to preview Worktrail docs, render Worktrail knowledge, open a Worktrail candidate, handoff, workflow, profile, rule, lesson, or says 预览 Worktrail 文档",
 		},
 		RequiredActions: []string{
-			"Run `worktrail preview <path> --scope <scope> --open` or `worktrail preview --candidate <id> --scope <scope> --open`.",
-			"Use browser verification when available and report the preview URL, source, and validation result.",
+			"Run `worktrail preview --scope <scope>` or `worktrail preview --scope <scope> --no-open`.",
+			"Use browser verification when available and report the preview file path, scope, and validation result.",
 		},
 		Never: []string{
 			"Do not use the target project's dev server, docs site, package manager, or framework for Worktrail document preview.",

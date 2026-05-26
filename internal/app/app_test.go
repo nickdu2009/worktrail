@@ -56,7 +56,44 @@ func TestInitCreatesUserAndProjectRoots(t *testing.T) {
 	}
 }
 
-func TestPreviewRenderOnlyRendersProjectDocument(t *testing.T) {
+func TestPreviewBuildsProjectKnowledgeHTML(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", filepath.Join(home, ".worktrail"))
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"init"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run init: %v stderr=%s", err, errb.String())
+	}
+	writeTextFile(t, filepath.Join(project, ".worktrail", "decisions", "choice.md"), "# Choice\n\nDecision body.")
+	if err := Run(context.Background(), []string{"candidates", "create", "--id", "preview-note", "--type", "rule", "--target", "rules/preview-note.md", "--title", "Preview Candidate", "# Preview Candidate\n\nPending body."}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run candidates create: %v stderr=%s", err, errb.String())
+	}
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"preview", "--no-open"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run preview --no-open: %v stderr=%s", err, errb.String())
+	}
+	indexPath := parseTabValue(t, out.String(), "index")
+	body, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read preview HTML: %v", err)
+	}
+	for _, want := range []string{"Project Knowledge", "Pending Candidates", "Preview Candidate", "Decision body."} {
+		if !bytes.Contains(body, []byte(want)) {
+			t.Fatalf("preview HTML missing %q:\n%s", want, body)
+		}
+	}
+	if !strings.Contains(indexPath, filepath.Join(".worktrail", ".cache", "preview")) {
+		t.Fatalf("preview index path should live in cache, got %s", indexPath)
+	}
+}
+
+func TestPreviewScopeUserAndClearCache(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
 	if err := os.MkdirAll(project, 0o755); err != nil {
@@ -71,27 +108,28 @@ func TestPreviewRenderOnlyRendersProjectDocument(t *testing.T) {
 	}
 	out.Reset()
 	errb.Reset()
-	renderDir := filepath.Join(t.TempDir(), "preview")
-	if err := Run(context.Background(), []string{"preview", "project.md", "--render-only", "--out", renderDir, "--format", "json"}, nil, &out, &errb); err != nil {
-		t.Fatalf("Run preview render-only: %v stderr=%s", err, errb.String())
+	if err := Run(context.Background(), []string{"preview", "--scope", "user", "--no-open"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run preview user --no-open: %v stderr=%s", err, errb.String())
 	}
-	var result previewJSON
-	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
-		t.Fatalf("preview JSON invalid: %v\n%s", err, out.String())
+	indexPath := parseTabValue(t, out.String(), "index")
+	if _, err := os.Stat(indexPath); err != nil {
+		t.Fatalf("user preview file missing: %v", err)
 	}
-	if result.Source.Path != "project.md" || result.IndexPath != filepath.Join(renderDir, "index.html") {
-		t.Fatalf("preview result unexpected: %+v", result)
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"preview", "--scope", "user", "--clear-cache"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run preview clear-cache: %v stderr=%s", err, errb.String())
 	}
-	body, err := os.ReadFile(result.IndexPath)
-	if err != nil {
-		t.Fatalf("read preview HTML: %v", err)
+	cleared := parseTabValue(t, out.String(), "cleared")
+	if !strings.Contains(cleared, filepath.Join(".worktrail", ".cache", "preview")) {
+		t.Fatalf("cleared path unexpected: %s", cleared)
 	}
-	if !bytes.Contains(body, []byte("Worktrail Preview")) || !bytes.Contains(body, []byte("Project")) {
-		t.Fatalf("preview HTML missing content:\n%s", body)
+	if _, err := os.Stat(cleared); !os.IsNotExist(err) {
+		t.Fatalf("cache dir should be removed, err=%v", err)
 	}
 }
 
-func TestPreviewRenderOnlyRendersCandidate(t *testing.T) {
+func TestPreviewRejectsLegacyFlagsAndTargets(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
 	if err := os.MkdirAll(project, 0o755); err != nil {
@@ -102,64 +140,46 @@ func TestPreviewRenderOnlyRendersCandidate(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	runApp(t, &out, &errb, "init")
-	runApp(t, &out, &errb, "candidates", "create", "--id", "note-1", "--type", "rule", "--target", "rules/note-1.md", "--title", "Candidate Preview", "# Candidate Body")
-	out.Reset()
-	errb.Reset()
-	renderDir := filepath.Join(t.TempDir(), "preview")
-	if err := Run(context.Background(), []string{"preview", "--candidate", "note-1", "--render-only", "--out", renderDir, "--format", "json"}, nil, &out, &errb); err != nil {
-		t.Fatalf("Run preview candidate: %v stderr=%s", err, errb.String())
-	}
-	body, err := os.ReadFile(filepath.Join(renderDir, "index.html"))
-	if err != nil {
-		t.Fatalf("read preview HTML: %v", err)
-	}
-	for _, want := range []string{"Candidate Preview", "candidate_id", "target_path", "Candidate Body"} {
-		if !bytes.Contains(body, []byte(want)) {
-			t.Fatalf("candidate preview missing %q:\n%s", want, body)
-		}
-	}
-	if bytes.Contains(body, []byte("---worktrail")) {
-		t.Fatalf("candidate preview leaked frontmatter:\n%s", body)
-	}
-}
-
-func TestPreviewFlagParsingAndErrors(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	project := filepath.Join(t.TempDir(), "project")
-	if err := os.MkdirAll(project, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("WORKTRAIL_HOME", filepath.Join(home, ".worktrail"))
-	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
-
-	var out, errb bytes.Buffer
-	runApp(t, &out, &errb, "init")
-	out.Reset()
-	errb.Reset()
-	if err := Run(context.Background(), []string{"preview", "--render-only", "project.md", "--out", filepath.Join(t.TempDir(), "preview")}, nil, &out, &errb); err != nil {
-		t.Fatalf("boolean render-only should not consume target: %v stderr=%s", err, errb.String())
-	}
 	for _, args := range [][]string{
-		{"preview", "--open", "project.md", "--render-only"},
-		{"preview", "project.md", "--render-only", "--open"},
+		{"preview", "project.md"},
+		{"preview", "--candidate", "note-1"},
+		{"preview", "--render-only"},
+		{"preview", "--open"},
 	} {
 		out.Reset()
 		errb.Reset()
 		err := Run(context.Background(), args, nil, &out, &errb)
-		if err == nil || !strings.Contains(err.Error(), "--render-only cannot be used with --open") {
-			t.Fatalf("Run %v expected open/render conflict, got err=%v stdout=%s stderr=%s", args, err, out.String(), errb.String())
-		}
-	}
-	for _, args := range [][]string{
-		{"preview", "missing.md", "--render-only"},
-		{"preview", "../outside.md", "--render-only"},
-	} {
-		out.Reset()
-		errb.Reset()
-		if err := Run(context.Background(), args, nil, &out, &errb); err == nil {
+		if err == nil {
 			t.Fatalf("Run %v expected error", args)
 		}
 	}
+}
+
+func TestPreviewHelpShowsNewContract(t *testing.T) {
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"preview", "--help"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run preview help: %v stderr=%s", err, errb.String())
+	}
+	for _, want := range []string{
+		"usage: worktrail preview [--scope project|user] [--no-open]",
+		"worktrail preview --clear-cache [--scope project|user]",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("preview help missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestPreviewRenderOnlyRendersCandidate(t *testing.T) {
+	t.Skip("preview command was redesigned to whole-knowledge rendering")
+}
+
+func TestPreviewFlagParsingAndErrors(t *testing.T) {
+	t.Skip("preview command was redesigned to whole-knowledge rendering")
+}
+
+func TestPreviewRenderOnlyRendersProjectDocument(t *testing.T) {
+	t.Skip("preview command was redesigned to whole-knowledge rendering")
 }
 
 func TestTopLevelHelpIncludesCandidateApplyCommands(t *testing.T) {
@@ -1987,6 +2007,18 @@ func runApp(t *testing.T, out, errb *bytes.Buffer, args ...string) string {
 		t.Fatalf("Run %v: %v stderr=%s", args, err, errb.String())
 	}
 	return out.String()
+}
+
+func parseTabValue(t *testing.T, text, key string) string {
+	t.Helper()
+	prefix := key + "\t"
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimPrefix(line, prefix)
+		}
+	}
+	t.Fatalf("output missing %q in:\n%s", key, text)
+	return ""
 }
 
 func writeTextFile(t *testing.T, path string, body string) {

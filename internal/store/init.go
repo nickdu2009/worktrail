@@ -104,6 +104,7 @@ const ProjectGitignoreBody = `# Worktrail local integration installs. These are 
 .worktrail/raw/
 .worktrail/index/
 .worktrail/logs/
+.worktrail/.cache/
 .worktrail/exports/`
 
 const legacyProjectGitignoreBody = `# Worktrail local integration installs. These are generated per developer by
@@ -119,6 +120,7 @@ const legacyProjectGitignoreBody = `# Worktrail local integration installs. Thes
 .worktrail/raw/
 .worktrail/index/
 .worktrail/logs/
+.worktrail/.cache/
 .worktrail/exports/`
 
 func EnsureProjectGitignore(env paths.Env) error {
