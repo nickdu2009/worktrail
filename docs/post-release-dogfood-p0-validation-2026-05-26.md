@@ -23,10 +23,24 @@ This record validates the P0 post-release dogfood implementation plan:
 go test ./...
 git diff --check
 go build ./cmd/worktrail
+go install ./cmd/worktrail
 go run ./cmd/worktrail note add --help
 go run ./cmd/worktrail context "maintenance"
 go run ./cmd/worktrail evidence plan --format json
 go run ./cmd/worktrail maintain knowledge --format json
+```
+
+Isolated e2e smoke used a disposable `HOME`, `WORKTRAIL_HOME`, and
+`WORKTRAIL_PROJECT_ROOT` with a temporary binary:
+
+```bash
+worktrail init
+worktrail install codex --user --project
+worktrail doctor codex --user --project
+worktrail install claude --user --project
+worktrail doctor claude --user --project
+worktrail context "maintenance"
+worktrail maintain knowledge --format json
 ```
 
 ## Result
@@ -34,8 +48,11 @@ go run ./cmd/worktrail maintain knowledge --format json
 - Full Go test suite passed.
 - Whitespace diff check passed.
 - Worktrail binary build passed.
+- Worktrail install passed.
 - CLI smoke checks for `note add`, `context`, `evidence plan`, and
   `maintain knowledge` passed.
+- Isolated e2e smoke passed for `init`, Codex install/doctor, Claude
+  install/doctor, context, and maintain scan.
 - No raw transcript bodies, local private paths, session ids, usernames, or
   temporary proposal bodies are included in this validation record.
 

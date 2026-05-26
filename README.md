@@ -21,7 +21,7 @@ Formal knowledge is Markdown with JSON frontmatter. Local indexes are rebuildabl
 ```bash
 worktrail init
 worktrail context "current task"
-worktrail candidates create --type rule --target rules/example.md --title "Example Rule" "Rule body."
+worktrail note add --type rule --target rules/example.md --title "Example Rule" --summary "Example rule" --evidence-label "manual note" "Rule body."
 worktrail review
 worktrail review plan --format json
 worktrail candidates diff <candidate-id>
@@ -29,6 +29,10 @@ worktrail promote <candidate-id>
 worktrail index rebuild
 worktrail context "current task"
 ```
+
+`worktrail note add` is the low-friction path for capturing a confirmed finding
+as a pending semantic candidate. It does not edit formal knowledge or promote
+candidates; use `review`, `promote`, or `merge` for the explicit review step.
 
 `worktrail review` shows pending semantic candidates by default and reports hidden transcript evidence plus non-semantic operational candidates such as handoffs. Semantic candidates include `source_candidate_ids` details when present, source health warnings, target/duplicate warnings, and a focused `worktrail candidates diff <id>` next step. Use `worktrail review --evidence` for raw transcript evidence, or `worktrail review --all` when operational candidates also need inspection.
 
@@ -59,6 +63,11 @@ Worktrail supports multiple local agent surfaces in the same repository. Install
 
 - User scope installs the agent capabilities that should follow the human across repositories. The bundled `templates/root/**` and `templates/skills/**` files are user-level instructions, rules, and skills.
 - Project scope installs runtime integration config for the current repository only, such as hooks, MCP/settings files, and the managed `.gitignore` entries needed for those runtime files. `--project` does not install project-level rules or project-level skills from `templates/root/**` or `templates/skills/**`.
+
+Install the Worktrail CLI before installing agent integrations. Installed skills,
+hooks, and MCP configs invoke the `worktrail` command, so `worktrail` must be
+available in `PATH`; from this repository, use `go install ./cmd/worktrail` or a
+packaged binary.
 
 By default, `worktrail install <tool>` installs user scope only. For a complete setup, run both scopes in one command:
 
@@ -92,7 +101,7 @@ worktrail distill --pending --summary --scope user
 worktrail evidence plan --format json --scope user
 ```
 
-For routine upkeep, use the installed `/worktrail-maintain` skill. It chains `context "maintenance"`, `distill --pending --summary`, `review plan --format json`, and `evidence plan --format json`, then waits for explicit confirmation before any state-changing command.
+For routine upkeep, use the installed `/worktrail-maintain` skill. It chains `context "maintenance"`, `distill --pending --summary`, `review plan --format json`, `evidence plan --format json`, and `maintain knowledge --format json` when a proposal workflow is needed, then waits for explicit confirmation before any state-changing command.
 
 Saved review plans can be applied only with confirmation:
 

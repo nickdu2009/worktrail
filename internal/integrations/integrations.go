@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -64,6 +65,7 @@ func Install(env paths.Env, tool Tool, opts Options) (Report, error) {
 			return report, err
 		}
 	}
+	report.Checks = append(report.Checks, worktrailCommandCheck())
 	_ = wlog.Append(env.ProjectWT, "install", string(tool), "integrations:"+string(tool), map[string]any{"user": opts.User, "project": opts.Project})
 	return report, nil
 }
@@ -96,6 +98,7 @@ func Doctor(env paths.Env, tool Tool, opts Options) (Report, error) {
 	}
 	opts = normalizeOptions(opts)
 	report := Report{Tool: tool}
+	report.Checks = append(report.Checks, worktrailCommandCheck())
 	if opts.User {
 		doctorScope(cfg, "user", &report)
 	}
@@ -415,6 +418,24 @@ func worktrailWritableChecks(projectRoot string) []Check {
 		checks = append(checks, Check{Name: "project worktrail writable " + filepath.ToSlash(rel), Path: path, OK: ok, Note: note})
 	}
 	return checks
+}
+
+func worktrailCommandCheck() Check {
+	path, err := exec.LookPath("worktrail")
+	if err != nil {
+		return Check{
+			Name: "worktrail command available",
+			Path: "worktrail",
+			OK:   false,
+			Note: "not found in PATH; install the Worktrail CLI with `go install ./cmd/worktrail` or add the worktrail binary to PATH before relying on installed skills, hooks, or MCP",
+		}
+	}
+	return Check{
+		Name: "worktrail command available",
+		Path: path,
+		OK:   true,
+		Note: "available in PATH for installed skills, hooks, and MCP",
+	}
 }
 
 func checkWritable(path string) (bool, string) {

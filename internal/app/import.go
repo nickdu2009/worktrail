@@ -262,19 +262,19 @@ func printImportReport(ioctx IO, report importReport, format string) error {
 
 func importNextSteps(dryRun bool) []string {
 	if dryRun {
-		return []string{"run `worktrail import codex --all` to sync transcripts and create pending transcript_notes evidence"}
+		return []string{"rerun the bounded import with `--all`, for example `worktrail import codex --since 14d --all`, to sync transcripts and create pending transcript_notes evidence"}
 	}
 	return []string{
 		"run `worktrail distill --pending --limit 5` to process evidence in small batches",
 		"or run `worktrail distill --pending --all --write-pack distill.md` to write one full pack without flooding the terminal",
-		"create semantic pending candidates with `worktrail candidates create`",
+		"capture confirmed findings as semantic pending candidates with `worktrail note add`",
 		"run `worktrail review` to review semantic candidates; use `worktrail review --evidence` for transcript evidence",
 	}
 }
 
 func cursorImportNextSteps(dryRun bool) []string {
 	if dryRun {
-		return []string{"run `worktrail import cursor --all` to sync observed Cursor transcripts and create pending transcript_notes evidence"}
+		return []string{"rerun the bounded import with `--all`, for example `worktrail import cursor --limit 20 --all`, to sync observed Cursor transcripts and create pending transcript_notes evidence"}
 	}
 	return importNextSteps(false)
 }

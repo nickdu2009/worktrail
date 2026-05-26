@@ -20,8 +20,8 @@ For an existing `docs/knowledge-driven-development/` project knowledge base:
 
 For all current-project Codex conversations:
 
-1. Run `worktrail import codex` first and show the dry-run count.
-2. If the user asked to proceed or already asked for all conversations, run `worktrail import codex --all`.
+1. Run a bounded dry-run first and show the count. Prefer the exact command from `worktrail context "maintenance"` when present, such as `worktrail import codex --since 14d`, otherwise use `worktrail import codex --limit 20`.
+2. If the user asked to proceed or already asked for all conversations, run the same bounded command with `--all`, for example `worktrail import codex --since 14d --all`.
 3. Summarize matched sessions, synced transcripts, extracted pending transcript evidence candidates, and skipped duplicates.
 4. Distill all transcript evidence before review. Prefer `worktrail distill --pending --all --write-pack worktrail-distill.md`; for chat-sized batches, process every batch with `worktrail distill --pending --limit 5 --offset <N>` until all `transcript_notes` are covered.
 5. As the current AI agent, summarize every evidence pack into a `worktrail.distill.proposal.v1` JSON proposal.
@@ -31,9 +31,9 @@ For all current-project Codex conversations:
 
 For observed Cursor conversations:
 
-1. Run `worktrail import cursor` first and show the dry-run observed, matched, skipped, and blocked counts.
+1. Run a bounded dry-run first and show the observed, matched, skipped, and blocked counts. Prefer the exact command from `worktrail context "maintenance"` when present, such as `worktrail import cursor --limit 20`.
 2. Explain that Cursor import uses explicit `--file` paths or Worktrail-observed `observed-*.metadata.json` registry entries. It does not scan undocumented private Cursor directories.
-3. If the user asked to proceed or already asked for observed Cursor conversations, run `worktrail import cursor --all`.
+3. If the user asked to proceed or already asked for observed Cursor conversations, run the same bounded command with `--all`, for example `worktrail import cursor --limit 20 --all`.
 4. Summarize observed, synced, extracted, skipped, and blocked counts.
 5. Distill transcript evidence before review, then hand off review to `/worktrail-review`.
 

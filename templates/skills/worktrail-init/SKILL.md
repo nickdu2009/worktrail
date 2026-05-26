@@ -13,27 +13,31 @@ Use this skill when initializing Worktrail or installing Worktrail-managed agent
 - Do not require the target project to have Node, Python, Go, package manifests, or any app structure.
 - Do not overwrite non-Worktrail configuration.
 - Explain write impact before running commands that install or merge Worktrail integration files.
+- Worktrail-managed skills, hooks, and MCP configs call the `worktrail` command. Before installing integrations, ensure the Worktrail CLI is installed and available in `PATH`.
 
 ## Workflow
 
 1. Confirm the target directory. Default to the current workspace unless the user specified another directory.
-2. Inspect current Worktrail state:
+2. Verify the Worktrail CLI is installed:
+   - Run `worktrail --help`.
+   - If it is missing, install the CLI first, for example `go install ./cmd/worktrail` from this repository or by using the packaged binary, then ensure `worktrail` is in `PATH`.
+3. Inspect current Worktrail state:
    - `.worktrail/config.json`
    - `.gitignore`
    - `.cursor/mcp.json`
    - `.cursor/hooks.json`
    - `.codex/hooks.json`
    - `.claude/settings.json`
-3. Run `worktrail init`.
+4. Run `worktrail init`.
    - This initializes user and project Worktrail roots.
    - It may create or update project `.worktrail`, `.gitignore`, and `.codex/hooks.json`.
-4. Install requested integrations:
+5. Install requested integrations:
    - `worktrail install cursor --user|--project`
    - `worktrail install codex --user|--project`
    - `worktrail install claude --user|--project`
    - `worktrail install all --user|--project`
-5. Verify with `worktrail doctor <tool> --user|--project`.
-6. Report only Worktrail-managed changes and any remaining setup step.
+6. Verify with `worktrail doctor <tool> --user|--project`; the doctor report must include a passing `worktrail command available` check.
+7. Report only Worktrail-managed changes and any remaining setup step.
 
 ## Scope Notes
 

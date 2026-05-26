@@ -1,6 +1,6 @@
 # Worktrail Backlog
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 This backlog tracks follow-up work after the KDD compatibility import,
 agent-assisted distillation dogfood pass, and review/evidence lifecycle

@@ -19,12 +19,26 @@ func testEnv(t *testing.T) paths.Env {
 	if err := os.MkdirAll(project, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	installFakeWorktrailCommand(t)
 	return paths.Env{
 		Home:        home,
 		UserRoot:    filepath.Join(home, ".worktrail"),
 		ProjectRoot: project,
 		ProjectWT:   filepath.Join(project, ".worktrail"),
 	}
+}
+
+func installFakeWorktrailCommand(t *testing.T) {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(bin, "worktrail")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 var allWorktrailSkills = []string{
@@ -136,9 +150,11 @@ func TestInstallCodexProjectManagesHooksAndGitignoreOnly(t *testing.T) {
 
 func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 	env := testEnv(t)
-	if _, err := InstallCodex(env, Options{}); err != nil {
+	report, err := InstallCodex(env, Options{})
+	if err != nil {
 		t.Fatalf("InstallCodex: %v", err)
 	}
+	assertDoctorCheckNamed(t, report, "worktrail command available")
 	for _, path := range []string{
 		filepath.Join(env.Home, ".codex", "AGENTS.md"),
 	} {
@@ -229,6 +245,28 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 			t.Fatalf("default codex install should not create project file %s, err=%v", path, err)
 		}
 	}
+}
+
+func TestDoctorReportsMissingWorktrailCommand(t *testing.T) {
+	env := testEnv(t)
+	emptyBin := filepath.Join(t.TempDir(), "empty-bin")
+	if err := os.MkdirAll(emptyBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", emptyBin)
+	report, err := Doctor(env, ToolCodex, Options{User: true})
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+	for _, check := range report.Checks {
+		if check.Name == "worktrail command available" {
+			if check.OK || !strings.Contains(check.Note, "not found in PATH") {
+				t.Fatalf("expected missing worktrail command check, got %+v", check)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing worktrail command check: %+v", report.Checks)
 }
 
 func TestInstallClaudeUserInstallsAllSkillsAndProjectRuntimeOnly(t *testing.T) {

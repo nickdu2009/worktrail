@@ -9,13 +9,13 @@ func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 	expected := map[string][]string{
 		"worktrail-context":     {"worktrail context", "continue a previous task"},
 		"worktrail-doc-preview": {"worktrail preview", "preview URL", "Do not use the target project's dev server"},
-		"worktrail-init":        {"worktrail init", "worktrail install cursor|codex|claude|all", "worktrail doctor <tool>", "Do not initialize the target application's language"},
+		"worktrail-init":        {"worktrail init", "worktrail install cursor|codex|claude|all", "worktrail doctor <tool>", "worktrail` is available in `PATH", "Do not initialize the target application's language"},
 		"worktrail-state":       {"worktrail state", "save progress"},
 		"worktrail-handoff":     {"worktrail handoff", "new conversation", "end current chat", "Do not only output a copyable text handoff"},
-		"worktrail-import":      {"worktrail import", "worktrail sync", "worktrail migrate kdd"},
+		"worktrail-import":      {"worktrail import", "--since 14d", "--limit 20", "worktrail sync", "worktrail migrate kdd"},
 		"worktrail-distill":     {"worktrail distill --pending --summary", "worktrail.distill.proposal.v1"},
 		"worktrail-review":      {"worktrail review plan --format json", "worktrail review apply-candidates", "promoted, merged, discarded, restored, or retired", "Do not promote, merge, or discard `transcript_notes`"},
-		"worktrail-maintain":    {"worktrail context \"maintenance\"", "worktrail evidence plan --format json", "review apply-candidates"},
+		"worktrail-maintain":    {"worktrail context \"maintenance\"", "worktrail evidence plan --format json", "worktrail note add", "review apply-candidates"},
 	}
 	seen := map[string]bool{}
 	rendered := RenderSkillTriggerRouting()
@@ -99,7 +99,7 @@ func TestSkillTemplatesExposeTriggerIntent(t *testing.T) {
 	expected := map[string][]string{
 		"worktrail-context":     {"description:", "Use this skill when", "starting", "resuming", "continuing"},
 		"worktrail-doc-preview": {"description:", "Use this skill when", "preview", "Worktrail-managed", "candidate"},
-		"worktrail-init":        {"description:", "Use this skill when", "initialize Worktrail", "install", "doctor"},
+		"worktrail-init":        {"description:", "Use this skill when", "initialize Worktrail", "install", "doctor", "worktrail --help"},
 		"worktrail-state":       {"description:", "Use this skill when", "long", "risky", "checkpoint"},
 		"worktrail-handoff":     {"description:", "Use this skill", "new conversation", "end current chat", "worktrail handoff", "do not only output"},
 		"worktrail-import":      {"description:", "Use this skill when", "import", "sync", "migrate"},

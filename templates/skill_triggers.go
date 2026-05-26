@@ -48,6 +48,7 @@ var skillTriggers = []SkillTrigger{
 			"the user asks to initialize Worktrail, set up Worktrail, install Worktrail for Cursor, Codex, Claude, or all agents, configure Worktrail hooks, MCP, rules, or skills",
 		},
 		RequiredActions: []string{
+			"Ensure the Worktrail CLI is installed and `worktrail` is available in `PATH` before installing Worktrail-managed skills, hooks, or MCP configs.",
 			"Run `worktrail init` for Worktrail user and project initialization.",
 			"Run `worktrail install cursor|codex|claude|all --user|--project` as requested and verify with `worktrail doctor <tool> --user|--project`.",
 			"Report the Worktrail-managed files affected, including `.worktrail`, `.gitignore`, agent hooks, MCP config, rules, and skills as applicable.",
@@ -90,7 +91,7 @@ var skillTriggers = []SkillTrigger{
 			"the user wants to import, sync, extract, migrate, or reuse knowledge from Codex, Claude, Cursor, transcript files, all current-project conversations, observed Cursor conversations, or legacy KDD docs",
 		},
 		RequiredActions: []string{
-			"Run the relevant dry-run first: `worktrail import codex`, `worktrail import cursor`, `worktrail sync <source> <file>`, or `worktrail migrate kdd`.",
+			"Run the relevant bounded dry-run first: `worktrail import codex --since 14d`, `worktrail import cursor --limit 20`, `worktrail sync <source> <file>`, or `worktrail migrate kdd`; prefer the exact command from `worktrail context \"maintenance\"` when present.",
 			"Create pending candidates only after the user asked to proceed, then hand off review to `/worktrail-review`.",
 		},
 		Never: []string{
@@ -136,6 +137,7 @@ var skillTriggers = []SkillTrigger{
 		RequiredActions: []string{
 			"Run the read-only discovery chain first: `worktrail context \"maintenance\"`, then the exact scope-aware commands from `maintenance.next_steps`.",
 			"Use `worktrail distill --pending --summary`, `worktrail review plan --format json`, and `worktrail evidence plan --format json` as indicated by maintenance hints.",
+			"Use `worktrail note add ...` to capture a confirmed finding as a pending semantic candidate instead of editing formal `.worktrail` knowledge directly.",
 			"Ask which lane to run and require explicit confirmation before distill apply, review apply-plan, review apply-candidates, promote, merge, discard, archive, restore, or retire.",
 		},
 		Never: []string{

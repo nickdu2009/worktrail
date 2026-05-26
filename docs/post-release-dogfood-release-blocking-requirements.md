@@ -1,8 +1,8 @@
 # Post-Release Dogfood Release-Blocking Requirements
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
-Status: draft
+Status: implemented
 
 ## Summary
 
@@ -278,14 +278,21 @@ Evidence:
   formal `.worktrail` paths and no use of promote / merge / distill / review for
   those document updates.
 
+## Implementation Evidence
+
+The P0 implementation and validation records are:
+
+- [post-release-dogfood-p0-implementation-plan.md](post-release-dogfood-p0-implementation-plan.md)
+- [post-release-dogfood-p0-validation-2026-05-26.md](post-release-dogfood-p0-validation-2026-05-26.md)
+
 ## Acceptance
 
-This requirement set is ready for implementation planning when:
+This requirement set is satisfied when:
 
-- Each `REQ-POST-*` item is either accepted, revised, or explicitly rejected.
-- Any implementation plan preserves the no-daemon, no-Web-UI, no-vector-store,
+- Each `REQ-POST-*` item is implemented or explicitly deferred with rationale.
+- The implementation preserves the no-daemon, no-Web-UI, no-vector-store,
   no-automatic-promotion boundaries.
 - Validation includes both CLI unit tests and at least one dogfood smoke pass on
   a project with recent Cursor or Codex sessions.
-- The backlog links to this document as the active release-blocking post-release
-  requirement set.
+- The backlog links to the requirement, plan, and validation records and marks
+  the P0 dogfood blockers complete.
