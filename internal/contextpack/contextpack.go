@@ -1,6 +1,8 @@
 package contextpack
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/index"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
+	"github.com/nickdu2009/worktrail/internal/transcript"
 )
 
 type Options struct {
@@ -48,6 +51,8 @@ type Maintenance struct {
 	PendingEvidenceCandidates   int      `json:"pending_evidence_candidates"`
 	PendingSemanticCandidates   int      `json:"pending_semantic_candidates"`
 	EvidenceLifecycleCandidates int      `json:"evidence_lifecycle_candidates"`
+	ImportableCodexSessions     int      `json:"importable_codex_sessions,omitempty"`
+	ObservedCursorSessions      int      `json:"observed_cursor_sessions,omitempty"`
 	NextSteps                   []string `json:"next_steps"`
 }
 
@@ -192,6 +197,14 @@ func RenderMarkdown(pack Pack) string {
 		if pack.Maintenance.EvidenceLifecycleCandidates > 0 {
 			fmt.Fprintf(&b, "Evidence lifecycle actions available: %d.\n", pack.Maintenance.EvidenceLifecycleCandidates)
 			fmt.Fprintf(&b, "Next: run %s.\n\n", maintenanceStepList(pack.Maintenance.NextSteps, "worktrail evidence plan"))
+		}
+		if pack.Maintenance.ImportableCodexSessions > 0 {
+			fmt.Fprintf(&b, "Importable current-project Codex sessions: %d.\n", pack.Maintenance.ImportableCodexSessions)
+			fmt.Fprintf(&b, "Next: run %s.\n\n", maintenanceStepList(pack.Maintenance.NextSteps, "worktrail import codex"))
+		}
+		if pack.Maintenance.ObservedCursorSessions > 0 {
+			fmt.Fprintf(&b, "Observed Cursor sessions ready for import: %d.\n", pack.Maintenance.ObservedCursorSessions)
+			fmt.Fprintf(&b, "Next: run %s.\n\n", maintenanceStepList(pack.Maintenance.NextSteps, "worktrail import cursor"))
 		}
 	}
 	if pack.HiddenEvidenceCandidates > 0 && !pack.EvidenceIncluded {
@@ -395,7 +408,9 @@ func buildMaintenance(env paths.Env) Maintenance {
 	for _, count := range evidenceLifecycleByScope {
 		maintenance.EvidenceLifecycleCandidates += count
 	}
-	maintenance.NextSteps = maintenanceNextSteps(pendingEvidenceByScope, pendingSemanticByScope, evidenceLifecycleByScope)
+	maintenance.ImportableCodexSessions = countImportableCodexSessions(env)
+	maintenance.ObservedCursorSessions = countObservedCursorSessions(env.ProjectWT)
+	maintenance.NextSteps = maintenanceNextSteps(pendingEvidenceByScope, pendingSemanticByScope, evidenceLifecycleByScope, maintenance.ImportableCodexSessions, maintenance.ObservedCursorSessions)
 	return maintenance
 }
 
@@ -449,7 +464,7 @@ func maintenanceReferenceCounts(id string, records []candidate.Record) (int, int
 	return pending, applied
 }
 
-func maintenanceNextSteps(pendingEvidenceByScope, pendingSemanticByScope, evidenceLifecycleByScope map[string]int) []string {
+func maintenanceNextSteps(pendingEvidenceByScope, pendingSemanticByScope, evidenceLifecycleByScope map[string]int, importableCodex, observedCursor int) []string {
 	var steps []string
 	for _, scope := range []string{"project", "user"} {
 		if pendingEvidenceByScope[scope] > 0 {
@@ -466,7 +481,90 @@ func maintenanceNextSteps(pendingEvidenceByScope, pendingSemanticByScope, eviden
 			steps = append(steps, scopedMaintenanceCommand("worktrail evidence plan --format json", scope))
 		}
 	}
+	if importableCodex > 0 {
+		steps = append(steps, "worktrail import codex --since 14d --all")
+	}
+	if observedCursor > 0 {
+		steps = append(steps, "worktrail import cursor --limit 20 --all")
+	}
 	return steps
+}
+
+func countImportableCodexSessions(env paths.Env) int {
+	if env.Home == "" || env.ProjectRoot == "" {
+		return 0
+	}
+	sessions, err := transcript.DiscoverCodexSessionsBounded(env.Home, env.ProjectRoot, transcript.DiscoverOptions{
+		Since: time.Now().UTC().AddDate(0, 0, -14),
+		Limit: 20,
+	})
+	if err != nil {
+		return 0
+	}
+	imported := transcriptHashes(env.ProjectWT, "codex")
+	count := 0
+	for _, session := range sessions {
+		hash := fileSHA256(session.Path)
+		if hash == "" || imported[hash] {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func countObservedCursorSessions(root string) int {
+	matches, err := filepath.Glob(filepath.Join(root, "raw", "cursor", "observed-*.metadata.json"))
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, match := range matches {
+		data, err := os.ReadFile(match)
+		if err != nil {
+			continue
+		}
+		var raw struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(data, &raw); err != nil || strings.TrimSpace(raw.Path) == "" {
+			continue
+		}
+		if _, err := os.Stat(raw.Path); err == nil {
+			count++
+		}
+	}
+	return count
+}
+
+func transcriptHashes(root, source string) map[string]bool {
+	out := map[string]bool{}
+	matches, err := filepath.Glob(filepath.Join(root, "raw", source, "*.metadata.json"))
+	if err != nil {
+		return out
+	}
+	for _, match := range matches {
+		data, err := os.ReadFile(match)
+		if err != nil {
+			continue
+		}
+		var raw struct {
+			Hash string `json:"hash"`
+		}
+		if err := json.Unmarshal(data, &raw); err == nil && raw.Hash != "" {
+			out[raw.Hash] = true
+		}
+	}
+	return out
+}
+
+func fileSHA256(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:])
 }
 
 func scopedMaintenanceCommand(command, scope string) string {
@@ -490,7 +588,7 @@ func maintenanceStepList(steps []string, prefix string) string {
 }
 
 func hasMaintenance(maintenance Maintenance) bool {
-	return maintenance.PendingEvidenceCandidates > 0 || maintenance.PendingSemanticCandidates > 0 || maintenance.EvidenceLifecycleCandidates > 0 || len(maintenance.NextSteps) > 0
+	return maintenance.PendingEvidenceCandidates > 0 || maintenance.PendingSemanticCandidates > 0 || maintenance.EvidenceLifecycleCandidates > 0 || maintenance.ImportableCodexSessions > 0 || maintenance.ObservedCursorSessions > 0 || len(maintenance.NextSteps) > 0
 }
 
 func isMaintenanceEvidence(rec candidate.Record) bool {

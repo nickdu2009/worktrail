@@ -16,6 +16,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
+	"github.com/nickdu2009/worktrail/internal/transcript"
 	"github.com/nickdu2009/worktrail/internal/util"
 )
 
@@ -124,7 +125,11 @@ func ensureWorktrail(root string) error {
 
 func writeState(env paths.Env, tool, event string, payload map[string]any) (string, error) {
 	now := time.Now()
-	title := titleFromPayload(payload, event)
+	hc := hookContextFromPayload(tool, payload)
+	if !hc.HasSignal {
+		return "", nil
+	}
+	title := titleFromHookContext(hc, event)
 	session := sessionFromPayload(tool, payload)
 	state := model.State{
 		Schema:         model.SchemaState,
@@ -139,7 +144,7 @@ func writeState(env paths.Env, tool, event string, payload map[string]any) (stri
 		UpdatedAt:      now,
 		Tags:           []string{tool, event},
 	}
-	body := stateBody(title, tool, event, durablePayload(tool, payload))
+	body := stateBody(title, tool, event, durablePayload(tool, payload), hc)
 	data, err := store.RenderMarkdown(state, body)
 	if err != nil {
 		return "", err
@@ -156,7 +161,8 @@ func writeState(env paths.Env, tool, event string, payload map[string]any) (stri
 
 func writeCheckpoint(env paths.Env, tool, event string, payload map[string]any, statePath string) (string, error) {
 	now := time.Now()
-	title := titleFromPayload(payload, event)
+	hc := hookContextFromPayload(tool, payload)
+	title := titleFromHookContext(hc, event)
 	safePayload := durablePayload(tool, payload)
 	meta := map[string]any{
 		"schema":      model.SchemaState,
@@ -171,7 +177,8 @@ func writeCheckpoint(env paths.Env, tool, event string, payload map[string]any, 
 		"tags":        []string{tool, event, "checkpoint"},
 	}
 	body := "# Checkpoint: " + title + "\n\n" +
-		"## Source State\n" + statePath + "\n\n" +
+		"## Source State\n" + sourceStateSummary(statePath) + "\n\n" +
+		"## Recovery Summary\n" + recoverySummary(hc) + "\n\n" +
 		"## Event\n" + event + "\n\n" +
 		"## Payload Summary\n" + payloadSummary(safePayload) + "\n"
 	data, err := store.RenderMarkdown(meta, body)
@@ -229,16 +236,17 @@ func writeHandoffCandidate(env paths.Env, tool, event string, payload map[string
 	return path, nil
 }
 
-func stateBody(title, tool, event string, payload map[string]any) string {
+func stateBody(title, tool, event string, payload map[string]any, hc hookContext) string {
 	return "# State Capsule: " + title + "\n\n" +
 		"## Original Intent\nCaptured from " + tool + " hook event `" + event + "`.\n\n" +
-		"## Current Goal\n" + title + "\n\n" +
+		"## Current Goal\n" + valueOrUnknown(hc.CurrentGoal) + "\n\n" +
 		"## Constraints\nHooks may create state, checkpoints, candidates, and logs, but never promote.\n\n" +
+		"## Relevant Context\n" + valueOrUnknown(hc.RecentAssistant) + "\n\n" +
 		"## Evidence\n" + payloadSummary(payload) + "\n\n" +
-		"## Work Done\nHook event processed and recorded.\n\n" +
-		"## Validation\nNo validation command was inferred from the hook payload.\n\n" +
+		"## Work Done\n" + valueOrUnknown(hc.WorkDone) + "\n\n" +
+		"## Validation\n" + valueOrUnknown(hc.Validation) + "\n\n" +
 		"## Open Questions\nReview generated candidates before promotion.\n\n" +
-		"## Next Step\nRun `/worktrail-review` when ready to inspect pending candidates.\n"
+		"## Next Step\n" + valueOrDefault(hc.NextStep, "Run `/worktrail-review` when ready to inspect pending candidates.") + "\n"
 }
 
 func titleFromPayload(payload map[string]any, fallback string) string {
@@ -248,6 +256,179 @@ func titleFromPayload(payload map[string]any, fallback string) string {
 		}
 	}
 	return "Worktrail " + fallback
+}
+
+type hookContext struct {
+	HasSignal       bool
+	CurrentGoal     string
+	RecentDecision  string
+	RecentAssistant string
+	WorkDone        string
+	Validation      string
+	NextStep        string
+}
+
+func hookContextFromPayload(tool string, payload map[string]any) hookContext {
+	hc := hookContext{
+		CurrentGoal:     firstPayloadString(payload, "task", "prompt", "message"),
+		RecentAssistant: firstPayloadString(payload, "transcript_summary", "summary"),
+		Validation:      payloadStringList(payload, "commands"),
+	}
+	if hc.CurrentGoal != "" || hc.RecentAssistant != "" {
+		hc.HasSignal = true
+	}
+	if path := firstPayloadString(payload, "transcript_path", "transcript_file", "session_path"); path != "" {
+		if tail, err := transcriptTailContext(tool, path); err == nil && tail.HasSignal {
+			hc.HasSignal = true
+			if hc.CurrentGoal == "" {
+				hc.CurrentGoal = tail.CurrentGoal
+			}
+			if hc.RecentAssistant == "" {
+				hc.RecentAssistant = tail.RecentAssistant
+			}
+			if hc.WorkDone == "" {
+				hc.WorkDone = tail.WorkDone
+			}
+			if hc.Validation == "" {
+				hc.Validation = tail.Validation
+			}
+			if hc.NextStep == "" {
+				hc.NextStep = tail.NextStep
+			}
+		}
+	}
+	return hc
+}
+
+func transcriptTailContext(tool, path string) (hookContext, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return hookContext{}, err
+	}
+	defer f.Close()
+	var tr transcript.Transcript
+	switch tool {
+	case "cursor":
+		tr, err = transcript.ParseCursorJSONL(f)
+	case "claude":
+		tr, err = transcript.ParseClaudeJSONL(f)
+	default:
+		tr, err = transcript.ParseCodexJSONL(f)
+	}
+	if err != nil {
+		return hookContext{}, err
+	}
+	hc := hookContext{}
+	for _, msg := range tr.Messages {
+		switch msg.Role {
+		case "user":
+			if hc.CurrentGoal == "" {
+				hc.CurrentGoal = compactText(msg.Content, 300)
+			}
+			if looksLikeDecision(msg.Content) {
+				hc.RecentDecision = compactText(msg.Content, 300)
+			}
+		case "assistant":
+			hc.RecentAssistant = compactText(msg.Content, 300)
+			if looksLikeValidation(msg.Content) {
+				hc.Validation = compactText(msg.Content, 300)
+			}
+			hc.WorkDone = compactText(msg.Content, 300)
+		}
+	}
+	hc.HasSignal = hc.CurrentGoal != "" || hc.RecentAssistant != ""
+	return hc, nil
+}
+
+func titleFromHookContext(hc hookContext, fallback string) string {
+	if strings.TrimSpace(hc.CurrentGoal) != "" {
+		return hc.CurrentGoal
+	}
+	if strings.TrimSpace(hc.RecentAssistant) != "" {
+		return hc.RecentAssistant
+	}
+	return "Worktrail " + fallback
+}
+
+func sourceStateSummary(statePath string) string {
+	if strings.TrimSpace(statePath) == "" {
+		return "No active state was written because no meaningful task context was available."
+	}
+	return statePath
+}
+
+func recoverySummary(hc hookContext) string {
+	if !hc.HasSignal {
+		return "Recovery context was unavailable. The hook payload did not include a task signal or readable bounded transcript context."
+	}
+	var b strings.Builder
+	b.WriteString("- Active goal: ")
+	b.WriteString(valueOrUnknown(hc.CurrentGoal))
+	b.WriteString("\n- Recent decisions: ")
+	b.WriteString(valueOrUnknown(hc.RecentDecision))
+	b.WriteString("\n- Work completed: ")
+	b.WriteString(valueOrUnknown(hc.WorkDone))
+	b.WriteString("\n- Validation: ")
+	b.WriteString(valueOrUnknown(hc.Validation))
+	b.WriteString("\n- Next safe action: ")
+	b.WriteString(valueOrDefault(hc.NextStep, "Review the latest state, checkpoint, and pending candidates."))
+	return b.String()
+}
+
+func valueOrUnknown(value string) string {
+	return valueOrDefault(value, "Unknown.")
+}
+
+func valueOrDefault(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func compactText(value string, limit int) string {
+	value = strings.TrimSpace(strings.Join(strings.Fields(value), " "))
+	if len(value) <= limit {
+		return value
+	}
+	if limit <= 3 {
+		return value[:limit]
+	}
+	return strings.TrimSpace(value[:limit-3]) + "..."
+}
+
+func looksLikeDecision(value string) bool {
+	lower := strings.ToLower(value)
+	return strings.Contains(lower, "decided") || strings.Contains(lower, "decision") || strings.Contains(lower, "采纳") || strings.Contains(lower, "决定")
+}
+
+func looksLikeValidation(value string) bool {
+	lower := strings.ToLower(value)
+	return strings.Contains(lower, "go test") || strings.Contains(lower, "validation") || strings.Contains(lower, "passed") || strings.Contains(lower, "测试")
+}
+
+func payloadStringList(payload map[string]any, key string) string {
+	raw, ok := payload[key]
+	if !ok {
+		return ""
+	}
+	switch v := raw.(type) {
+	case []any:
+		var values []string
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				values = append(values, strings.TrimSpace(s))
+			}
+		}
+		return strings.Join(values, "\n")
+	case []string:
+		return strings.Join(v, "\n")
+	case string:
+		return strings.TrimSpace(v)
+	default:
+		return ""
+	}
 }
 
 func sessionFromPayload(tool string, payload map[string]any) string {

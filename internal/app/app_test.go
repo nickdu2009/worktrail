@@ -178,6 +178,76 @@ func TestTopLevelHelpIncludesCandidateApplyCommands(t *testing.T) {
 	}
 }
 
+func TestCLIHelpSmokeDoesNotMutateState(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "context", args: []string{"context", "--help"}, want: "usage: worktrail context"},
+		{name: "state", args: []string{"state", "--help"}, want: "usage: worktrail state"},
+		{name: "state help", args: []string{"state", "help"}, want: "start <title>"},
+		{name: "state short help", args: []string{"state", "-h"}, want: "checkpoint"},
+		{name: "state start", args: []string{"state", "start", "--help"}, want: "inject"},
+		{name: "state update", args: []string{"state", "update", "--help"}, want: "update"},
+		{name: "state checkpoint", args: []string{"state", "checkpoint", "--help"}, want: "checkpoint"},
+		{name: "state inject", args: []string{"state", "inject", "--help"}, want: "inject"},
+		{name: "handoff", args: []string{"handoff", "--help"}, want: "usage: worktrail handoff"},
+		{name: "import", args: []string{"import", "--help"}, want: "usage: worktrail import codex"},
+		{name: "review", args: []string{"review", "--help"}, want: "usage: worktrail review"},
+		{name: "distill", args: []string{"distill", "--help"}, want: "usage: worktrail distill"},
+		{name: "evidence", args: []string{"evidence", "--help"}, want: "usage: worktrail evidence"},
+		{name: "evidence plan", args: []string{"evidence", "plan", "--help"}, want: "usage: worktrail evidence"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if err := Run(context.Background(), tc.args, nil, &out, &errb); err != nil {
+				t.Fatalf("Run %v: %v stderr=%s", tc.args, err, errb.String())
+			}
+			if !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("help output missing %q:\n%s", tc.want, out.String())
+			}
+		})
+	}
+
+	if _, err := os.Stat(filepath.Join(project, ".worktrail", "candidates")); !os.IsNotExist(err) {
+		t.Fatalf("help commands should not create candidates directory, err=%v", err)
+	}
+
+	var out, errb bytes.Buffer
+	err := Run(context.Background(), []string{"state", "unknown"}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), `unknown state subcommand "unknown"`) {
+		t.Fatalf("unknown state subcommand error = %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"context", "help", "debug", "this"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run context with help task word: %v stderr=%s", err, errb.String())
+	}
+	if strings.Contains(out.String(), "usage: worktrail context") || !strings.Contains(out.String(), "help debug this") {
+		t.Fatalf("context task word help was treated as help output:\n%s", out.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"handoff", "need", "help", "later"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run handoff with help summary word: %v stderr=%s", err, errb.String())
+	}
+	if strings.Contains(out.String(), "usage: worktrail handoff") || !strings.Contains(out.String(), "handoff-") {
+		t.Fatalf("handoff summary word help was treated as help output:\n%s", out.String())
+	}
+}
+
 func TestCandidateActionHelpDoesNotLookupCandidates(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
@@ -477,6 +547,208 @@ func TestImportHelpDoesNotExposeKDDMigration(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "import kdd") {
 		t.Fatalf("import help exposed legacy KDD migration:\n%s", out.String())
+	}
+}
+
+func TestImportSinceAcceptsDayShorthand(t *testing.T) {
+	d, err := parseImportSince("14d")
+	if err != nil {
+		t.Fatalf("parseImportSince: %v", err)
+	}
+	if d.Hours() != 14*24 {
+		t.Fatalf("duration = %s, want 336h", d)
+	}
+}
+
+func TestNoteAddCreatesPendingCandidateOnly(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	out.Reset()
+	if err := Run(context.Background(), []string{
+		"note", "add",
+		"--type", "rule",
+		"--target", "rules/note-rule.md",
+		"--title", "Note Rule",
+		"--summary", "Capture a validated rule.",
+		"--evidence-label", "dogfood-analysis",
+		"--confidence", "0.8",
+		"Keep knowledge writes candidate-based.",
+	}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run note add: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "pending") || !strings.Contains(out.String(), "next: worktrail review plan --format json --scope project") {
+		t.Fatalf("note add output unexpected:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(project, ".worktrail", "rules", "note-rule.md")); !os.IsNotExist(err) {
+		t.Fatalf("note add should not write formal knowledge, err=%v", err)
+	}
+	candidates, err := filepath.Glob(filepath.Join(project, ".worktrail", "candidates", "project", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("candidate files = %d, want 1", len(candidates))
+	}
+	body, err := os.ReadFile(candidates[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"candidate_type": "rule"`, `"target_path": "rules/note-rule.md"`, `"evidence_label": "dogfood-analysis"`, `"confidence": 0.8`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("candidate missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestNoteAddRejectsUnsafeOrIncompleteInput(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	err := Run(context.Background(), []string{"note", "add", "--type", "rule", "--target", "rules/missing.md"}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "note add requires") {
+		t.Fatalf("missing fields error = %v stdout=%s", err, out.String())
+	}
+	err = Run(context.Background(), []string{
+		"note", "add",
+		"--type", "decision",
+		"--target", "rules/wrong.md",
+		"--title", "Wrong Target",
+		"--summary", "Wrong target.",
+		"--evidence-label", "test",
+		"Body.",
+	}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "does not match target path") {
+		t.Fatalf("target mismatch error = %v stdout=%s", err, out.String())
+	}
+}
+
+func TestHandoffWriteFailureReportsWorktrailWriteDirs(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	if err := os.RemoveAll(filepath.Join(project, ".worktrail", "candidates")); err != nil {
+		t.Fatal(err)
+	}
+	writeTextFile(t, filepath.Join(project, ".worktrail", "candidates"), "not a directory\n")
+
+	err := Run(context.Background(), []string{"handoff", "cannot write candidate"}, nil, &out, &errb)
+	if err == nil {
+		t.Fatalf("handoff unexpectedly succeeded")
+	}
+	for _, want := range []string{"handoff write failed", filepath.Join(project, ".worktrail", "candidates", "project"), filepath.Join(project, ".worktrail", "state", "active"), filepath.Join(project, ".worktrail", "logs")} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("handoff error missing %q:\n%v", want, err)
+		}
+	}
+}
+
+func TestMaintainKnowledgeValidateAndApplyProposal(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	proposal := filepath.Join(project, "maintain-proposal.json")
+	writeTextFile(t, proposal, `{
+  "schema": "worktrail.knowledge.maintenance.proposal.v1",
+  "actions": [
+    {
+      "action": "create_candidate",
+      "candidate_type": "rule",
+      "target_path": "rules/maintained.md",
+      "title": "Maintained Rule",
+      "summary": "Created through maintenance proposal.",
+      "evidence_label": "maintain-smoke",
+      "confidence": 0.7,
+      "body": "# Maintained Rule\n\nUse proposals for maintenance writes.",
+      "reason": "Capture a reviewed maintenance finding."
+    }
+  ]
+}`)
+	out.Reset()
+	if err := Run(context.Background(), []string{"maintain", "knowledge", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run maintain knowledge: %v stderr=%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), `"schema":"worktrail.knowledge.maintenance.report.v1"`) {
+		t.Fatalf("maintain knowledge report unexpected:\n%s", out.String())
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"maintain", "validate", proposal, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run maintain validate: %v stderr=%s stdout=%s", err, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), `"valid":true`) {
+		t.Fatalf("maintain validate should be valid:\n%s", out.String())
+	}
+	out.Reset()
+	if err := Run(context.Background(), []string{"maintain", "apply", proposal, "--confirm", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run maintain apply: %v stderr=%s stdout=%s", err, errb.String(), out.String())
+	}
+	if !strings.Contains(out.String(), `"applied":1`) {
+		t.Fatalf("maintain apply output unexpected:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(project, ".worktrail", "rules", "maintained.md")); !os.IsNotExist(err) {
+		t.Fatalf("maintain create_candidate should not write formal target, err=%v", err)
+	}
+	candidates, err := filepath.Glob(filepath.Join(project, ".worktrail", "candidates", "project", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("candidate files = %d, want 1", len(candidates))
+	}
+}
+
+func TestMaintainRejectsUnsafeProposalActions(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	bad := filepath.Join(project, "bad-maintain-proposal.json")
+	writeTextFile(t, bad, `{
+  "schema": "worktrail.knowledge.maintenance.proposal.v1",
+  "actions": [
+    {"action": "update_index", "target_path": "index.md", "reason": "direct index mutation"},
+    {"action": "create_candidate", "candidate_type": "decision", "target_path": "rules/wrong.md", "title": "Wrong", "summary": "Wrong", "body": "# Wrong"}
+  ]
+}`)
+	out.Reset()
+	err := Run(context.Background(), []string{"maintain", "validate", bad, "--format", "json"}, nil, &out, &errb)
+	if err != nil {
+		t.Fatalf("maintain validate error = %v stdout=%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), `"valid":false`) || !strings.Contains(out.String(), "unsupported action type") || !strings.Contains(out.String(), "candidate_type does not match target_path") {
+		t.Fatalf("maintain validation output missing errors:\n%s", out.String())
 	}
 }
 
@@ -805,6 +1077,84 @@ This PRD describes MVP boundary, out-of-scope behavior, user goal, and acceptanc
 		if !hasKnowledgeFinding(report, code) {
 			t.Fatalf("doctor knowledge report missing %s: %+v", code, report.Findings)
 		}
+	}
+}
+
+func TestDoctorKnowledgeDetectsFormalWriteEscapes(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	if err := exec.Command("git", "-C", project, "init").Run(); err != nil {
+		t.Skipf("git init failed: %v", err)
+	}
+	runApp(t, &out, &errb, "candidates", "create", "--id", "promoted-rule", "--type", "rule", "--target", "rules/promoted.md", "--title", "Promoted Rule", "Promoted rule body.")
+	runApp(t, &out, &errb, "promote", "promoted-rule")
+	if err := exec.Command("git", "-C", project, "add", ".worktrail").Run(); err != nil {
+		t.Skipf("git add failed: %v", err)
+	}
+	writeTextFile(t, filepath.Join(project, ".worktrail", "rules", "direct.md"), "# Direct\n\nDirect formal edit.")
+
+	out.Reset()
+	err := Run(context.Background(), []string{"doctor", "knowledge", "--format", "json"}, nil, &out, &errb)
+	if err != nil {
+		t.Fatalf("doctor knowledge should not fail on warnings without strict: %v stdout=%s", err, out.String())
+	}
+	var report knowledgeDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !hasKnowledgeFindingFor(report, "ESCAPE001", "rules/direct.md") || !hasKnowledgeFindingFor(report, "ESCAPE003", "rules/direct.md") {
+		t.Fatalf("doctor report missing direct edit escapes: %+v", report.Findings)
+	}
+	if hasKnowledgeFindingFor(report, "ESCAPE003", "rules/promoted.md") {
+		t.Fatalf("promoted formal file should have candidate trail: %+v", report.Findings)
+	}
+}
+
+func TestDoctorKnowledgeDetectsFormalDeletionWhenGitReportsIt(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	if err := exec.Command("git", "-C", project, "init").Run(); err != nil {
+		t.Skipf("git init failed: %v", err)
+	}
+	path := filepath.Join(project, ".worktrail", "rules", "deleted.md")
+	writeTextFile(t, path, "# Deleted\n\nDeleted formal knowledge.")
+	if err := exec.Command("git", "-C", project, "add", ".worktrail/rules/deleted.md").Run(); err != nil {
+		t.Skipf("git add failed: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	err := Run(context.Background(), []string{"doctor", "knowledge", "--format", "json"}, nil, &out, &errb)
+	if err != nil {
+		t.Fatalf("doctor knowledge should not fail on warnings without strict: %v stdout=%s", err, out.String())
+	}
+	var report knowledgeDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !hasKnowledgeFindingFor(report, "ESCAPE005", "rules/deleted.md") {
+		t.Fatalf("doctor report missing deletion escape: %+v", report.Findings)
 	}
 }
 
@@ -1336,6 +1686,15 @@ func hasMigrationFinding(report migrationDoctorReport, code string) bool {
 func hasKnowledgeFinding(report knowledgeDoctorReport, code string) bool {
 	for _, finding := range report.Findings {
 		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func hasKnowledgeFindingFor(report knowledgeDoctorReport, code, path string) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code && finding.Path == path {
 			return true
 		}
 	}

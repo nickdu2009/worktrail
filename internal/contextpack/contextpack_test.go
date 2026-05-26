@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
@@ -235,6 +236,41 @@ func TestBuildMaintenanceNextStepsIncludeUserScope(t *testing.T) {
 	rendered := RenderMarkdown(pack)
 	if !strings.Contains(rendered, "`worktrail distill --pending --summary --scope user`") {
 		t.Fatalf("rendered maintenance hint missing user scope:\n%s", rendered)
+	}
+}
+
+func TestBuildMaintenanceSurfacesImportableCodexSessions(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	project := filepath.Join(tmp, "project")
+	env := paths.Env{
+		Home:        home,
+		ProjectRoot: project,
+		UserRoot:    filepath.Join(home, ".worktrail"),
+		ProjectWT:   filepath.Join(project, ".worktrail"),
+	}
+	session := filepath.Join(home, ".codex", "sessions", "2026", "05", "26", "session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(session), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"timestamp":"` + time.Now().UTC().Format(time.RFC3339) + `","type":"session_meta","payload":{"id":"session-1","cwd":"` + filepath.ToSlash(project) + `"}}` + "\n"
+	if err := os.WriteFile(session, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pack, err := Build(env, Options{Task: "import discovery"})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if pack.Maintenance.ImportableCodexSessions != 1 {
+		t.Fatalf("importable codex = %d, want 1: %+v", pack.Maintenance.ImportableCodexSessions, pack.Maintenance)
+	}
+	if !containsStep(pack.Maintenance.NextSteps, "worktrail import codex --since 14d --all") {
+		t.Fatalf("maintenance next steps missing bounded import: %+v", pack.Maintenance.NextSteps)
+	}
+	rendered := RenderMarkdown(pack)
+	if !strings.Contains(rendered, "Importable current-project Codex sessions: 1") || !strings.Contains(rendered, "`worktrail import codex --since 14d --all`") {
+		t.Fatalf("rendered maintenance hint missing import discovery:\n%s", rendered)
 	}
 }
 

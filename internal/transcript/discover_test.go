@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDiscoverCodexSessionsMatchesProjectRoot(t *testing.T) {
@@ -25,6 +26,19 @@ func TestDiscoverCodexSessionsMatchesProjectRoot(t *testing.T) {
 	}
 	if sessions[0].ProjectRoot != project || filepath.Base(sessions[0].Path) != "match.jsonl" {
 		t.Fatalf("unexpected session: %+v", sessions[0])
+	}
+}
+
+func TestBoundSessionsFiltersAndLimitsRecentSessions(t *testing.T) {
+	old := DiscoveredSession{ID: "old", Path: "old.jsonl", UpdatedAt: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)}
+	newer := DiscoveredSession{ID: "new", Path: "new.jsonl", UpdatedAt: time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC)}
+	latest := DiscoveredSession{ID: "latest", Path: "latest.jsonl", UpdatedAt: time.Date(2026, 5, 21, 0, 0, 0, 0, time.UTC)}
+	got := BoundSessions([]DiscoveredSession{old, newer, latest}, DiscoverOptions{
+		Since: time.Date(2026, 5, 10, 0, 0, 0, 0, time.UTC),
+		Limit: 1,
+	})
+	if len(got) != 1 || got[0].ID != "latest" {
+		t.Fatalf("bounded sessions = %+v, want latest only", got)
 	}
 }
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
@@ -13,6 +15,10 @@ import (
 )
 
 func runHandoff(_ context.Context, env paths.Env, ioctx IO, args []string) error {
+	if wantsFlagHelpOrLeadingHelp(args) {
+		printHandoffHelp(ioctx.Out)
+		return nil
+	}
 	flags, positional := splitFlags(args)
 	scope := flagValue(flags, "scope", "project")
 	title := flagValue(flags, "title", "Handoff")
@@ -31,9 +37,32 @@ func runHandoff(_ context.Context, env paths.Env, ioctx IO, args []string) error
 		Body:          "# Handoff: " + title + "\n\n" + summary + "\n",
 	})
 	if err != nil {
-		return err
+		return handoffWriteError(env, scope, err)
 	}
 	return printCandidate(ioctx, rec, flagValue(flags, "format", "text"))
+}
+
+func handoffWriteError(env paths.Env, scope string, err error) error {
+	root, rootErr := env.ScopeRoot(scope)
+	if rootErr != nil {
+		return err
+	}
+	return fmt.Errorf("handoff write failed for target %s; ensure the sandbox allows writes to %s: %w", filepath.Join(root, "candidates", scope), strings.Join(requiredWorktrailWriteDirs(root), ", "), err)
+}
+
+func requiredWorktrailWriteDirs(root string) []string {
+	return []string{
+		filepath.Join(root, "state", "active"),
+		filepath.Join(root, "state", "checkpoints"),
+		filepath.Join(root, "candidates"),
+		filepath.Join(root, "logs"),
+	}
+}
+
+func printHandoffHelp(out io.Writer) {
+	fmt.Fprintln(out, "usage: worktrail handoff [--scope project|user] [--title <title>] [--format text|json] <summary>")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Creates a pending handoff candidate without promoting formal knowledge.")
 }
 
 func runADR(_ context.Context, env paths.Env, ioctx IO, args []string) error {

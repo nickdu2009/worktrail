@@ -84,6 +84,24 @@ func TestMalformedInputStillLogsHookRun(t *testing.T) {
 	}
 }
 
+func TestEventOnlyStopDoesNotOverwriteLatestState(t *testing.T) {
+	env := hookEnv(t)
+	var out bytes.Buffer
+	if err := Run(context.Background(), env, "cursor", "stop", strings.NewReader(`{"status":"completed","generation_id":"runtime-only"}`), &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.ProjectWT, "state", "active", "latest.md")); !os.IsNotExist(err) {
+		t.Fatalf("event-only hook should not write latest state, err=%v", err)
+	}
+	events, err := os.ReadFile(filepath.Join(env.ProjectWT, "logs", "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(events), "hook.run") {
+		t.Fatalf("event-only hook should still log hook.run:\n%s", events)
+	}
+}
+
 func TestClaudePreCompactCreatesCheckpoint(t *testing.T) {
 	env := hookEnv(t)
 	fixture, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fixtures", "hooks", "claude_session_end.json"))
@@ -100,6 +118,62 @@ func TestClaudePreCompactCreatesCheckpoint(t *testing.T) {
 	}
 	if len(checkpoints) != 1 {
 		t.Fatalf("expected one checkpoint, got %d", len(checkpoints))
+	}
+	body, err := os.ReadFile(checkpoints[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "## Recovery Summary") || !strings.Contains(string(body), "Prepare compact-safe Worktrail state") {
+		t.Fatalf("checkpoint missing recovery summary:\n%s", body)
+	}
+}
+
+func TestPreCompactWithoutContextWritesUnavailableRecoverySummary(t *testing.T) {
+	env := hookEnv(t)
+	var out bytes.Buffer
+	if err := Run(context.Background(), env, "claude", "pre-compact", strings.NewReader(`{"event":"pre-compact"}`), &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	checkpoints, err := filepath.Glob(filepath.Join(env.ProjectWT, "state", "checkpoints", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checkpoints) != 1 {
+		t.Fatalf("expected one checkpoint, got %d", len(checkpoints))
+	}
+	body, err := os.ReadFile(checkpoints[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Recovery context was unavailable") {
+		t.Fatalf("checkpoint should explain unavailable recovery context:\n%s", body)
+	}
+	if _, err := os.Stat(filepath.Join(env.ProjectWT, "state", "active", "latest.md")); !os.IsNotExist(err) {
+		t.Fatalf("context-free compact should not write latest state, err=%v", err)
+	}
+}
+
+func TestHookStateCanUseBoundedTranscriptContext(t *testing.T) {
+	env := hookEnv(t)
+	transcriptPath := filepath.Join(t.TempDir(), "codex.jsonl")
+	body := strings.Join([]string{
+		`{"timestamp":"2026-05-14T00:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Implement bounded recovery context."}]}}`,
+		`{"timestamp":"2026-05-14T00:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Ran go test ./internal/hooks and it passed."}]}}`,
+	}, "\n")
+	if err := os.WriteFile(transcriptPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := Run(context.Background(), env, "codex", "pre-compact", strings.NewReader(`{"transcript_path":"`+filepath.ToSlash(transcriptPath)+`"}`), &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	state, err := os.ReadFile(filepath.Join(env.ProjectWT, "state", "active", "latest.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(state)
+	if !strings.Contains(text, "Implement bounded recovery context.") || !strings.Contains(text, "Ran go test ./internal/hooks") {
+		t.Fatalf("state missing transcript context:\n%s", text)
 	}
 }
 

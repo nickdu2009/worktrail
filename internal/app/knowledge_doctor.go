@@ -7,10 +7,12 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/nickdu2009/worktrail/internal/candidate"
 	"github.com/nickdu2009/worktrail/internal/index"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
@@ -113,6 +115,7 @@ func buildKnowledgeDoctorReport(env paths.Env, scope string, strict bool) knowle
 		docs = append(docs, scanned...)
 	}
 	report.checkDocs(docs)
+	report.checkWriteEscapes(env, docs)
 	report.OK = report.Summary.Errors == 0 && (!strict || report.Summary.Warnings == 0)
 	return report
 }
@@ -241,6 +244,105 @@ func (r *knowledgeDoctorReport) checkDocs(docs []knowledgeDoc) {
 		}
 	}
 	r.checkStarterIndex(docs, supersededBy)
+}
+
+func (r *knowledgeDoctorReport) checkWriteEscapes(env paths.Env, docs []knowledgeDoc) {
+	candidateTrails := appliedCandidateTargets(env)
+	for _, doc := range docs {
+		if !isFormalKnowledgePath(doc.Path) {
+			continue
+		}
+		if !candidateTrails[doc.Scope+"\x00"+doc.Path] {
+			r.add("ESCAPE003", "warning", doc.Scope, doc.Path, "formal knowledge has no applied candidate trail; recover with `worktrail note add` or create a pending candidate before promote/merge")
+		}
+	}
+	if env.ProjectRoot == "" || env.ProjectWT == "" {
+		return
+	}
+	for _, item := range gitFormalStatus(env.ProjectRoot) {
+		path := strings.TrimPrefix(filepath.ToSlash(item.Path), ".worktrail/")
+		if !isFormalKnowledgePath(path) {
+			continue
+		}
+		switch item.Status {
+		case "untracked":
+			r.add("ESCAPE001", "warning", "project", path, "untracked formal knowledge file may bypass review; recover with `worktrail note add` or remove it if unintended")
+		case "modified":
+			r.add("ESCAPE002", "warning", "project", path, "modified formal knowledge file may bypass review; create a pending candidate or promote/merge through Worktrail")
+		case "deleted":
+			r.add("ESCAPE005", "warning", "project", path, "deleted formal knowledge file may bypass retire flow; use `worktrail retire <id> --reason <text>` when intentional")
+		}
+	}
+}
+
+func appliedCandidateTargets(env paths.Env) map[string]bool {
+	out := map[string]bool{}
+	manager := candidate.Manager{Env: env, Actor: "doctor-knowledge"}
+	for _, scope := range []string{"project", "user"} {
+		records, err := manager.List(scope)
+		if err != nil {
+			continue
+		}
+		for _, rec := range records {
+			switch rec.Meta.Status {
+			case candidate.StatusPromoted, candidate.StatusMerged, candidate.StatusRetired:
+				out[rec.Meta.Scope+"\x00"+filepath.ToSlash(rec.Meta.TargetPath)] = true
+			}
+		}
+	}
+	return out
+}
+
+type gitStatusItem struct {
+	Status string
+	Path   string
+}
+
+func gitFormalStatus(projectRoot string) []gitStatusItem {
+	if projectRoot == "" {
+		return nil
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		return nil
+	}
+	cmd := exec.Command("git", "-C", projectRoot, "status", "--porcelain", "--", ".worktrail")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var items []gitStatusItem
+	for _, line := range strings.Split(string(out), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		code := line[:2]
+		path := strings.TrimSpace(line[3:])
+		if strings.Contains(path, " -> ") {
+			parts := strings.Split(path, " -> ")
+			path = parts[len(parts)-1]
+		}
+		status := "modified"
+		if code == "??" {
+			status = "untracked"
+		} else if strings.Contains(code, "D") {
+			status = "deleted"
+		}
+		items = append(items, gitStatusItem{Status: status, Path: path})
+	}
+	return items
+}
+
+func isFormalKnowledgePath(path string) bool {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	if path == "project.md" || path == "index.md" {
+		return true
+	}
+	for _, prefix := range []string{"architecture/", "decisions/", "requirements/", "workflows/", "validation/", "integrations/", "glossary/", "rules/", "lessons/", "prompts/"} {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *knowledgeDoctorReport) checkDocShape(doc knowledgeDoc) {

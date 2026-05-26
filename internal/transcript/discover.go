@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -17,7 +18,16 @@ type DiscoveredSession struct {
 	UpdatedAt   time.Time `json:"updated_at,omitempty"`
 }
 
+type DiscoverOptions struct {
+	Since time.Time
+	Limit int
+}
+
 func DiscoverCodexSessions(home, projectRoot string) ([]DiscoveredSession, error) {
+	return DiscoverCodexSessionsBounded(home, projectRoot, DiscoverOptions{})
+}
+
+func DiscoverCodexSessionsBounded(home, projectRoot string, opts DiscoverOptions) ([]DiscoveredSession, error) {
 	var sessions []DiscoveredSession
 	projectRoot = filepath.Clean(projectRoot)
 	for _, root := range []string{
@@ -28,7 +38,34 @@ func DiscoverCodexSessions(home, projectRoot string) ([]DiscoveredSession, error
 			return nil, err
 		}
 	}
+	sessions = BoundSessions(sessions, opts)
 	return sessions, nil
+}
+
+func BoundSessions(sessions []DiscoveredSession, opts DiscoverOptions) []DiscoveredSession {
+	filtered := sessions[:0]
+	for _, session := range sessions {
+		if !opts.Since.IsZero() && !session.UpdatedAt.IsZero() && session.UpdatedAt.Before(opts.Since) {
+			continue
+		}
+		filtered = append(filtered, session)
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if filtered[i].UpdatedAt.Equal(filtered[j].UpdatedAt) {
+			return filtered[i].Path < filtered[j].Path
+		}
+		if filtered[i].UpdatedAt.IsZero() {
+			return false
+		}
+		if filtered[j].UpdatedAt.IsZero() {
+			return true
+		}
+		return filtered[i].UpdatedAt.After(filtered[j].UpdatedAt)
+	})
+	if opts.Limit > 0 && len(filtered) > opts.Limit {
+		filtered = filtered[:opts.Limit]
+	}
+	return filtered
 }
 
 func walkCodexSessions(root, projectRoot string, sessions *[]DiscoveredSession) error {

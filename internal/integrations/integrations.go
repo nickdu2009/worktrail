@@ -384,6 +384,7 @@ func doctorScope(cfg integrationConfig, scope string, report *Report) {
 		report.Checks = append(report.Checks, hashManagedCheck(scope+" gitignore", filepath.Join(projectRoot, ".gitignore")))
 		ok, note := jsonHasWorktrail(cfg.projectJSONPath)
 		report.Checks = append(report.Checks, Check{Name: scope + " hooks/settings", Path: cfg.projectJSONPath, OK: ok, Note: note})
+		report.Checks = append(report.Checks, worktrailWritableChecks(projectRoot)...)
 	}
 	jsons := cfg.userJSONs
 	if scope == "project" {
@@ -391,12 +392,55 @@ func doctorScope(cfg integrationConfig, scope string, report *Report) {
 		if len(jsons) > 0 {
 			projectRoot := filepath.Dir(filepath.Dir(jsons[0].path))
 			report.Checks = append(report.Checks, hashManagedCheck(scope+" gitignore", filepath.Join(projectRoot, ".gitignore")))
+			report.Checks = append(report.Checks, worktrailWritableChecks(projectRoot)...)
 		}
 	}
 	for _, jt := range jsons {
 		ok, note := jsonHasTemplate(jt.path, jt.template)
 		report.Checks = append(report.Checks, Check{Name: scope + " " + filepath.Base(jt.path), Path: jt.path, OK: ok, Note: note})
 	}
+}
+
+func worktrailWritableChecks(projectRoot string) []Check {
+	root := filepath.Join(projectRoot, ".worktrail")
+	var checks []Check
+	for _, rel := range []string{
+		filepath.Join("state", "active"),
+		filepath.Join("state", "checkpoints"),
+		filepath.Join("candidates"),
+		"logs",
+	} {
+		path := filepath.Join(root, rel)
+		ok, note := checkWritable(path)
+		checks = append(checks, Check{Name: "project worktrail writable " + filepath.ToSlash(rel), Path: path, OK: ok, Note: note})
+	}
+	return checks
+}
+
+func checkWritable(path string) (bool, string) {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, "not found; run worktrail init-project before using state, checkpoints, candidates, handoffs, or logs"
+	}
+	if err != nil {
+		return false, err.Error()
+	}
+	if !info.IsDir() {
+		return false, "not a directory"
+	}
+	tmp, err := os.CreateTemp(path, ".worktrail-doctor-*")
+	if err != nil {
+		return false, "not writable; allow sandbox write access for state, checkpoints, candidates, handoffs, and logs"
+	}
+	name := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return false, err.Error()
+	}
+	if err := os.Remove(name); err != nil {
+		return false, err.Error()
+	}
+	return true, "writable for state, checkpoints, candidates, handoffs, and logs"
 }
 
 func applyManaged(path, body string) error {

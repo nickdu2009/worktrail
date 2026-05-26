@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/transcript"
@@ -49,7 +51,11 @@ func runImport(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	if source != "codex" {
 		return fmt.Errorf("unsupported import source %q", source)
 	}
-	sessions, err := transcript.DiscoverCodexSessions(env.Home, env.ProjectRoot)
+	bounds, err := importDiscoverOptions(flags)
+	if err != nil {
+		return err
+	}
+	sessions, err := transcript.DiscoverCodexSessionsBounded(env.Home, env.ProjectRoot, bounds)
 	if err != nil {
 		return err
 	}
@@ -101,6 +107,11 @@ func runImportCursor(env paths.Env, ioctx IO, flags map[string]string, scope str
 	if err != nil {
 		return err
 	}
+	bounds, err := importDiscoverOptions(flags)
+	if err != nil {
+		return err
+	}
+	sessions = transcript.BoundSessions(sessions, bounds)
 	report := importReport{
 		Source:   "cursor",
 		Project:  env.ProjectRoot,
@@ -141,6 +152,37 @@ func runImportCursor(env paths.Env, ioctx IO, flags map[string]string, scope str
 	return printImportReport(ioctx, report, flagValue(flags, "format", "text"))
 }
 
+func importDiscoverOptions(flags map[string]string) (transcript.DiscoverOptions, error) {
+	var opts transcript.DiscoverOptions
+	if since := strings.TrimSpace(flagValue(flags, "since", "")); since != "" {
+		d, err := parseImportSince(since)
+		if err != nil {
+			return opts, fmt.Errorf("invalid --since duration %q", since)
+		}
+		opts.Since = time.Now().UTC().Add(-d)
+	}
+	if limit := strings.TrimSpace(flagValue(flags, "limit", "")); limit != "" {
+		n, err := strconv.Atoi(limit)
+		if err != nil || n <= 0 {
+			return opts, fmt.Errorf("--limit must be a positive integer")
+		}
+		opts.Limit = n
+	}
+	return opts, nil
+}
+
+func parseImportSince(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if strings.HasSuffix(value, "d") {
+		days, err := strconv.Atoi(strings.TrimSuffix(value, "d"))
+		if err != nil || days <= 0 {
+			return 0, fmt.Errorf("days must be positive")
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(value)
+}
+
 func cursorImportSessions(root, explicitFile string) ([]transcript.DiscoveredSession, error) {
 	if explicitFile != "" {
 		return []transcript.DiscoveredSession{{
@@ -170,12 +212,21 @@ func cursorImportSessions(root, explicitFile string) ([]transcript.DiscoveredSes
 			continue
 		}
 		sessions = append(sessions, transcript.DiscoveredSession{
-			Source: "cursor",
-			ID:     raw.ID,
-			Path:   raw.Path,
+			Source:    "cursor",
+			ID:        raw.ID,
+			Path:      raw.Path,
+			UpdatedAt: fileModTime(raw.Path),
 		})
 	}
 	return sessions, nil
+}
+
+func fileModTime(path string) time.Time {
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
 }
 
 func isDuplicateCandidateError(err error) bool {
@@ -249,10 +300,11 @@ func printImportGuidance(ioctx IO, report importReport) {
 }
 
 func printImportHelp(out io.Writer) {
-	fmt.Fprintln(out, "usage: worktrail import codex [--all] [--scope project|user] [--format text|json]")
-	fmt.Fprintln(out, "       worktrail import cursor [--file path] [--all] [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "usage: worktrail import codex [--all] [--since duration] [--limit N] [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "       worktrail import cursor [--file path] [--all] [--since duration] [--limit N] [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Default mode is a dry-run that discovers current-project Codex transcripts.")
 	fmt.Fprintln(out, "`--all` syncs discovered transcripts and creates pending transcript_notes evidence candidates.")
+	fmt.Fprintln(out, "`--since` accepts Go durations such as 336h or day shorthand such as 14d.")
 	fmt.Fprintln(out, "`import cursor` reads explicit files or Worktrail-observed Cursor transcript metadata; it does not scan private Cursor directories.")
 }

@@ -70,6 +70,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 		return runSearch(ctx, env, ioctx, args[1:])
 	case "context":
 		return runContextPack(ctx, env, ioctx, args[1:])
+	case "note":
+		return runNote(ctx, env, ioctx, args[1:])
 	case "preview":
 		return runPreview(ctx, env, ioctx, args[1:])
 	case "sync":
@@ -82,6 +84,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 		return runMigrate(ctx, env, ioctx, args[1:])
 	case "distill":
 		return runDistill(ctx, env, ioctx, args[1:])
+	case "maintain":
+		return runMaintain(ctx, env, ioctx, args[1:])
 	case "install":
 		return runInstall(ctx, env, ioctx, args[1:])
 	case "uninstall":
@@ -119,6 +123,7 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  worktrail review [--semantic|--evidence|--all]")
 	fmt.Fprintln(out, "  worktrail doctor knowledge")
 	fmt.Fprintln(out, "  worktrail evidence plan [--status active|archived|all]")
+	fmt.Fprintln(out, "  worktrail note add --type rule --target rules/example.md --title <title> --summary <summary> --evidence-label <label> <body>")
 	fmt.Fprintln(out, "  worktrail promote <candidate-id>")
 	fmt.Fprintln(out, "  worktrail merge <candidate-id>")
 	fmt.Fprintln(out, "  worktrail discard <candidate-id>")

@@ -147,6 +147,10 @@ func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 }
 
 func runContextPack(_ context.Context, env paths.Env, ioctx IO, args []string) error {
+	if wantsFlagHelpOrLeadingHelp(args) {
+		printContextHelp(ioctx.Out)
+		return nil
+	}
 	flags, positional := splitFlagsWithBooleans(args, map[string]bool{"evidence": true})
 	pack, err := contextpack.Build(env, contextpack.Options{
 		Task:            joinArgs(positional),
@@ -161,6 +165,12 @@ func runContextPack(_ context.Context, env paths.Env, ioctx IO, args []string) e
 	}
 	fmt.Fprint(ioctx.Out, contextpack.RenderMarkdown(pack))
 	return nil
+}
+
+func printContextHelp(out interface{ Write([]byte) (int, error) }) {
+	fmt.Fprintln(out, "usage: worktrail context [--stage <stage>] [--evidence] [--format markdown|json] <task>")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Builds a read-only context pack from Worktrail knowledge, state, and pending maintenance hints.")
 }
 
 func runSync(_ context.Context, env paths.Env, ioctx IO, args []string) error {

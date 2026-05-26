@@ -11,23 +11,30 @@ non-goals, behavior, and acceptance criteria.
 
 ## Pending
 
-- Prepare the `v1.0.0` release package without expanding core functionality:
-  add release notes or `CHANGELOG.md`, document what `v1.0.0` means in the
-  README, add a release operation checklist, include the long-term vision
-  discussion, rerun the release gate, and tag `v1.0.0`.
+Pending items are ordered by dependency and release priority.
+
+- P1: Prepare the `v1.0.0` release package without expanding core functionality
+  after the P0 dogfood blockers are resolved. Add release notes or `CHANGELOG.md`,
+  document what `v1.0.0` means in the README, add a release operation checklist,
+  include the long-term vision discussion, rerun the release gate, and tag
+  `v1.0.0`.
   Requirements:
   [worktrail-release-acceptance.md](worktrail-release-acceptance.md) and
   [worktrail-long-term-vision-discussion.md](worktrail-long-term-vision-discussion.md).
-- Run post-release dogfood passes and convert repeated feedback into numbered
-  follow-up requirements before the next implementation round.
+
+## Completed
+
+- Fix post-release dogfood blockers before the next release candidate.
+  Implementation status: implemented.
   Requirements:
   [post-release-dogfood-feedback.md](post-release-dogfood-feedback.md) and
   [post-release-dogfood-release-blocking-requirements.md](post-release-dogfood-release-blocking-requirements.md).
   Design:
   [knowledge-maintenance-proposal-workflow.md](knowledge-maintenance-proposal-workflow.md).
-
-## Completed
-
+  Plan:
+  [post-release-dogfood-p0-implementation-plan.md](post-release-dogfood-p0-implementation-plan.md).
+  Validation:
+  [post-release-dogfood-p0-validation-2026-05-26.md](post-release-dogfood-p0-validation-2026-05-26.md).
 - Define and implement release acceptance, scope behavior, maintenance UX,
   knowledge quality, apply-plan safety, and dogfood feedback requirements.
   Implementation status: implemented.

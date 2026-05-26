@@ -15,6 +15,10 @@ func runState(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 	if len(args) == 0 {
 		return errors.New("state subcommand required")
 	}
+	if wantsStateHelp(args) {
+		printStateHelp(ioctx.Out)
+		return nil
+	}
 	cmd, rest := args[0], args[1:]
 	flags, positional := splitFlags(rest)
 	scope := flagValue(flags, "scope", "project")
@@ -179,6 +183,20 @@ func printState(ioctx IO, cap wtstate.Capsule, format string) error {
 	return nil
 }
 
+func printStateHelp(out interface{ Write([]byte) (int, error) }) {
+	fmt.Fprintln(out, "usage: worktrail state <start|update|checkpoint|inject|close|archive|list|show> [options]")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "subcommands:")
+	fmt.Fprintln(out, "  start <title>                 create an active state capsule")
+	fmt.Fprintln(out, "  update [--id latest] <note>    append progress to an active state")
+	fmt.Fprintln(out, "  checkpoint [--id latest]       write a checkpoint from active state")
+	fmt.Fprintln(out, "  inject [--id latest] <task>    inject task instructions into state")
+	fmt.Fprintln(out, "  close [--id latest] <summary>  close active state")
+	fmt.Fprintln(out, "  archive <id>                   archive a state capsule")
+	fmt.Fprintln(out, "  list [--active]                list state capsules")
+	fmt.Fprintln(out, "  show <id>                      print a state capsule")
+}
+
 func defaultStateBody(title string) string {
 	if strings.TrimSpace(title) == "" {
 		title = "Untitled"
@@ -247,6 +265,31 @@ func wantsHelp(args []string) bool {
 		}
 	}
 	return false
+}
+
+func wantsFlagHelpOrLeadingHelp(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	if args[0] == "--help" || args[0] == "-h" {
+		return true
+	}
+	if len(args) == 1 && args[0] == "help" {
+		return true
+	}
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
+func wantsStateHelp(args []string) bool {
+	if wantsFlagHelpOrLeadingHelp(args) {
+		return true
+	}
+	return len(args) == 2 && args[1] == "help"
 }
 
 func splitCSV(value string) []string {

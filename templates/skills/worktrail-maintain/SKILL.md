@@ -14,10 +14,11 @@ Use this skill when the user asks to maintain, clean up, advance, summarize, or 
 5. Run `worktrail review plan --format json` or its scoped variant and group pending semantic candidates by `recommended_action`.
 6. Run `worktrail evidence plan --format json` or its scoped variant and group evidence lifecycle items by `recommended_action`.
 7. Present one concise maintenance summary: pending evidence, pending review, evidence lifecycle actions, blockers, and commands that would be safe after confirmation.
-8. Ask the user which lane to run: distill proposal workflow, review apply-plan workflow, review apply-candidates batch command, single candidate command, evidence archive/discard, or no action.
-9. Execute review batch commands only after explicit user confirmation that identifies the action, exact candidate id list, and scope for `worktrail review apply-candidates --promote|--merge|--discard <id...> [--scope ...]`.
-10. Execute other state-changing commands only after explicit user confirmation that identifies the exact candidate id, evidence id, saved plan file, and scope.
-11. After any confirmed action, rerun the relevant read-only plan command and summarize the new counts.
+8. When the user asks to capture a confirmed finding directly into Worktrail knowledge, use `worktrail note add --type <type> --target <path> --title <title> --summary <summary> --evidence-label <label> ...` to create a pending semantic candidate. Do not edit formal `.worktrail` knowledge files directly.
+9. Ask the user which lane to run: note capture, distill proposal workflow, review apply-plan workflow, review apply-candidates batch command, single candidate command, evidence archive/discard, or no action.
+10. Execute review batch commands only after explicit user confirmation that identifies the action, exact candidate id list, and scope for `worktrail review apply-candidates --promote|--merge|--discard <id...> [--scope ...]`.
+11. Execute other state-changing commands only after explicit user confirmation that identifies the exact candidate id, evidence id, saved plan file, and scope.
+12. After any confirmed action, rerun the relevant read-only plan command and summarize the new counts.
 
 Do not automatically commit git changes.
 
