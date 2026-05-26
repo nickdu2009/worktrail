@@ -7,6 +7,8 @@ description: Import, sync, extract, or migrate pending Worktrail candidates from
 
 Use this skill when the user wants to import, sync, extract, migrate, or reuse knowledge from Codex, Claude, Cursor, transcript files, all current-project conversations, observed Cursor conversations, or legacy KDD docs.
 
+If `.worktrail/` is absent at the current workspace or repository root and the user did not explicitly ask to initialize, install, inspect, repair, or otherwise manage Worktrail, stop; Worktrail is not enabled for this project.
+
 For an existing `docs/knowledge-driven-development/` project knowledge base:
 
 1. Run `worktrail migrate kdd` first and show the dry-run matched, blocked, skipped, project item, and local item counts.

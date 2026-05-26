@@ -168,6 +168,7 @@ func RenderSkillTriggerRouting() string {
 	var b strings.Builder
 	b.WriteString("## Skill Trigger Routing\n\n")
 	b.WriteString("When a user request matches one of these intents, use the named Worktrail skill or run the equivalent command. Do not answer with prose only when a required Worktrail command is listed.\n\n")
+	b.WriteString("Project activation gate: automatic Worktrail workflows are active only when `.worktrail/` exists at the current workspace or repository root. If `.worktrail/` is absent, do not run Worktrail automatically; only proceed when the user explicitly asks to initialize, install, inspect, repair, or otherwise manage Worktrail itself.\n\n")
 	for _, trigger := range skillTriggers {
 		fmt.Fprintf(&b, "### %s\n\n", trigger.Skill)
 		writeTriggerList(&b, "Use when", trigger.UseWhen)

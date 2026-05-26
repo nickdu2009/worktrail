@@ -168,6 +168,9 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		assertRenderedTriggerRouting(t, path)
 	}
 	assertInstalledSkills(t, filepath.Join(env.Home, ".codex", "skills"))
+	if _, err := os.Stat(filepath.Join(env.UserRoot, "logs", "events.jsonl")); err != nil {
+		t.Fatalf("expected user install event log: %v", err)
+	}
 	distillSkill, err := os.ReadFile(filepath.Join(env.Home, ".codex", "skills", "worktrail-distill", "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -240,11 +243,23 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 		filepath.Join(env.ProjectRoot, ".agents", "skills", "worktrail-state", "SKILL.md"),
 		filepath.Join(env.ProjectRoot, ".gitignore"),
 		filepath.Join(env.ProjectRoot, ".codex", "hooks.json"),
+		env.ProjectWT,
 	} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("default codex install should not create project file %s, err=%v", path, err)
 		}
 	}
+}
+
+func TestUninstallCodexUserOnlyDoesNotCreateProjectWorktrail(t *testing.T) {
+	env := testEnv(t)
+	if _, err := UninstallCodex(env, Options{User: true}); err != nil {
+		t.Fatalf("UninstallCodex: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.UserRoot, "logs", "events.jsonl")); err != nil {
+		t.Fatalf("expected user uninstall event log: %v", err)
+	}
+	assertNoPath(t, env.ProjectWT)
 }
 
 func TestDoctorReportsMissingWorktrailCommand(t *testing.T) {
@@ -610,6 +625,8 @@ func assertRenderedTriggerRouting(t *testing.T, path string) {
 	text := string(data)
 	for _, want := range []string{
 		"## Skill Trigger Routing",
+		"Project activation gate",
+		"`.worktrail/` exists",
 		"### worktrail-context",
 		"### worktrail-state",
 		"### worktrail-handoff",

@@ -9,6 +9,7 @@ Use this skill when previewing Worktrail-maintained Markdown or candidate conten
 
 ## Rules
 
+- If `.worktrail/` is absent at the current workspace or repository root and the user did not explicitly ask to initialize, install, inspect, repair, or otherwise manage Worktrail, stop; Worktrail is not enabled for this project.
 - Preview only Worktrail-managed content: user/project Worktrail documents or Worktrail candidates.
 - Do not use the target project's docs site, dev server, package manager, or framework.
 - Do not modify target project business files.

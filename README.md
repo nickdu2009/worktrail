@@ -63,6 +63,7 @@ Worktrail supports multiple local agent surfaces in the same repository. Install
 
 - User scope installs the agent capabilities that should follow the human across repositories. The bundled `templates/root/**` and `templates/skills/**` files are user-level instructions, rules, and skills.
 - Project scope installs runtime integration config for the current repository only, such as hooks, MCP/settings files, and the managed `.gitignore` entries needed for those runtime files. `--project` does not install project-level rules or project-level skills from `templates/root/**` or `templates/skills/**`.
+- User-level instructions and skills are gated by project opt-in: agents should only run automatic Worktrail workflows when `.worktrail/` exists at the current workspace or repository root. In directories without that marker, Worktrail remains available only for explicit init, install, inspect, or repair requests.
 
 Install the Worktrail CLI before installing agent integrations. Installed skills,
 hooks, and MCP configs invoke the `worktrail` command, so `worktrail` must be

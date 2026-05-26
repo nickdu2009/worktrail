@@ -43,6 +43,7 @@ Use this skill when initializing Worktrail or installing Worktrail-managed agent
 
 - `--user` installs user-level Worktrail instructions and skills where supported.
 - `--project` installs local project integration files where supported, such as Cursor MCP/hooks config.
+- User-level instructions and skills must not auto-run Worktrail in a project unless `.worktrail/` exists at that workspace or repository root; project initialization or project install creates the project opt-in marker.
 - Cursor project installs do not create project-level skills or rules; they merge `.cursor/mcp.json` and `.cursor/hooks.json`.
 
 ## Output

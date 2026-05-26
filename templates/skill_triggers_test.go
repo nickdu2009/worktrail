@@ -19,6 +19,11 @@ func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	rendered := RenderSkillTriggerRouting()
+	for _, want := range []string{"Project activation gate", "`.worktrail/` exists", "do not run Worktrail automatically"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered trigger routing missing project gate %q:\n%s", want, rendered)
+		}
+	}
 	for _, trigger := range SkillTriggers() {
 		seen[trigger.Skill] = true
 		if len(trigger.UseWhen) == 0 || len(trigger.RequiredActions) == 0 || len(trigger.Never) == 0 {
@@ -46,7 +51,7 @@ func TestRenderRootTemplateReplacesRoutingPlaceholder(t *testing.T) {
 	if strings.Contains(rendered, SkillTriggerRoutingPlaceholder) {
 		t.Fatalf("placeholder was not replaced:\n%s", rendered)
 	}
-	for _, want := range []string{"## Skill Trigger Routing", "worktrail-handoff", "worktrail handoff", "new conversation", "end current chat"} {
+	for _, want := range []string{"## Skill Trigger Routing", "Project activation gate", "worktrail-handoff", "worktrail handoff", "new conversation", "end current chat"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered root template missing %q:\n%s", want, rendered)
 		}
@@ -66,6 +71,11 @@ func TestPlaceholderIsOnlyUsedByRootRuleTemplates(t *testing.T) {
 		}
 		if !strings.Contains(body, SkillTriggerRoutingPlaceholder) {
 			t.Fatalf("%s missing trigger routing placeholder", path)
+		}
+		for _, want := range []string{"project has opted in", "`.worktrail/` exists", "does not block explicit user requests"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s missing project activation gate %q:\n%s", path, want, body)
+			}
 		}
 	}
 
@@ -97,15 +107,15 @@ func TestPlaceholderIsOnlyUsedByRootRuleTemplates(t *testing.T) {
 
 func TestSkillTemplatesExposeTriggerIntent(t *testing.T) {
 	expected := map[string][]string{
-		"worktrail-context":     {"description:", "Use this skill when", "starting", "resuming", "continuing"},
-		"worktrail-doc-preview": {"description:", "Use this skill when", "preview", "Worktrail-managed", "candidate"},
-		"worktrail-init":        {"description:", "Use this skill when", "initialize Worktrail", "install", "doctor", "worktrail --help"},
-		"worktrail-state":       {"description:", "Use this skill when", "long", "risky", "checkpoint"},
-		"worktrail-handoff":     {"description:", "Use this skill", "new conversation", "end current chat", "worktrail handoff", "do not only output"},
-		"worktrail-import":      {"description:", "Use this skill when", "import", "sync", "migrate"},
-		"worktrail-distill":     {"description:", "Use this skill when", "transcript_notes", "migration_source", "semantic Worktrail candidates"},
-		"worktrail-review":      {"description:", "Use this skill when", "review candidates", "promoted", "retired"},
-		"worktrail-maintain":    {"description:", "Use this skill when", "maintain", "clean up", "evidence lifecycle"},
+		"worktrail-context":     {"description:", "Use this skill when", "starting", "resuming", "continuing", ".worktrail/"},
+		"worktrail-doc-preview": {"description:", "Use this skill when", "preview", "Worktrail-managed", "candidate", ".worktrail/"},
+		"worktrail-init":        {"description:", "Use this skill when", "initialize Worktrail", "install", "doctor", "worktrail --help", ".worktrail/"},
+		"worktrail-state":       {"description:", "Use this skill when", "long", "risky", "checkpoint", ".worktrail/"},
+		"worktrail-handoff":     {"description:", "Use this skill", "new conversation", "end current chat", "worktrail handoff", "do not only output", ".worktrail/"},
+		"worktrail-import":      {"description:", "Use this skill when", "import", "sync", "migrate", ".worktrail/"},
+		"worktrail-distill":     {"description:", "Use this skill when", "transcript_notes", "migration_source", "semantic Worktrail candidates", ".worktrail/"},
+		"worktrail-review":      {"description:", "Use this skill when", "review candidates", "promoted", "retired", ".worktrail/"},
+		"worktrail-maintain":    {"description:", "Use this skill when", "maintain", "clean up", "evidence lifecycle", ".worktrail/"},
 	}
 	for skill, wants := range expected {
 		body, err := Read("skills/" + skill + "/SKILL.md")

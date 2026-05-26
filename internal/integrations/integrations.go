@@ -66,7 +66,7 @@ func Install(env paths.Env, tool Tool, opts Options) (Report, error) {
 		}
 	}
 	report.Checks = append(report.Checks, worktrailCommandCheck())
-	_ = wlog.Append(env.ProjectWT, "install", string(tool), "integrations:"+string(tool), map[string]any{"user": opts.User, "project": opts.Project})
+	appendInstallEvent(env, "install", string(tool), "integrations:"+string(tool), opts)
 	return report, nil
 }
 
@@ -87,8 +87,18 @@ func Uninstall(env paths.Env, tool Tool, opts Options) (Report, error) {
 			return report, err
 		}
 	}
-	_ = wlog.Append(env.ProjectWT, "install", string(tool), "integrations:uninstall-"+string(tool), map[string]any{"user": opts.User, "project": opts.Project})
+	appendInstallEvent(env, "install", string(tool), "integrations:uninstall-"+string(tool), opts)
 	return report, nil
+}
+
+func appendInstallEvent(env paths.Env, event string, id string, actor string, opts Options) {
+	data := map[string]any{"user": opts.User, "project": opts.Project}
+	if opts.User {
+		_ = wlog.Append(env.UserRoot, event, id, actor, data)
+	}
+	if opts.Project {
+		_ = wlog.Append(env.ProjectWT, event, id, actor, data)
+	}
 }
 
 func Doctor(env paths.Env, tool Tool, opts Options) (Report, error) {
