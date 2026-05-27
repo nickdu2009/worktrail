@@ -13,17 +13,19 @@ import (
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
 	"github.com/nickdu2009/worktrail/internal/index"
+	"github.com/nickdu2009/worktrail/internal/knowledge"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/transcript"
 )
 
 type Options struct {
-	Task            string
-	Stage           string
-	Limit           int
-	Now             time.Time
-	IncludeEvidence bool
+	Task             string
+	Stage            string
+	IncludeLifecycle []string
+	Limit            int
+	Now              time.Time
+	IncludeEvidence  bool
 }
 
 type Item struct {
@@ -33,6 +35,7 @@ type Item struct {
 	Path          string    `json:"path"`
 	Status        string    `json:"status,omitempty"`
 	Stage         string    `json:"stage,omitempty"`
+	Lifecycle     string    `json:"lifecycle,omitempty"`
 	Topic         string    `json:"topic,omitempty"`
 	SourceOfTruth bool      `json:"source_of_truth,omitempty"`
 	SupersededBy  []string  `json:"superseded_by,omitempty"`
@@ -56,14 +59,25 @@ type Maintenance struct {
 	NextSteps                   []string `json:"next_steps"`
 }
 
+type IndexHealth struct {
+	Scope               string `json:"scope"`
+	Stale               bool   `json:"stale"`
+	StaleEntriesSkipped int    `json:"stale_entries_skipped,omitempty"`
+	MissingFromFS       int    `json:"missing_from_fs,omitempty"`
+	MissingFromIndex    int    `json:"missing_from_index,omitempty"`
+	Changed             int    `json:"changed,omitempty"`
+	NextStep            string `json:"next_step,omitempty"`
+}
+
 type Pack struct {
-	Schema                   string      `json:"schema"`
-	Task                     string      `json:"task,omitempty"`
-	CreatedAt                time.Time   `json:"created_at"`
-	HiddenEvidenceCandidates int         `json:"hidden_evidence_candidates"`
-	Maintenance              Maintenance `json:"maintenance"`
-	Sections                 []Section   `json:"sections"`
-	EvidenceIncluded         bool        `json:"-"`
+	Schema                   string        `json:"schema"`
+	Task                     string        `json:"task,omitempty"`
+	CreatedAt                time.Time     `json:"created_at"`
+	HiddenEvidenceCandidates int           `json:"hidden_evidence_candidates"`
+	IndexHealth              []IndexHealth `json:"index_health,omitempty"`
+	Maintenance              Maintenance   `json:"maintenance"`
+	Sections                 []Section     `json:"sections"`
+	EvidenceIncluded         bool          `json:"-"`
 }
 
 func Build(env paths.Env, opts Options) (Pack, error) {
@@ -79,7 +93,15 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 	if stage != "" && !validStage(stage) {
 		return Pack{}, fmt.Errorf("invalid context stage %q", opts.Stage)
 	}
-	var entries []index.Entry
+	includeLifecycle := append([]string{}, opts.IncludeLifecycle...)
+	if len(includeLifecycle) == 0 && (stage == knowledge.LifecycleHistorical || stage == knowledge.LifecycleRetired) {
+		includeLifecycle = []string{stage}
+		stage = ""
+	}
+	var (
+		entries      []index.Entry
+		indexHealths []IndexHealth
+	)
 	for _, rootScope := range []struct {
 		root  string
 		scope string
@@ -87,11 +109,14 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 		{env.UserRoot, "user"},
 		{env.ProjectWT, "project"},
 	} {
-		es, err := loadOrRebuild(rootScope.root, rootScope.scope)
+		es, health, err := loadOrRebuild(rootScope.root, rootScope.scope)
 		if err != nil {
 			return Pack{}, err
 		}
 		entries = append(entries, es...)
+		if health.Stale || health.StaleEntriesSkipped > 0 {
+			indexHealths = append(indexHealths, health)
+		}
 	}
 	supersededBy := supersededByMap(entries)
 	pack := Pack{
@@ -99,6 +124,7 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 		Task:                     opts.Task,
 		CreatedAt:                now,
 		HiddenEvidenceCandidates: countPendingEvidence(entries),
+		IndexHealth:              append([]IndexHealth{}, indexHealths...),
 		Maintenance:              buildMaintenance(env),
 		EvidenceIncluded:         opts.IncludeEvidence,
 	}
@@ -106,6 +132,9 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 	for _, spec := range sectionSpecs {
 		var items []Item
 		for _, entry := range entries {
+			if !knowledge.IncludesLifecycle(includeLifecycle, entry.Lifecycle) {
+				continue
+			}
 			if spec.keep(entry) {
 				items = append(items, itemFromEntry(entry, supersededBy[filepath.ToSlash(entry.Path)]))
 			}
@@ -162,6 +191,11 @@ func RenderMarkdown(pack Pack) string {
 				b.WriteString(item.Stage)
 				b.WriteString("]")
 			}
+			if knowledge.IsNonCurrentLifecycle(item.Lifecycle) {
+				b.WriteString(" [lifecycle:")
+				b.WriteString(item.Lifecycle)
+				b.WriteString("]")
+			}
 			if item.Topic != "" {
 				b.WriteString(" [topic:")
 				b.WriteString(item.Topic)
@@ -183,6 +217,17 @@ func RenderMarkdown(pack Pack) string {
 			}
 		}
 		b.WriteString("\n")
+	}
+	if len(pack.IndexHealth) > 0 {
+		b.WriteString("## Index Health\n\n")
+		for _, health := range pack.IndexHealth {
+			fmt.Fprintf(&b, "%s index stale: skipped %d entries (%d missing, %d changed, %d unindexed).\n", scopeLabel(health.Scope), health.StaleEntriesSkipped, health.MissingFromFS, health.Changed, health.MissingFromIndex)
+			if health.NextStep != "" {
+				fmt.Fprintf(&b, "Next: `%s`\n\n", health.NextStep)
+			} else {
+				b.WriteString("\n")
+			}
+		}
 	}
 	if hasMaintenance(pack.Maintenance) {
 		b.WriteString("## Maintenance\n\n")
@@ -214,26 +259,42 @@ func RenderMarkdown(pack Pack) string {
 	return strings.TrimSpace(b.String()) + "\n"
 }
 
-func loadOrRebuild(root, scope string) ([]index.Entry, error) {
+func loadOrRebuild(root, scope string) ([]index.Entry, IndexHealth, error) {
 	if root == "" {
-		return nil, nil
+		return nil, IndexHealth{}, nil
 	}
 	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, IndexHealth{}, nil
 	} else if err != nil {
-		return nil, err
+		return nil, IndexHealth{}, err
 	}
 	db, err := index.Load(root)
 	if err != nil {
 		if _, rebuildErr := index.Rebuild(root, index.RebuildOptions{Scope: scope}); rebuildErr != nil {
-			return nil, rebuildErr
+			return nil, IndexHealth{}, rebuildErr
 		}
 		db, err = index.Load(root)
 	}
 	if err != nil {
-		return nil, err
+		return nil, IndexHealth{}, err
 	}
-	return db.Entries, nil
+	entries, freshReport, err := index.FilterFresh(root, db)
+	if err != nil {
+		return nil, IndexHealth{}, err
+	}
+	healthReport, err := index.Health(root)
+	if err != nil {
+		return nil, IndexHealth{}, err
+	}
+	return entries, IndexHealth{
+		Scope:               scope,
+		Stale:               healthReport.Stale,
+		StaleEntriesSkipped: len(freshReport.Deleted) + len(freshReport.Changed),
+		MissingFromFS:       len(healthReport.MissingFromFS),
+		MissingFromIndex:    len(healthReport.MissingFromIndex),
+		Changed:             len(healthReport.Changed),
+		NextStep:            "worktrail index rebuild --scope " + scope,
+	}, nil
 }
 
 func itemFromEntry(entry index.Entry, supersededBy []string) Item {
@@ -244,6 +305,7 @@ func itemFromEntry(entry index.Entry, supersededBy []string) Item {
 		Path:          filepath.ToSlash(entry.Path),
 		Status:        entry.Status,
 		Stage:         entry.Stage,
+		Lifecycle:     entry.Lifecycle,
 		Topic:         entry.Topic,
 		SourceOfTruth: entry.SourceOfTruth,
 		SupersededBy:  append([]string{}, supersededBy...),
@@ -293,7 +355,7 @@ func sectionSpecsForStage(stage string, includeEvidence bool) []sectionSpec {
 
 func itemPriority(item Item, requestedStage string) int {
 	score := 0
-	if len(item.SupersededBy) == 0 && item.Stage != "historical" && item.Stage != "retired" {
+	if len(item.SupersededBy) == 0 && !knowledge.IsNonCurrentLifecycle(item.Lifecycle) && item.Stage != "historical" && item.Stage != "retired" {
 		score += 100
 	}
 	if item.SourceOfTruth {
@@ -359,6 +421,13 @@ func validStage(stage string) bool {
 	default:
 		return false
 	}
+}
+
+func scopeLabel(scope string) string {
+	if strings.EqualFold(strings.TrimSpace(scope), "user") {
+		return "User"
+	}
+	return "Project"
 }
 
 func pendingCandidateVisible(entry index.Entry, includeEvidence bool) bool {

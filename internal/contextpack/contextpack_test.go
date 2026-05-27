@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nickdu2009/worktrail/internal/index"
+	"github.com/nickdu2009/worktrail/internal/knowledge"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
 )
@@ -127,7 +129,7 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 		}
 	}
 	requirements := section(pack, "Requirements")
-	if len(requirements.Items) != 2 || requirements.Items[0].Title != "New Requirement" || len(requirements.Items[1].SupersededBy) != 1 {
+	if len(requirements.Items) != 1 || requirements.Items[0].Title != "New Requirement" {
 		t.Fatalf("requirements priority or superseded marker unexpected: %+v", requirements.Items)
 	}
 	workflows := section(pack, "Workflows")
@@ -145,8 +147,11 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	if rendered == "" || !strings.Contains(rendered, "unapproved") {
 		t.Fatalf("rendered pack missing unapproved marker:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "[stage:requirements] [topic:delivery] [source_of_truth]") || !strings.Contains(rendered, "[superseded_by:requirements/new.md]") {
+	if !strings.Contains(rendered, "[stage:requirements] [topic:delivery] [source_of_truth]") {
 		t.Fatalf("rendered pack missing governance metadata:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Old Requirement") {
+		t.Fatalf("default rendered pack should hide historical requirements:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "Hidden evidence candidates: 1") || !strings.Contains(rendered, "worktrail context --evidence <task>") {
 		t.Fatalf("rendered pack missing hidden evidence guidance:\n%s", rendered)
@@ -181,6 +186,19 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	if !strings.Contains(rendered, "Raw transcript evidence content.") || strings.Contains(rendered, "Hidden evidence candidates") {
 		t.Fatalf("IncludeEvidence rendered pack unexpected:\n%s", rendered)
 	}
+
+	withHistorical, err := Build(env, Options{Task: "ship packages", IncludeLifecycle: []string{knowledge.LifecycleCurrent, knowledge.LifecycleHistorical}})
+	if err != nil {
+		t.Fatalf("Build(IncludeLifecycle historical) error = %v", err)
+	}
+	requirements = section(withHistorical, "Requirements")
+	if len(requirements.Items) != 2 || requirements.Items[1].Title != "Old Requirement" || len(requirements.Items[1].SupersededBy) != 1 {
+		t.Fatalf("historical lifecycle view unexpected: %+v", requirements.Items)
+	}
+	rendered = RenderMarkdown(withHistorical)
+	if !strings.Contains(rendered, "[lifecycle:historical]") {
+		t.Fatalf("rendered historical pack missing lifecycle marker:\n%s", rendered)
+	}
 }
 
 func TestBuildOmitsMaintenanceTextWhenCountsAreZero(t *testing.T) {
@@ -206,6 +224,83 @@ func TestBuildOmitsMaintenanceTextWhenCountsAreZero(t *testing.T) {
 	rendered := RenderMarkdown(pack)
 	if strings.Contains(rendered, "## Maintenance") {
 		t.Fatalf("rendered quiet pack included maintenance section:\n%s", rendered)
+	}
+}
+
+func TestBuildSkipsStaleIndexedEntriesAndReportsIndexHealth(t *testing.T) {
+	tmp := t.TempDir()
+	env := paths.Env{
+		UserRoot:  filepath.Join(tmp, "user"),
+		ProjectWT: filepath.Join(tmp, "project", ".worktrail"),
+	}
+	currentPath := filepath.Join(env.ProjectWT, "rules", "current.md")
+	deletedPath := filepath.Join(env.ProjectWT, "rules", "deleted.md")
+	newPath := filepath.Join(env.ProjectWT, "rules", "new.md")
+	writePackDoc(t, currentPath, map[string]any{
+		"id":    "current",
+		"scope": "project",
+		"type":  "rule",
+		"title": "Current Rule",
+	}, "current body")
+	writePackDoc(t, deletedPath, map[string]any{
+		"id":    "deleted",
+		"scope": "project",
+		"type":  "rule",
+		"title": "Deleted Rule",
+	}, "deleted body")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "workflows", "stable.md"), map[string]any{
+		"id":    "stable",
+		"scope": "project",
+		"type":  "workflow",
+		"title": "Stable Workflow",
+	}, "stable body")
+	if _, err := Build(env, Options{Task: "prime index"}); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	db, err := index.Load(env.ProjectWT)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if err := os.Remove(deletedPath); err != nil {
+		t.Fatal(err)
+	}
+	writePackDoc(t, currentPath, map[string]any{
+		"id":    "current",
+		"scope": "project",
+		"type":  "rule",
+		"title": "Current Rule",
+	}, "updated body")
+	writePackDoc(t, newPath, map[string]any{
+		"id":    "new",
+		"scope": "project",
+		"type":  "rule",
+		"title": "New Rule",
+	}, "new body")
+	later := db.GeneratedAt.Add(time.Hour)
+	if err := os.Chtimes(currentPath, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newPath, later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	pack, err := Build(env, Options{Task: "stale index"})
+	if err != nil {
+		t.Fatalf("Build() with stale index error = %v", err)
+	}
+	if len(pack.IndexHealth) != 1 {
+		t.Fatalf("IndexHealth len = %d, want 1: %+v", len(pack.IndexHealth), pack.IndexHealth)
+	}
+	health := pack.IndexHealth[0]
+	if !health.Stale || health.StaleEntriesSkipped != 2 || health.MissingFromFS != 1 || health.Changed != 1 || health.MissingFromIndex != 1 {
+		t.Fatalf("unexpected index health: %+v", health)
+	}
+	rendered := RenderMarkdown(pack)
+	if !strings.Contains(rendered, "## Index Health") || !strings.Contains(rendered, "worktrail index rebuild --scope project") {
+		t.Fatalf("rendered pack missing index health guidance:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Current Rule") || strings.Contains(rendered, "Deleted Rule") || strings.Contains(rendered, "New Rule") {
+		t.Fatalf("rendered pack should hide stale or unindexed rule entries:\n%s", rendered)
 	}
 }
 

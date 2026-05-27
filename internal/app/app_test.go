@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
 	wtdistill "github.com/nickdu2009/worktrail/internal/distill"
+	"github.com/nickdu2009/worktrail/internal/index"
 	kddmigration "github.com/nickdu2009/worktrail/internal/migration/kdd"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
@@ -223,6 +225,9 @@ func TestTopLevelHelpIncludesCandidateApplyCommands(t *testing.T) {
 		"worktrail promote <candidate-id>",
 		"worktrail merge <candidate-id>",
 		"worktrail discard <candidate-id>",
+		"worktrail index diff [--scope project|user|all]",
+		"worktrail doctor delete <path>",
+		"worktrail context --include-lifecycle historical <task>",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("top-level help missing %q:\n%s", want, out.String())
@@ -1210,6 +1215,179 @@ func TestDoctorKnowledgeDetectsFormalDeletionWhenGitReportsIt(t *testing.T) {
 	}
 }
 
+func TestDoctorKnowledgeIncludesHintsAndIndexFindings(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	deletedPath := filepath.Join(project, ".worktrail", "decisions", "deleted.md")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "decisions", "choice.md"), "# Choice\n\nNo decision heading here.")
+	writeTextFile(t, deletedPath, "# Deleted\n\nOld decision.")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "rules", "invalid-lifecycle.md"), "---worktrail\n{\n  \"title\": \"Invalid Lifecycle\",\n  \"type\": \"rule\",\n  \"lifecycle\": \"historic\"\n}\n---\n\nRule body.\n")
+	runApp(t, &out, &errb, "index", "rebuild")
+	if err := os.Remove(deletedPath); err != nil {
+		t.Fatal(err)
+	}
+	writeTextFile(t, filepath.Join(project, ".worktrail", "rules", "new.md"), "# New Rule\n\nFresh rule.")
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"doctor", "knowledge", "--format", "json"}, nil, &out, &errb)
+	if err == nil {
+		t.Fatalf("doctor knowledge should fail when lifecycle metadata is invalid:\n%s", out.String())
+	}
+	var report knowledgeDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	dec := knowledgeFindingByCode(report, "DEC001")
+	if dec == nil || dec.Hint == "" {
+		t.Fatalf("DEC001 should include a hint: %+v", report.Findings)
+	}
+	idxDeleted := knowledgeFindingByCode(report, "IDX001")
+	if idxDeleted == nil || len(idxDeleted.Commands) == 0 || idxDeleted.Commands[0] != "worktrail index rebuild --scope project" {
+		t.Fatalf("IDX001 should include rebuild guidance: %+v", report.Findings)
+	}
+	if !hasKnowledgeFindingFor(report, "IDX002", "rules/new.md") {
+		t.Fatalf("doctor report missing IDX002 for unindexed rule: %+v", report.Findings)
+	}
+	if !hasKnowledgeFindingFor(report, "LIFE001", "rules/invalid-lifecycle.md") {
+		t.Fatalf("doctor report missing LIFE001 for invalid lifecycle: %+v", report.Findings)
+	}
+}
+
+func TestDoctorDeleteClassifiesBlockersAndWarnings(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	target := "rules/target.md"
+	writeTextFile(t, filepath.Join(project, ".worktrail", "project.md"), "# Project\n\nSee [Target](rules/target.md).")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "rules", "target.md"), "# Target\n\nRule body.")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "rules", "mention.md"), "# Mention\n\nPlain text rules/target.md reference.")
+	writeWorktrailGovernance(t, project)
+	writeTextFile(t, filepath.Join(project, "AGENTS.md"), "See rules/target.md before editing.\n")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "pending-target", "--type", "rule", "--target", target, "--title", "Pending Target", "See rules/target.md in body.")
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"doctor", "delete", "--format", "json", target}, nil, &out, &errb)
+	var report deleteDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if err == nil {
+		t.Fatalf("doctor delete should fail when blockers exist: %+v", report)
+	}
+	if report.Safe {
+		t.Fatalf("doctor delete unexpectedly marked report safe: %+v", report)
+	}
+	if !hasDeleteFindingKind(report.Blockers, "starter_link") || !hasDeleteFindingKind(report.Blockers, "candidate_target") {
+		t.Fatalf("doctor delete missing blockers: %+v", report)
+	}
+	if !hasDeleteFindingKind(report.Warnings, "candidate_body") || !hasDeleteFindingKind(report.Warnings, "governance_text") || !hasDeleteFindingKind(report.Warnings, "body_text") {
+		t.Fatalf("doctor delete missing warnings: %+v", report)
+	}
+	for _, finding := range append(append([]deleteDoctorFinding{}, report.Blockers...), report.Warnings...) {
+		if finding.Scope == "" {
+			t.Fatalf("doctor delete finding missing scope: %+v", report)
+		}
+	}
+}
+
+func TestDoctorDeleteScopeAllPreservesFindingScope(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", filepath.Join(home, ".worktrail"))
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	writeTextFile(t, filepath.Join(home, ".worktrail", "project.md"), "# User Root\n\nSee [Target](rules/shared.md).")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "project.md"), "# Project Root\n\nSee [Target](rules/shared.md).")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "rules", "shared.md"), "# Shared\n\nRule body.")
+	writeTextFile(t, filepath.Join(home, ".worktrail", "rules", "shared.md"), "# Shared\n\nRule body.")
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"doctor", "delete", "--scope", "all", "--format", "json", "rules/shared.md"}, nil, &out, &errb)
+	if err == nil {
+		t.Fatalf("doctor delete --scope all should fail with blockers")
+	}
+	var report deleteDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !hasDeleteFindingScope(report.Blockers, "project") || !hasDeleteFindingScope(report.Blockers, "user") {
+		t.Fatalf("doctor delete all-scope report missing scope attribution: %+v", report)
+	}
+}
+
+func TestContextLifecycleIncludeAndLegacyStageAlias(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	writeTextFile(t, filepath.Join(project, ".worktrail", "requirements", "current.md"), "---worktrail\n{\n  \"title\": \"Current Requirement\",\n  \"stage\": \"requirements\"\n}\n---\n\nCurrent body.\n")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "requirements", "historical.md"), "---worktrail\n{\n  \"title\": \"Historical Requirement\",\n  \"stage\": \"historical\"\n}\n---\n\nHistorical body.\n")
+
+	defaultText := runApp(t, &out, &errb, "context", "lifecycle test")
+	if strings.Contains(defaultText, "Historical Requirement") {
+		t.Fatalf("default context should hide historical requirement:\n%s", defaultText)
+	}
+	historicalOnly := runApp(t, &out, &errb, "context", "--include-lifecycle", "historical", "lifecycle test")
+	if !strings.Contains(historicalOnly, "Historical Requirement") || strings.Contains(historicalOnly, "Current Requirement") {
+		t.Fatalf("include-lifecycle output unexpected:\n%s", historicalOnly)
+	}
+	legacyAlias := runApp(t, &out, &errb, "context", "--stage", "historical", "lifecycle test")
+	if !strings.Contains(legacyAlias, "Historical Requirement") || strings.Contains(legacyAlias, "Current Requirement") {
+		t.Fatalf("legacy stage alias output unexpected:\n%s", legacyAlias)
+	}
+}
+
+func TestContextRejectsInvalidIncludeLifecycle(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"context", "--include-lifecycle", "historical,historcal", "lifecycle test"}, nil, &out, &errb)
+	if err == nil {
+		t.Fatal("context should reject invalid include-lifecycle values")
+	}
+	if !strings.Contains(err.Error(), `invalid lifecycle "historcal"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
@@ -1767,6 +1945,33 @@ func hasDuplicateKDDCandidateIDs(items []kddmigration.Item) bool {
 	return false
 }
 
+func knowledgeFindingByCode(report knowledgeDoctorReport, code string) *knowledgeFinding {
+	for i := range report.Findings {
+		if report.Findings[i].Code == code {
+			return &report.Findings[i]
+		}
+	}
+	return nil
+}
+
+func hasDeleteFindingKind(findings []deleteDoctorFinding, kind string) bool {
+	for _, finding := range findings {
+		if finding.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDeleteFindingScope(findings []deleteDoctorFinding, scope string) bool {
+	for _, finding := range findings {
+		if finding.Scope == scope {
+			return true
+		}
+	}
+	return false
+}
+
 func writeWorktrailGovernance(t *testing.T, project string) {
 	t.Helper()
 	body := "Use worktrail context before work, worktrail review before applying candidates, and worktrail handoff before ending a session.\n"
@@ -2028,6 +2233,95 @@ func TestDistillAllLargeSetRequiresCompactOutput(t *testing.T) {
 	err := Run(context.Background(), []string{"distill", "--pending", "--all"}, nil, &out, &errb)
 	if err == nil || !strings.Contains(err.Error(), "avoid flooding the terminal") {
 		t.Fatalf("distill --all error = %v, stdout=%s", err, out.String())
+	}
+}
+
+func TestIndexDiffCommandReportsDeletedUnindexedAndChanged(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	currentPath := filepath.Join(project, ".worktrail", "rules", "current.md")
+	deletedPath := filepath.Join(project, ".worktrail", "rules", "deleted.md")
+	newPath := filepath.Join(project, ".worktrail", "rules", "new.md")
+	writeTextFile(t, currentPath, "# Current\n\ncurrent body")
+	writeTextFile(t, deletedPath, "# Deleted\n\ndeleted body")
+	runApp(t, &out, &errb, "index", "rebuild")
+
+	db, err := index.Load(filepath.Join(project, ".worktrail"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if err := os.Remove(deletedPath); err != nil {
+		t.Fatal(err)
+	}
+	writeTextFile(t, currentPath, "# Current\n\nchanged body")
+	writeTextFile(t, newPath, "# New\n\nnew body")
+	later := db.GeneratedAt.Add(time.Hour)
+	if err := os.Chtimes(currentPath, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newPath, later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	text := runApp(t, &out, &errb, "index", "diff")
+	for _, want := range []string{
+		"scope: project",
+		"stale: true",
+		"deleted: 1",
+		"unindexed: 1",
+		"new: 1",
+		"changed: 1",
+		"rules/deleted.md",
+		"rules/current.md",
+		"rules/new.md",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("index diff missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestSearchSkipsStaleDeletedAndChangedEntries(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	deletedPath := filepath.Join(project, ".worktrail", "rules", "deleted.md")
+	changedPath := filepath.Join(project, ".worktrail", "rules", "changed.md")
+	writeTextFile(t, deletedPath, "# Deleted\n\nneedle")
+	writeTextFile(t, changedPath, "# Changed\n\nneedle")
+	runApp(t, &out, &errb, "index", "rebuild")
+
+	db, err := index.Load(filepath.Join(project, ".worktrail"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if err := os.Remove(deletedPath); err != nil {
+		t.Fatal(err)
+	}
+	writeTextFile(t, changedPath, "# Changed\n\nneedle updated")
+	later := db.GeneratedAt.Add(time.Hour)
+	if err := os.Chtimes(changedPath, later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	text := runApp(t, &out, &errb, "search", "needle")
+	if strings.Contains(text, "Deleted") || strings.Contains(text, "Changed") {
+		t.Fatalf("search returned stale entries:\n%s", text)
 	}
 }
 

@@ -62,7 +62,19 @@ worktrail index rebuild
 worktrail context "task"
 ```
 
-如果只想读用户级知识，确认内容在用户级 scope 中，并按需要传入 `--scope user` 的命令。
+如果 `worktrail context "task"` 提示 stale index，先看差异再重建：
+
+```bash
+worktrail index diff
+worktrail index rebuild
+worktrail context "task"
+```
+
+如果只想读用户级知识，确认内容在用户级 scope 中，并按需要传入 `--scope user` 的命令。历史知识默认不进入主 context；需要时显式传入：
+
+```bash
+worktrail context --include-lifecycle historical "task"
+```
 
 ## Agent 没有自动使用 Worktrail
 <div class="title-en">Agent Does Not Use Worktrail Automatically</div>
@@ -143,6 +155,31 @@ worktrail review plan --format json
 - 候选类型是 `transcript_notes` 或 `migration_source`，需要先 distill
 - `target_path` 和 candidate type 不匹配
 - 目标文档缺失、冲突或需要人工 review
+
+## 删除知识前不确定是否安全
+<div class="title-en">Unsure Whether Deleting Knowledge Is Safe</div>
+
+### 现象
+<div class="title-en">Symptom</div>
+
+你想删除 `.worktrail` 下的正式知识文档，但不确定它是否仍被 starter 文档、候选知识或 agent 配置引用。
+
+### 处理
+<div class="title-en">Fix</div>
+
+先运行只读预检：
+
+```bash
+worktrail doctor delete rules/example.md
+```
+
+如果需要机器可读输出，用：
+
+```bash
+worktrail doctor delete --format json rules/example.md
+```
+
+`blockers` 表示仍有结构化依赖，例如 pending candidate target、`supersedes` / `superseded_by` 关系或 starter 文档中的 Markdown 链接。`warnings` 表示普通正文、candidate body 或 governance 文件中的文本提及，需要人工判断是否真的要一起清理。
 
 ## Evidence 无法归档或丢弃
 <div class="title-en">Evidence Archive or Discard Fails</div>

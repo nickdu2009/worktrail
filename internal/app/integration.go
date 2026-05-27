@@ -61,6 +61,9 @@ func runDoctor(ctx context.Context, env paths.Env, ioctx IO, args []string) erro
 	if args[0] == "knowledge" {
 		return runDoctorKnowledge(ctx, env, ioctx, args[1:])
 	}
+	if args[0] == "delete" {
+		return runDoctorDelete(ctx, env, ioctx, args[1:])
+	}
 	flags, _ := splitFlags(args[1:])
 	report, err := integrations.Doctor(env, integrations.Tool(args[0]), integrationOptions(flags))
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/contextpack"
 	"github.com/nickdu2009/worktrail/internal/extract"
 	"github.com/nickdu2009/worktrail/internal/index"
+	"github.com/nickdu2009/worktrail/internal/knowledge"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/transcript"
@@ -58,6 +59,33 @@ func runIndex(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 			return json.NewEncoder(ioctx.Out).Encode(status)
 		}
 		fmt.Fprintf(ioctx.Out, "exists: %v\nscope: %s\nentries: %d\nindex: %s\n", status.Exists, status.Scope, status.Entries, status.IndexPath)
+		return nil
+	case "diff":
+		scopes := []string{scope}
+		if scope == "all" {
+			scopes = []string{"user", "project"}
+		}
+		var reports []index.DiffReport
+		for _, s := range scopes {
+			root, err := env.ScopeRoot(s)
+			if err != nil {
+				return err
+			}
+			report, err := index.Diff(root)
+			if err != nil {
+				return err
+			}
+			reports = append(reports, report)
+		}
+		if flagValue(flags, "format", "text") == "json" {
+			return json.NewEncoder(ioctx.Out).Encode(reports)
+		}
+		for i, report := range reports {
+			if i > 0 {
+				fmt.Fprintln(ioctx.Out)
+			}
+			renderIndexDiff(ioctx.Out, report)
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown index subcommand %q", args[0])
@@ -116,25 +144,17 @@ func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	}
 	var results []index.Result
 	for _, s := range scopes {
-		root, err := env.ScopeRoot(s)
+		entries, err := loadFreshSearchEntries(env, s)
 		if err != nil {
 			return err
 		}
-		if _, err := index.Load(root); err != nil {
-			if _, rebuildErr := index.RebuildEnv(env, s); rebuildErr != nil {
-				return rebuildErr
-			}
-		}
-		found, err := index.Search(root, index.Query{
+		found := index.SearchEntries(entries, index.Query{
 			Scope:   s,
 			Type:    flagValue(flags, "type", ""),
 			Tag:     flagValue(flags, "tag", ""),
 			Content: query,
 			Limit:   20,
 		})
-		if err != nil {
-			return err
-		}
 		results = append(results, found...)
 	}
 	if flagValue(flags, "format", "text") == "json" {
@@ -146,16 +166,65 @@ func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	return nil
 }
 
+func loadFreshSearchEntries(env paths.Env, scope string) ([]index.Entry, error) {
+	root, err := env.ScopeRoot(scope)
+	if err != nil {
+		return nil, err
+	}
+	db, err := index.Load(root)
+	if err != nil {
+		if _, rebuildErr := index.RebuildEnv(env, scope); rebuildErr != nil {
+			return nil, rebuildErr
+		}
+		db, err = index.Load(root)
+	}
+	if err != nil {
+		return nil, err
+	}
+	entries, _, err := index.FilterFresh(root, db)
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func renderIndexDiff(out interface{ Write([]byte) (int, error) }, report index.DiffReport) {
+	fmt.Fprintf(out, "scope: %s\nstale: %t\ndeleted: %d\nunindexed: %d\nnew: %d\nchanged: %d\n", report.Scope, report.Stale, report.Summary.Deleted, report.Summary.Unindexed, report.Summary.New, report.Summary.Changed)
+	renderIndexDiffItems(out, "deleted", report.Deleted)
+	renderIndexDiffItems(out, "unindexed", report.Unindexed)
+	renderIndexDiffItems(out, "new", report.New)
+	renderIndexDiffItems(out, "changed", report.Changed)
+}
+
+func renderIndexDiffItems(out interface{ Write([]byte) (int, error) }, label string, items []index.DiffItem) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "%s:\n", label)
+	for _, item := range items {
+		fmt.Fprintf(out, "- %s", item.Path)
+		if item.Reason != "" {
+			fmt.Fprintf(out, " (%s)", item.Reason)
+		}
+		fmt.Fprintln(out)
+	}
+}
+
 func runContextPack(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 	if wantsFlagHelpOrLeadingHelp(args) {
 		printContextHelp(ioctx.Out)
 		return nil
 	}
 	flags, positional := splitFlagsWithBooleans(args, map[string]bool{"evidence": true})
+	includeLifecycle, err := knowledge.ParseLifecycleList(flagValue(flags, "include-lifecycle", ""))
+	if err != nil {
+		return err
+	}
 	pack, err := contextpack.Build(env, contextpack.Options{
-		Task:            joinArgs(positional),
-		Stage:           flagValue(flags, "stage", ""),
-		IncludeEvidence: flagValue(flags, "evidence", "") == "true",
+		Task:             joinArgs(positional),
+		Stage:            flagValue(flags, "stage", ""),
+		IncludeLifecycle: includeLifecycle,
+		IncludeEvidence:  flagValue(flags, "evidence", "") == "true",
 	})
 	if err != nil {
 		return err
@@ -168,7 +237,7 @@ func runContextPack(_ context.Context, env paths.Env, ioctx IO, args []string) e
 }
 
 func printContextHelp(out interface{ Write([]byte) (int, error) }) {
-	fmt.Fprintln(out, "usage: worktrail context [--stage <stage>] [--evidence] [--format markdown|json] <task>")
+	fmt.Fprintln(out, "usage: worktrail context [--stage <stage>] [--include-lifecycle <list>] [--evidence] [--format markdown|json] <task>")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Builds a read-only context pack from Worktrail knowledge, state, and pending maintenance hints.")
 }

@@ -15,5 +15,6 @@ worktrail
 .worktrail/raw/
 .worktrail/index/
 .worktrail/logs/
+.worktrail/.cache/
 .worktrail/exports/
 # END WORKTRAIL MANAGED BLOCK

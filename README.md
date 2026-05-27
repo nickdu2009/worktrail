@@ -55,6 +55,8 @@ worktrail review plan --format json
 worktrail candidates diff <candidate-id>
 worktrail promote <candidate-id>
 worktrail index rebuild
+worktrail index diff
+worktrail doctor delete rules/example.md
 worktrail context "current task"
 ```
 
@@ -66,7 +68,7 @@ candidates; use `review`, `promote`, or `merge` for the explicit review step.
 
 `worktrail review plan --format json` emits the read-only agent contract `worktrail.review.plan.v1`. It groups pending semantic candidates into deterministic recommendations: `promote`, `merge`, `discard`, or `needs_human_review`. The command never changes candidate state or formal knowledge; state-changing commands still require explicit user confirmation.
 
-`worktrail context <task>` hides pending evidence by default and reports how many evidence candidates are hidden. Use `worktrail context --evidence <task>` when those evidence candidates need to be included in the Pending Candidates section.
+`worktrail context <task>` hides pending evidence by default and reports how many evidence candidates are hidden. It also skips stale indexed entries instead of surfacing deleted or outdated cached content. Use `worktrail context --evidence <task>` when evidence candidates need to be included in the Pending Candidates section, and use `worktrail index diff` or `worktrail index rebuild` when context reports a stale index.
 
 Stop and session-end hooks now prefer runtime-first capture: they keep writing `state/` and audit logs, but they only create a pending `handoff` candidate when the captured context suggests an actual follow-up is needed. Routine hook noise should no longer accumulate in the default pending inbox.
 
@@ -83,9 +85,11 @@ Formal Markdown frontmatter can optionally declare governance metadata:
 }
 ```
 
-Allowed stages are `requirements`, `design`, `decision`, `implementation`, `validation`, `historical`, and `retired`. Existing documents without this metadata continue to work. Use `worktrail context --stage requirements <task>`, `--stage design`, or `--stage implementation` to bias context section order and item priority for the current work stage.
+Allowed stages are `requirements`, `design`, `decision`, `implementation`, `validation`, `historical`, and `retired`. Existing documents without this metadata continue to work. Use `worktrail context --stage requirements <task>`, `--stage design`, or `--stage implementation` to bias context section order and item priority for the current work stage. Historical and retired knowledge is now treated as lifecycle metadata and is excluded from default context; include it explicitly with `worktrail context --include-lifecycle historical <task>` or `--include-lifecycle historical,retired`. The legacy aliases `worktrail context --stage historical <task>` and `--stage retired <task>` continue to work during the transition.
 
-`worktrail doctor knowledge` checks for knowledge governance drift such as requirements content in `architecture/` or `decisions/`, decisions without a clear Decision section, multiple `source_of_truth` documents for the same topic, superseded documents still referenced from `index.md`, and invalid stage metadata.
+`worktrail doctor knowledge` checks for knowledge governance drift such as requirements content in `architecture/` or `decisions/`, decisions without a clear Decision section, multiple `source_of_truth` documents for the same topic, superseded documents still referenced from `index.md` or `project.md`, stale index entries, and invalid stage metadata. Findings now include concrete hints and, when appropriate, the exact `worktrail index rebuild --scope ...` command to recover.
+
+`worktrail doctor delete <path>` is a read-only preflight for formal knowledge deletion. It reports blocking structured references such as pending candidate targets, `supersedes` / `superseded_by` relationships, and Markdown links from starter docs, plus warning-only plain-text mentions from governance files or candidate bodies.
 
 ## Agent integration support
 

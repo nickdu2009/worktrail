@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nickdu2009/worktrail/internal/knowledge"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
 	"github.com/nickdu2009/worktrail/internal/util"
@@ -30,6 +31,7 @@ type Entry struct {
 	Title          string    `json:"title"`
 	Status         string    `json:"status,omitempty"`
 	Stage          string    `json:"stage,omitempty"`
+	Lifecycle      string    `json:"lifecycle,omitempty"`
 	Topic          string    `json:"topic,omitempty"`
 	SourceOfTruth  bool      `json:"source_of_truth,omitempty"`
 	Supersedes     []string  `json:"supersedes,omitempty"`
@@ -63,6 +65,52 @@ type StatusInfo struct {
 	IndexPath    string    `json:"index_path"`
 	ManifestPath string    `json:"manifest_path"`
 	Entries      int       `json:"entries"`
+}
+
+type DiffSummary struct {
+	Deleted   int `json:"deleted"`
+	Unindexed int `json:"unindexed"`
+	New       int `json:"new"`
+	Changed   int `json:"changed"`
+}
+
+type DiffItem struct {
+	Path   string `json:"path"`
+	Type   string `json:"type,omitempty"`
+	Title  string `json:"title,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type DiffReport struct {
+	Schema      string      `json:"schema"`
+	Scope       string      `json:"scope"`
+	GeneratedAt time.Time   `json:"generated_at,omitempty"`
+	Stale       bool        `json:"stale"`
+	Summary     DiffSummary `json:"summary"`
+	Deleted     []DiffItem  `json:"deleted,omitempty"`
+	Unindexed   []DiffItem  `json:"unindexed,omitempty"`
+	New         []DiffItem  `json:"new,omitempty"`
+	Changed     []DiffItem  `json:"changed,omitempty"`
+}
+
+type HealthInfo struct {
+	Schema           string     `json:"schema"`
+	Scope            string     `json:"scope"`
+	GeneratedAt      time.Time  `json:"generated_at,omitempty"`
+	Stale            bool       `json:"stale"`
+	IndexedEntries   int        `json:"indexed_entries"`
+	FreshEntries     int        `json:"fresh_entries"`
+	MissingFromFS    []DiffItem `json:"missing_from_fs,omitempty"`
+	MissingFromIndex []DiffItem `json:"missing_from_index,omitempty"`
+	Changed          []DiffItem `json:"changed,omitempty"`
+}
+
+type FreshReport struct {
+	Stale          bool       `json:"stale"`
+	IndexedEntries int        `json:"indexed_entries"`
+	FreshEntries   int        `json:"fresh_entries"`
+	Deleted        []DiffItem `json:"deleted,omitempty"`
+	Changed        []DiffItem `json:"changed,omitempty"`
 }
 
 type RebuildOptions struct {
@@ -166,13 +214,17 @@ func Search(root string, query Query) ([]Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	return SearchEntries(db.Entries, query), nil
+}
+
+func SearchEntries(entries []Entry, query Query) []Result {
 	needle := strings.ToLower(strings.TrimSpace(query.Content))
 	tags := append([]string{}, query.Tags...)
 	if query.Tag != "" {
 		tags = append(tags, query.Tag)
 	}
 	var results []Result
-	for _, entry := range db.Entries {
+	for _, entry := range entries {
 		if query.Scope != "" && entry.Scope != query.Scope {
 			continue
 		}
@@ -200,7 +252,7 @@ func Search(root string, query Query) ([]Result, error) {
 	if query.Limit > 0 && len(results) > query.Limit {
 		results = results[:query.Limit]
 	}
-	return results, nil
+	return results
 }
 
 func Load(root string) (DB, error) {
@@ -217,6 +269,167 @@ func Load(root string) (DB, error) {
 		return DB{}, err
 	}
 	return db, nil
+}
+
+func Diff(root string) (DiffReport, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return DiffReport{}, err
+	}
+	scope := inferScope(root)
+	report := DiffReport{
+		Schema: "worktrail.index.diff.v1",
+		Scope:  scope,
+	}
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+		return report, nil
+	} else if err != nil {
+		return DiffReport{}, err
+	}
+	currentEntries, err := scan(root, scope)
+	if err != nil {
+		return DiffReport{}, err
+	}
+	db, err := Load(root)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return DiffReport{}, err
+	}
+	report.GeneratedAt = db.GeneratedAt
+	indexedByPath := make(map[string]Entry, len(db.Entries))
+	currentByPath := make(map[string]Entry, len(currentEntries))
+	for _, entry := range db.Entries {
+		indexedByPath[entry.Path] = entry
+	}
+	for _, entry := range currentEntries {
+		currentByPath[entry.Path] = entry
+	}
+	for path, entry := range indexedByPath {
+		current, ok := currentByPath[path]
+		if !ok {
+			report.Deleted = append(report.Deleted, DiffItem{
+				Path:   path,
+				Type:   entry.Type,
+				Title:  entry.Title,
+				Reason: "indexed file is missing from filesystem",
+			})
+			continue
+		}
+		modTime, statErr := entryModTime(root, current)
+		if statErr != nil {
+			return DiffReport{}, statErr
+		}
+		if !db.GeneratedAt.IsZero() && modTime.After(db.GeneratedAt) {
+			report.Changed = append(report.Changed, DiffItem{
+				Path:   path,
+				Type:   current.Type,
+				Title:  current.Title,
+				Reason: "filesystem file is newer than the index",
+			})
+		}
+	}
+	for path, entry := range currentByPath {
+		if _, ok := indexedByPath[path]; ok {
+			continue
+		}
+		item := DiffItem{
+			Path:   path,
+			Type:   entry.Type,
+			Title:  entry.Title,
+			Reason: "filesystem file is not indexed",
+		}
+		report.Unindexed = append(report.Unindexed, item)
+		modTime, statErr := entryModTime(root, entry)
+		if statErr != nil {
+			return DiffReport{}, statErr
+		}
+		if db.GeneratedAt.IsZero() || modTime.After(db.GeneratedAt) {
+			item.Reason = "filesystem file was created after the last index build"
+			report.New = append(report.New, item)
+		}
+	}
+	sortDiffItems(report.Deleted)
+	sortDiffItems(report.Unindexed)
+	sortDiffItems(report.New)
+	sortDiffItems(report.Changed)
+	report.Summary = DiffSummary{
+		Deleted:   len(report.Deleted),
+		Unindexed: len(report.Unindexed),
+		New:       len(report.New),
+		Changed:   len(report.Changed),
+	}
+	report.Stale = report.Summary.Deleted > 0 || report.Summary.Unindexed > 0 || report.Summary.Changed > 0
+	return report, nil
+}
+
+func Health(root string) (HealthInfo, error) {
+	report, err := Diff(root)
+	if err != nil {
+		return HealthInfo{}, err
+	}
+	indexedEntries := 0
+	if !report.GeneratedAt.IsZero() {
+		db, loadErr := Load(root)
+		if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
+			return HealthInfo{}, loadErr
+		}
+		indexedEntries = len(db.Entries)
+	}
+	freshEntries := indexedEntries - len(report.Deleted) - len(report.Changed)
+	if freshEntries < 0 {
+		freshEntries = 0
+	}
+	return HealthInfo{
+		Schema:           "worktrail.index.health.v1",
+		Scope:            report.Scope,
+		GeneratedAt:      report.GeneratedAt,
+		Stale:            report.Stale,
+		IndexedEntries:   indexedEntries,
+		FreshEntries:     freshEntries,
+		MissingFromFS:    append([]DiffItem{}, report.Deleted...),
+		MissingFromIndex: append([]DiffItem{}, report.Unindexed...),
+		Changed:          append([]DiffItem{}, report.Changed...),
+	}, nil
+}
+
+func FilterFresh(root string, db DB) ([]Entry, FreshReport, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, FreshReport{}, err
+	}
+	report := FreshReport{
+		IndexedEntries: len(db.Entries),
+	}
+	var fresh []Entry
+	for _, entry := range db.Entries {
+		modTime, modErr := entryModTime(root, entry)
+		if errors.Is(modErr, os.ErrNotExist) {
+			report.Deleted = append(report.Deleted, DiffItem{
+				Path:   entry.Path,
+				Type:   entry.Type,
+				Title:  entry.Title,
+				Reason: "indexed file is missing from filesystem",
+			})
+			continue
+		}
+		if modErr != nil {
+			return nil, FreshReport{}, modErr
+		}
+		if !db.GeneratedAt.IsZero() && modTime.After(db.GeneratedAt) {
+			report.Changed = append(report.Changed, DiffItem{
+				Path:   entry.Path,
+				Type:   entry.Type,
+				Title:  entry.Title,
+				Reason: "filesystem file is newer than the index",
+			})
+			continue
+		}
+		fresh = append(fresh, entry)
+	}
+	sortDiffItems(report.Deleted)
+	sortDiffItems(report.Changed)
+	report.FreshEntries = len(fresh)
+	report.Stale = len(report.Deleted) > 0 || len(report.Changed) > 0
+	return fresh, report, nil
 }
 
 func scan(root, scope string) ([]Entry, error) {
@@ -284,6 +497,7 @@ func buildEntry(root, path, rel, scope string) (Entry, bool, error) {
 		Title:         stringMeta(meta, "title", inferTitle(rel, body)),
 		Status:        stringMeta(meta, "status", ""),
 		Stage:         stringMeta(meta, "stage", ""),
+		Lifecycle:     knowledge.NormalizeLifecycle(stringMeta(meta, "lifecycle", ""), stringMeta(meta, "stage", ""), stringMeta(meta, "status", "")),
 		Topic:         stringMeta(meta, "topic", ""),
 		SourceOfTruth: boolMeta(meta, "source_of_truth"),
 		Supersedes:    stringListMeta(meta, "supersedes"),
@@ -520,7 +734,7 @@ func scoreEntry(entry Entry, needle string) float64 {
 	if entry.SourceOfTruth {
 		score += 5
 	}
-	if len(entry.SupersededBy) > 0 || entry.Stage == "historical" || entry.Stage == "retired" {
+	if len(entry.SupersededBy) > 0 || knowledge.IsNonCurrentLifecycle(entry.Lifecycle) || entry.Stage == "historical" || entry.Stage == "retired" {
 		score -= 5
 	}
 	age := time.Since(entry.UpdatedAt)
@@ -536,6 +750,20 @@ func scoreEntry(entry Entry, needle string) float64 {
 		score += 1
 	}
 	return score
+}
+
+func entryModTime(root string, entry Entry) (time.Time, error) {
+	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(entry.Path)))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime().UTC(), nil
+}
+
+func sortDiffItems(items []DiffItem) {
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Path < items[j].Path
+	})
 }
 
 func RebuildEnv(env paths.Env, scope string) (Manifest, error) {

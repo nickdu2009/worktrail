@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
 	"github.com/nickdu2009/worktrail/internal/index"
+	"github.com/nickdu2009/worktrail/internal/knowledge"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
 )
@@ -36,11 +38,13 @@ type knowledgeDoctorSummary struct {
 }
 
 type knowledgeFinding struct {
-	Code     string `json:"code"`
-	Severity string `json:"severity"`
-	Scope    string `json:"scope,omitempty"`
-	Path     string `json:"path,omitempty"`
-	Message  string `json:"message"`
+	Code     string   `json:"code"`
+	Severity string   `json:"severity"`
+	Scope    string   `json:"scope,omitempty"`
+	Path     string   `json:"path,omitempty"`
+	Message  string   `json:"message"`
+	Hint     string   `json:"hint,omitempty"`
+	Commands []string `json:"commands,omitempty"`
 }
 
 type knowledgeDoc struct {
@@ -51,6 +55,8 @@ type knowledgeDoc struct {
 	Title         string
 	Body          string
 	Stage         string
+	LifecycleMeta string
+	Lifecycle     string
 	Status        string
 	Topic         string
 	SourceOfTruth bool
@@ -115,13 +121,23 @@ func buildKnowledgeDoctorReport(env paths.Env, scope string, strict bool) knowle
 		docs = append(docs, scanned...)
 	}
 	report.checkDocs(docs)
+	report.checkIndexHealth(env, scopes)
 	report.checkWriteEscapes(env, docs)
 	report.OK = report.Summary.Errors == 0 && (!strict || report.Summary.Warnings == 0)
 	return report
 }
 
 func (r *knowledgeDoctorReport) add(code, severity, scope, path, message string) {
-	r.Findings = append(r.Findings, knowledgeFinding{Code: code, Severity: severity, Scope: scope, Path: path, Message: message})
+	hint, commands := knowledgeFindingRemediation(code, scope, path)
+	r.Findings = append(r.Findings, knowledgeFinding{
+		Code:     code,
+		Severity: severity,
+		Scope:    scope,
+		Path:     path,
+		Message:  message,
+		Hint:     hint,
+		Commands: commands,
+	})
 	if severity == "error" {
 		r.Summary.Errors++
 	} else {
@@ -175,6 +191,8 @@ func scanKnowledgeDocs(root, scope string) ([]knowledgeDoc, error) {
 			Title:         knowledgeStringMeta(meta, "title", rel),
 			Body:          body,
 			Stage:         strings.TrimSpace(knowledgeStringMeta(meta, "stage", "")),
+			LifecycleMeta: strings.TrimSpace(knowledgeStringMeta(meta, "lifecycle", "")),
+			Lifecycle:     knowledge.NormalizeLifecycle(knowledgeStringMeta(meta, "lifecycle", ""), knowledgeStringMeta(meta, "stage", ""), knowledgeStringMeta(meta, "status", "")),
 			Status:        strings.TrimSpace(knowledgeStringMeta(meta, "status", "")),
 			Topic:         strings.TrimSpace(knowledgeStringMeta(meta, "topic", "")),
 			SourceOfTruth: knowledgeBoolMeta(meta, "source_of_truth"),
@@ -201,11 +219,18 @@ func shouldSkipKnowledgeDoctorDir(path, root, name string) bool {
 func (r *knowledgeDoctorReport) checkDocs(docs []knowledgeDoc) {
 	sotByTopic := map[string][]knowledgeDoc{}
 	supersededBy := map[string][]string{}
+	docsByScopePath := map[string]bool{}
+	for _, doc := range docs {
+		docsByScopePath[doc.Scope+"\x00"+doc.Path] = true
+	}
 	for _, doc := range docs {
 		if doc.Stage != "" && !validKnowledgeStage(doc.Stage) {
 			r.add("STAGE001", "error", doc.Scope, doc.Path, "stage metadata is not one of requirements, design, decision, implementation, validation, historical, retired")
 		}
-		if doc.SourceOfTruth && (doc.Stage == "historical" || doc.Stage == "retired" || doc.Status == "retired") {
+		if doc.LifecycleMeta != "" && !knowledge.IsValidLifecycle(doc.LifecycleMeta) {
+			r.add("LIFE001", "error", doc.Scope, doc.Path, "lifecycle metadata is not one of current, historical, or retired")
+		}
+		if doc.SourceOfTruth && knowledge.IsNonCurrentLifecycle(doc.Lifecycle) {
 			r.add("STAGE002", "error", doc.Scope, doc.Path, "retired or historical knowledge cannot be source_of_truth")
 		}
 		if doc.SourceOfTruth && doc.Topic == "" {
@@ -219,12 +244,18 @@ func (r *knowledgeDoctorReport) checkDocs(docs []knowledgeDoc) {
 			old = filepath.ToSlash(strings.TrimSpace(old))
 			if old != "" {
 				supersededBy[doc.Scope+"\x00"+old] = append(supersededBy[doc.Scope+"\x00"+old], doc.Path)
+				if !docsByScopePath[doc.Scope+"\x00"+old] {
+					r.add("REF001", "warning", doc.Scope, doc.Path, "supersedes references missing document "+old)
+				}
 			}
 		}
 		for _, by := range doc.SupersededBy {
 			by = filepath.ToSlash(strings.TrimSpace(by))
 			if by != "" {
 				supersededBy[doc.Scope+"\x00"+doc.Path] = append(supersededBy[doc.Scope+"\x00"+doc.Path], by)
+				if !docsByScopePath[doc.Scope+"\x00"+by] {
+					r.add("REF002", "warning", doc.Scope, doc.Path, "superseded_by references missing document "+by)
+				}
 			}
 		}
 		r.checkDocShape(doc)
@@ -243,13 +274,13 @@ func (r *knowledgeDoctorReport) checkDocs(docs []knowledgeDoc) {
 			r.add("SUPER002", "error", doc.Scope, doc.Path, "superseded document is still marked source_of_truth")
 		}
 	}
-	r.checkStarterIndex(docs, supersededBy)
+	r.checkStarterRefs(docs, supersededBy)
 }
 
 func (r *knowledgeDoctorReport) checkWriteEscapes(env paths.Env, docs []knowledgeDoc) {
 	candidateTrails := appliedCandidateTargets(env)
 	for _, doc := range docs {
-		if !isFormalKnowledgePath(doc.Path) {
+		if !knowledge.IsFormalKnowledgePath(doc.Path) {
 			continue
 		}
 		if !candidateTrails[doc.Scope+"\x00"+doc.Path] {
@@ -261,7 +292,7 @@ func (r *knowledgeDoctorReport) checkWriteEscapes(env paths.Env, docs []knowledg
 	}
 	for _, item := range gitFormalStatus(env.ProjectRoot) {
 		path := strings.TrimPrefix(filepath.ToSlash(item.Path), ".worktrail/")
-		if !isFormalKnowledgePath(path) {
+		if !knowledge.IsFormalKnowledgePath(path) {
 			continue
 		}
 		switch item.Status {
@@ -332,19 +363,6 @@ func gitFormalStatus(projectRoot string) []gitStatusItem {
 	return items
 }
 
-func isFormalKnowledgePath(path string) bool {
-	path = filepath.ToSlash(strings.TrimSpace(path))
-	if path == "project.md" || path == "index.md" {
-		return true
-	}
-	for _, prefix := range []string{"architecture/", "decisions/", "requirements/", "workflows/", "validation/", "integrations/", "glossary/", "rules/", "lessons/", "prompts/"} {
-		if strings.HasPrefix(path, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func (r *knowledgeDoctorReport) checkDocShape(doc knowledgeDoc) {
 	text := strings.ToLower(doc.Title + "\n" + doc.Body)
 	signals := requirementSignalCount(text)
@@ -363,19 +381,26 @@ func (r *knowledgeDoctorReport) checkDocShape(doc knowledgeDoc) {
 	}
 }
 
-func (r *knowledgeDoctorReport) checkStarterIndex(docs []knowledgeDoc, supersededBy map[string][]string) {
-	bodyByScope := map[string]string{}
+func (r *knowledgeDoctorReport) checkStarterRefs(docs []knowledgeDoc, supersededBy map[string][]string) {
+	bodyByScope := map[string]map[string]string{}
 	for _, doc := range docs {
-		if doc.Path == "index.md" {
-			bodyByScope[doc.Scope] = doc.Body
+		if doc.Path != "index.md" && doc.Path != "project.md" {
+			continue
 		}
+		if bodyByScope[doc.Scope] == nil {
+			bodyByScope[doc.Scope] = map[string]string{}
+		}
+		bodyByScope[doc.Scope][doc.Path] = doc.Body
 	}
 	for _, doc := range docs {
 		if len(supersededBy[doc.Scope+"\x00"+doc.Path]) == 0 {
 			continue
 		}
-		if strings.Contains(bodyByScope[doc.Scope], doc.Path) {
+		if strings.Contains(bodyByScope[doc.Scope]["index.md"], doc.Path) {
 			r.add("SUPER001", "warning", doc.Scope, "index.md", "starter knowledge index still references superseded document "+doc.Path)
+		}
+		if strings.Contains(bodyByScope[doc.Scope]["project.md"], doc.Path) {
+			r.add("SUPER003", "warning", doc.Scope, "project.md", "project knowledge overview still references superseded document "+doc.Path)
 		}
 	}
 }
@@ -415,6 +440,44 @@ func validKnowledgeStage(stage string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (r *knowledgeDoctorReport) checkIndexHealth(env paths.Env, scopes []string) {
+	for _, scope := range scopes {
+		root, err := env.ScopeRoot(scope)
+		if err != nil || root == "" {
+			continue
+		}
+		if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			r.add("IDX000", "warning", scope, "", err.Error())
+			continue
+		}
+		health, err := index.Health(root)
+		if err != nil {
+			r.add("IDX000", "warning", scope, "", err.Error())
+			continue
+		}
+		for _, item := range health.MissingFromFS {
+			if !knowledge.IsFormalKnowledgePath(item.Path) {
+				continue
+			}
+			r.add("IDX001", "warning", scope, item.Path, "formal knowledge is still indexed but missing from filesystem")
+		}
+		for _, item := range health.MissingFromIndex {
+			if !knowledge.IsFormalKnowledgePath(item.Path) {
+				continue
+			}
+			r.add("IDX002", "warning", scope, item.Path, "formal knowledge exists on disk but is missing from the current index")
+		}
+		for _, item := range health.Changed {
+			if !knowledge.IsFormalKnowledgePath(item.Path) {
+				continue
+			}
+			r.add("IDX003", "warning", scope, item.Path, "formal knowledge is newer than the current index")
+		}
 	}
 }
 
@@ -478,5 +541,45 @@ func renderKnowledgeDoctorText(out io.Writer, report knowledgeDoctorReport) {
 		} else {
 			fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", finding.Severity, finding.Code, finding.Scope, finding.Message)
 		}
+		if finding.Hint != "" {
+			fmt.Fprintf(out, "  hint: %s\n", finding.Hint)
+		}
+		for _, command := range finding.Commands {
+			fmt.Fprintf(out, "  next: %s\n", command)
+		}
 	}
+}
+
+func knowledgeFindingRemediation(code, scope, path string) (string, []string) {
+	rebuild := "worktrail index rebuild --scope " + normalizeKnowledgeScope(scope)
+	switch code {
+	case "DEC001":
+		return `add a markdown heading named "Decision"; if you already have "Migration Decision", rename it to "Decision"`, nil
+	case "STAGE001":
+		return "use one of requirements, design, decision, implementation, validation, historical, or retired", nil
+	case "LIFE001":
+		return "use one of current, historical, or retired for lifecycle metadata", nil
+	case "SUPER001":
+		return "remove the stale reference from index.md or update it to the superseding document", nil
+	case "SUPER003":
+		return "remove the stale reference from project.md or update it to the superseding document", nil
+	case "REF001", "REF002":
+		return "update the supersedes metadata to point at an existing document or remove the broken reference", nil
+	case "ESCAPE005":
+		return "prefer retiring the applied candidate trail instead of deleting the formal document directly", nil
+	case "IDX001", "IDX002", "IDX003":
+		return "rebuild the local text index so context and search read the current filesystem state", []string{rebuild}
+	case "ESCAPE001", "ESCAPE002", "ESCAPE003":
+		return "recover through Worktrail-managed note/promote/merge flow instead of editing formal knowledge directly", nil
+	default:
+		return "", nil
+	}
+}
+
+func normalizeKnowledgeScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return "project"
+	}
+	return scope
 }

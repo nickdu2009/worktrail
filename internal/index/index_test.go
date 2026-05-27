@@ -107,6 +107,83 @@ func TestRebuildStatusSearch(t *testing.T) {
 	}
 }
 
+func TestDiffHealthAndFilterFresh(t *testing.T) {
+	root := t.TempDir()
+	mustWriteJSON(t, filepath.Join(root, "config.json"), map[string]any{"scope": "project"})
+	mustWriteDoc(t, filepath.Join(root, "rules", "current.md"), map[string]any{
+		"id":    "current-rule",
+		"title": "Current Rule",
+	}, "current body")
+	mustWriteDoc(t, filepath.Join(root, "rules", "deleted.md"), map[string]any{
+		"id":    "deleted-rule",
+		"title": "Deleted Rule",
+	}, "deleted body")
+
+	rebuildAt := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := Rebuild(root, RebuildOptions{Now: rebuildAt}); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	if err := os.Remove(filepath.Join(root, "rules", "deleted.md")); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteDoc(t, filepath.Join(root, "rules", "new.md"), map[string]any{
+		"id":    "new-rule",
+		"title": "New Rule",
+	}, "new body")
+	later := rebuildAt.Add(2 * time.Hour)
+	currentPath := filepath.Join(root, "rules", "current.md")
+	if err := os.Chtimes(currentPath, later, later); err != nil {
+		t.Fatal(err)
+	}
+	newPath := filepath.Join(root, "rules", "new.md")
+	if err := os.Chtimes(newPath, later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Diff(root)
+	if err != nil {
+		t.Fatalf("Diff() error = %v", err)
+	}
+	if !report.Stale || report.Summary.Deleted != 1 || report.Summary.Unindexed != 1 || report.Summary.New != 1 || report.Summary.Changed != 1 {
+		t.Fatalf("unexpected diff report: %+v", report)
+	}
+	if report.Deleted[0].Path != "rules/deleted.md" || report.Unindexed[0].Path != "rules/new.md" || report.Changed[0].Path != "rules/current.md" {
+		t.Fatalf("unexpected diff paths: %+v", report)
+	}
+
+	health, err := Health(root)
+	if err != nil {
+		t.Fatalf("Health() error = %v", err)
+	}
+	if !health.Stale || health.IndexedEntries != 2 || health.FreshEntries != 0 || len(health.MissingFromFS) != 1 || len(health.MissingFromIndex) != 1 || len(health.Changed) != 1 {
+		t.Fatalf("unexpected health report: %+v", health)
+	}
+
+	db, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	fresh, freshReport, err := FilterFresh(root, db)
+	if err != nil {
+		t.Fatalf("FilterFresh() error = %v", err)
+	}
+	if len(fresh) != 0 || !freshReport.Stale || freshReport.IndexedEntries != 2 || len(freshReport.Deleted) != 1 || len(freshReport.Changed) != 1 {
+		t.Fatalf("unexpected fresh filter result: fresh=%+v report=%+v", fresh, freshReport)
+	}
+}
+
+func TestSearchEntriesUsesProvidedEntries(t *testing.T) {
+	entries := []Entry{
+		{ID: "rule", Scope: "project", Type: "rule", Title: "Rule", Content: "needle", UpdatedAt: time.Now().UTC()},
+		{ID: "other", Scope: "project", Type: "rule", Title: "Other", Content: "different", UpdatedAt: time.Now().UTC().Add(-time.Hour)},
+	}
+	results := SearchEntries(entries, Query{Scope: "project", Content: "needle", Limit: 5})
+	if len(results) != 1 || results[0].Entry.ID != "rule" {
+		t.Fatalf("SearchEntries() = %+v, want rule", results)
+	}
+}
+
 func mustWriteDoc(t *testing.T, path string, meta any, body string) {
 	t.Helper()
 	b, err := store.RenderMarkdown(meta, body)
