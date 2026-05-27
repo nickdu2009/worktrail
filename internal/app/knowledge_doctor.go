@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -365,18 +366,19 @@ func gitFormalStatus(projectRoot string) []gitStatusItem {
 
 func (r *knowledgeDoctorReport) checkDocShape(doc knowledgeDoc) {
 	text := strings.ToLower(doc.Title + "\n" + doc.Body)
-	signals := requirementSignalCount(text)
+	bodyLower := strings.ToLower(doc.Body)
+	signals := requirementHeadingSignalCount(bodyLower)
 	switch doc.Type {
 	case "decision":
 		if !hasMarkdownHeading(text, "decision") {
 			r.add("DEC001", "warning", doc.Scope, doc.Path, "decision document is missing a clear Decision section")
 		}
 		if signals >= 2 {
-			r.add("REQ001", "warning", doc.Scope, doc.Path, "requirements-like content appears under decisions/; consider requirements/ for PRD, MVP scope, user goals, or acceptance intent")
+			r.add("REQ001", "warning", doc.Scope, doc.Path, "requirements-like content appears under decisions/ (signals detected in H2/H3/H4 section headings); consider requirements/ for PRD, MVP scope, user goals, or acceptance intent")
 		}
 	case "architecture":
-		if signals >= 3 {
-			r.add("ARCH001", "warning", doc.Scope, doc.Path, "architecture document appears to mix substantial PRD, MVP scope, user problem, or acceptance intent")
+		if signals >= 2 {
+			r.add("ARCH001", "warning", doc.Scope, doc.Path, "architecture document appears to mix substantial PRD, MVP scope, user problem, or acceptance intent (signals detected in H2/H3/H4 section headings)")
 		}
 	}
 }
@@ -405,19 +407,73 @@ func (r *knowledgeDoctorReport) checkStarterRefs(docs []knowledgeDoc, superseded
 	}
 }
 
-func requirementSignalCount(text string) int {
-	signals := []string{
-		"prd", "mvp", "out of scope", "out-of-scope", "persona", "primary user",
-		"user goal", "user problem", "workflow problem", "acceptance criteria",
-		"business capability", "failure exit", "requirement-stage", "requirements clarification",
+// requirementSignals are phrases that, when they show up in section headings,
+// indicate the document is carrying PRD-style requirements content. Each entry
+// is compiled into a word-boundary regex so substrings like "personal-accident"
+// do not collide with "persona" and "personality" does not collide with "persona".
+var requirementSignals = []string{
+	"prd", "mvp", "out of scope", "out-of-scope", "persona", "primary user",
+	"user goal", "user problem", "workflow problem", "acceptance criteria",
+	"business capability", "failure exit", "requirement-stage", "requirements clarification",
+}
+
+var requirementSignalPatterns = func() []*regexp.Regexp {
+	patterns := make([]*regexp.Regexp, 0, len(requirementSignals))
+	for _, signal := range requirementSignals {
+		// Allow an optional trailing "s" for English plurals (e.g. persona -> personas,
+		// user goal -> user goals) without matching unrelated longer words like
+		// "personal-accident" or "personality".
+		patterns = append(patterns, regexp.MustCompile(`(?i)(?:^|[^a-z0-9_-])`+regexp.QuoteMeta(signal)+`s?(?:$|[^a-z0-9_-])`))
+	}
+	return patterns
+}()
+
+// requirementHeadingSignalCount counts how many H2/H3/H4 section headings in
+// the document body contain at least one PRD-style signal. H1 is excluded on
+// purpose: a decision document is allowed to mention "primary user" in its own
+// title (e.g. "Delivery Case As Primary User Entrypoint") without being
+// flagged as smuggling requirements content. Counting headings (rather than
+// distinct signals) keeps documents like "MVP scope / MVP must-have / MVP
+// non-goals / MVP boundary" classified as PRD-heavy even though they only use
+// one signal phrase.
+func requirementHeadingSignalCount(bodyLower string) int {
+	headings := collectSectionHeadings(bodyLower)
+	if len(headings) == 0 {
+		return 0
 	}
 	count := 0
-	for _, signal := range signals {
-		if strings.Contains(text, signal) {
-			count++
+	for _, heading := range headings {
+		for _, re := range requirementSignalPatterns {
+			if re.MatchString(heading) {
+				count++
+				break
+			}
 		}
 	}
 	return count
+}
+
+// collectSectionHeadings returns the heading text of every H2/H3/H4 line in the
+// body. The body must already be lower-cased. H1 lines are skipped because
+// the document title itself is not a section heading.
+func collectSectionHeadings(bodyLower string) []string {
+	var out []string
+	for _, line := range strings.Split(bodyLower, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "##") {
+			continue
+		}
+		// Skip H5+ as well; we only care about substantial section headings.
+		if strings.HasPrefix(trimmed, "#####") {
+			continue
+		}
+		text := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
+		if text == "" {
+			continue
+		}
+		out = append(out, text)
+	}
+	return out
 }
 
 func hasMarkdownHeading(text, heading string) bool {

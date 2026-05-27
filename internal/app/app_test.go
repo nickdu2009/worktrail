@@ -1152,7 +1152,16 @@ func TestDoctorKnowledgeDetectsGovernanceRisks(t *testing.T) {
 	runApp(t, &out, &errb, "init")
 
 	writeTextFile(t, filepath.Join(project, ".worktrail", "index.md"), "# Worktrail Project Index\n\n- `architecture/old.md`\n")
-	writeTextFile(t, filepath.Join(project, ".worktrail", "architecture", "old.md"), "# Old Architecture\n\nPRD notes, MVP boundary, user problem, and acceptance criteria mixed into architecture.")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "architecture", "old.md"), `# Old Architecture
+
+## MVP scope
+
+PRD notes, MVP boundary, user problem mixed into architecture.
+
+## Acceptance criteria
+
+Detailed acceptance criteria belong in requirements/, not architecture/.
+`)
 	writeTextFile(t, filepath.Join(project, ".worktrail", "requirements", "new.md"), `---worktrail
 {
   "stage": "requirements",
@@ -1186,7 +1195,13 @@ Conflicting source of truth.
 
 # Mixed Decision
 
-This PRD describes MVP boundary, out-of-scope behavior, user goal, and acceptance criteria but has no decision section.
+## PRD context
+
+This describes MVP boundary, out-of-scope behavior, user goal, and acceptance criteria.
+
+## Acceptance criteria
+
+Acceptance criteria belong in requirements/, not decisions/.
 `)
 
 	out.Reset()
