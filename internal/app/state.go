@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/nickdu2009/worktrail/internal/handoff"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	wtstate "github.com/nickdu2009/worktrail/internal/state"
 )
@@ -110,18 +112,44 @@ func runState(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 				return err
 			}
 		}
+		toHandoff := flagValue(flags, "to", "") == "handoff"
+		var handoffRecord *handoff.Record
+		if toHandoff {
+			cap, err := wtstate.Show(env, wtstate.ShowOptions{Scope: scope, ID: id, Directory: wtstate.DirActive})
+			if err != nil {
+				return err
+			}
+			rec, err := handoff.Create(env, handoff.CreateOptions{
+				Scope:         scope,
+				Title:         cap.State.Title,
+				Summary:       joinArgs(positional),
+				TaskID:        wtstate.TaskID(cap),
+				SourceStateID: cap.State.ID,
+				Body:          renderHandoffRecordBody(cap.State.Title, joinArgs(positional), &cap, projectedArchivedStatePath(env, scope, cap.State.ID), nil),
+				Tags:          []string{"handoff", "state-close"},
+				Actor:         "cli:state-close",
+			})
+			if err != nil {
+				return handoffWriteError(env, scope, err)
+			}
+			handoffRecord = &rec
+		}
 		result, err := wtstate.Close(env, wtstate.CloseOptions{
 			Scope:   scope,
 			ID:      id,
 			Summary: joinArgs(positional),
-			Handoff: flagValue(flags, "to", "") == "handoff",
+			Handoff: toHandoff,
 			Actor:   "cli:state-close",
 		})
 		if err != nil {
 			return err
 		}
-		if result.HandoffBody != "" {
-			fmt.Fprintln(ioctx.Out, result.HandoffBody)
+		if toHandoff {
+			if handoffRecord == nil {
+				return handoffWriteError(env, scope, fmt.Errorf("handoff was not created"))
+			}
+			fmt.Fprintf(ioctx.Out, "%s\t%s\n", result.Capsule.State.ID, result.Capsule.Path)
+			fmt.Fprintf(ioctx.Out, "%s\t%s\n", handoffRecord.Meta.ID, handoffRecord.Path)
 			return nil
 		}
 		return printState(ioctx, result.Capsule, flagValue(flags, "format", "text"))
@@ -165,14 +193,14 @@ func runState(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 }
 
 func latestStateID(env paths.Env, scope string) (string, error) {
-	items, err := wtstate.List(env, wtstate.ListOptions{Scope: scope, Directory: wtstate.DirActive})
+	cap, err := wtstate.LatestActive(env, scope)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errors.New("no active state found")
+		}
 		return "", err
 	}
-	if len(items) == 0 {
-		return "", errors.New("no active state found")
-	}
-	return items[0].State.ID, nil
+	return cap.State.ID, nil
 }
 
 func printState(ioctx IO, cap wtstate.Capsule, format string) error {
@@ -187,14 +215,14 @@ func printStateHelp(out interface{ Write([]byte) (int, error) }) {
 	fmt.Fprintln(out, "usage: worktrail state <start|update|checkpoint|inject|close|archive|list|show> [options]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "subcommands:")
-	fmt.Fprintln(out, "  start <title>                 create an active state capsule")
-	fmt.Fprintln(out, "  update [--id latest] <note>    append progress to an active state")
-	fmt.Fprintln(out, "  checkpoint [--id latest]       write a checkpoint from active state")
+	fmt.Fprintln(out, "  start <title>                  create the current active work log")
+	fmt.Fprintln(out, "  update [--id latest] <note>    append progress to the active work log")
+	fmt.Fprintln(out, "  checkpoint [--id latest]       write a recovery checkpoint")
 	fmt.Fprintln(out, "  inject [--id latest] <task>    inject task instructions into state")
-	fmt.Fprintln(out, "  close [--id latest] <summary>  close active state")
-	fmt.Fprintln(out, "  archive <id>                   archive a state capsule")
-	fmt.Fprintln(out, "  list [--active]                list state capsules")
-	fmt.Fprintln(out, "  show <id>                      print a state capsule")
+	fmt.Fprintln(out, "  close [--id latest] [--to handoff] <summary>  close the active work log")
+	fmt.Fprintln(out, "  archive <id>                   mark a closed state as archived")
+	fmt.Fprintln(out, "  list [--active]                list active and historical state records")
+	fmt.Fprintln(out, "  show <id>                      print a state record")
 }
 
 func defaultStateBody(title string) string {

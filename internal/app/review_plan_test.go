@@ -500,7 +500,7 @@ func TestReviewApplyCandidatesAppliesBatchActionsAndRebuildsIndex(t *testing.T) 
 	assertCandidateStatus(t, manager, "batch-promote-1", candidate.StatusPromoted)
 	assertCandidateStatus(t, manager, "batch-promote-2", candidate.StatusPromoted)
 	text := runApp(t, &out, &errb, "context", "Promoted body one")
-	if !strings.Contains(text, "Promoted body one.") {
+	if !strings.Contains(text, "rules/batch-promote-1.md") {
 		t.Fatalf("context did not see promoted doc after apply-candidates rebuild:\n%s", text)
 	}
 

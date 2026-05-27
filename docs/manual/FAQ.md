@@ -6,7 +6,7 @@
 ## Worktrail 是什么？
 <div class="title-en">What Is Worktrail?</div>
 
-Worktrail 是一个 local-first 的 AI coding session knowledge and state layer。它帮助 Agent 在任务开始前读取项目知识和状态，在长任务中保留进度，在任务结束或切换工具前留下 handoff，并把确认过的经验沉淀成可 review 的知识候选。
+Worktrail 是一个 local-first 的文档知识库、工作记录和交接工具。它帮助 Agent 在任务开始前读取项目知识和状态，在长任务中保留进度，在任务结束或切换工具前留下 durable handoff，并把确认过的经验沉淀成可 review 的知识候选。
 
 它不是 TUI、Web UI、daemon、向量数据库或后台服务。
 
@@ -66,7 +66,19 @@ worktrail review --all
 worktrail handoff "summary, validation, risks, open questions, and next step"
 ```
 
-handoff 是 pending operational candidate，不会直接进入正式知识。
+`worktrail handoff` 会直接写入 `.worktrail/handoffs/` 下的真实交接记录；自动 hooks 只会在需要时起草 pending handoff candidate。
+
+## 什么时候用 `resume`？
+<div class="title-en">When Should I Use resume</div>
+
+当你在新 session 里接上一个任务，不想手工拼 `context`、`state show` 和 handoff 文件时使用：
+
+```bash
+worktrail resume
+worktrail resume "continue review follow-up"
+```
+
+`resume` 会基于最近 active state 和最近 durable handoff 创建一个新的 active state，作为新的恢复入口。
 
 ## Cursor 会自动使用 Worktrail 吗？
 <div class="title-en">Does Cursor Use Worktrail Automatically?</div>

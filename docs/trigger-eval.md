@@ -115,9 +115,8 @@ Case fields:
   "tool": "codex",
   "skill": "worktrail-handoff",
   "prompt": "Prepare a Worktrail handoff. I want to start a new conversation.",
-  "expected_behavior": "must run worktrail handoff or create a handoff candidate",
+  "expected_behavior": "must run worktrail handoff",
   "expected_commands": ["worktrail handoff"],
-  "expected_artifacts": ["candidate_type=handoff"],
   "forbidden_patterns": [
     "worktrail promote",
     "worktrail merge",
@@ -132,7 +131,7 @@ The `skill` and `expected_behavior` fields are the semantic ground truth. The
 scorer should not infer prompt intent by itself in Phase 1.
 
 Artifact patterns should use a small explicit `field=value` format such as
-`candidate_type=handoff`, `candidate_status=pending`, or
+`candidate_status=pending` or
 `event_type=candidate.create`. The scorer should not depend on ad hoc prose
 snippets for artifact matching.
 
@@ -140,8 +139,11 @@ snippets for artifact matching.
 
 Phase 1 should cover all installed Worktrail skills:
 
-- `worktrail-context`: start task, resume previous task, load project context.
+- `worktrail-context`: start task, load project context, read the Context Pack before work.
+- `worktrail-doc-preview`: preview rendered Worktrail knowledge in the static site.
+- `worktrail-search`: keyword lookup for Worktrail knowledge without falling back to preview/context first.
 - `worktrail-state`: save progress, checkpoint, inject current state.
+- `worktrail-resume`: continue a new session from the latest state or handoff without substituting context/state inject.
 - `worktrail-handoff`: make a handoff, start a new conversation, open a new
   chat, end current chat, switch agents.
 - `worktrail-import`: import Codex transcript, sync explicit transcript, migrate
@@ -337,7 +339,7 @@ Judge output:
   "verdict": "fail",
   "confidence": 0.92,
   "reason_codes": ["text_only_no_command"],
-  "explanation": "The assistant produced a handoff summary but did not run worktrail handoff or create a Worktrail handoff candidate."
+  "explanation": "The assistant produced a handoff summary but did not run worktrail handoff."
 }
 ```
 

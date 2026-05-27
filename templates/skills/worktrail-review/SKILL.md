@@ -27,4 +27,4 @@ Never promote, merge, or discard `transcript_notes` from review actions; they ar
 
 Never promote, merge, or discard `migration_source` or legacy KDD split-source candidates directly from the review plan. They are evidence-like sources and should remain for the evidence lifecycle workflow.
 
-Never promote, merge, discard, restore, retire, delete, or replace from hooks or default MCP tools.
+Never promote, merge, discard, restore, retire, delete, or replace from hooks or any implicit runtime automation.

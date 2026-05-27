@@ -298,6 +298,10 @@ func loadOrRebuild(root, scope string) ([]index.Entry, IndexHealth, error) {
 }
 
 func itemFromEntry(entry index.Entry, supersededBy []string) Item {
+	content := ""
+	if entry.Type == "state" || entry.Type == "handoff" {
+		content = trimContent(entry.Content)
+	}
 	return Item{
 		Scope:         entry.Scope,
 		Type:          entry.Type,
@@ -310,7 +314,7 @@ func itemFromEntry(entry index.Entry, supersededBy []string) Item {
 		SourceOfTruth: entry.SourceOfTruth,
 		SupersededBy:  append([]string{}, supersededBy...),
 		Tags:          entry.Tags,
-		Content:       trimContent(entry.Content),
+		Content:       content,
 		UpdatedAt:     entry.UpdatedAt,
 		Unapproved:    entry.Type == "candidate" && entry.Status == "pending",
 	}
@@ -337,14 +341,14 @@ func sectionSpecsForStage(stage string, includeEvidence bool) []sectionSpec {
 		"rules":        {"Rules", func(e index.Entry) bool { return e.Type == "rule" }},
 		"pending":      {"Pending Candidates", func(e index.Entry) bool { return pendingCandidateVisible(e, includeEvidence) }},
 	}
-	order := []string{"user", "project", "requirements", "architecture", "integrations", "validation", "glossary", "workflows", "state", "decisions", "handoffs", "rules", "pending"}
+	order := []string{"state", "handoffs", "user", "project", "requirements", "architecture", "decisions", "validation", "rules", "workflows", "integrations", "glossary", "pending"}
 	switch stage {
 	case "requirements":
-		order = []string{"user", "project", "requirements", "decisions", "glossary", "architecture", "validation", "workflows", "rules", "integrations", "state", "handoffs", "pending"}
+		order = []string{"state", "handoffs", "user", "project", "requirements", "decisions", "glossary", "architecture", "validation", "workflows", "rules", "integrations", "pending"}
 	case "design":
-		order = []string{"user", "project", "requirements", "architecture", "decisions", "glossary", "integrations", "validation", "rules", "workflows", "state", "handoffs", "pending"}
+		order = []string{"state", "handoffs", "user", "project", "requirements", "architecture", "decisions", "glossary", "integrations", "validation", "rules", "workflows", "pending"}
 	case "implementation":
-		order = []string{"user", "project", "architecture", "validation", "rules", "workflows", "decisions", "requirements", "integrations", "glossary", "state", "handoffs", "pending"}
+		order = []string{"state", "handoffs", "user", "project", "architecture", "validation", "rules", "workflows", "decisions", "requirements", "integrations", "glossary", "pending"}
 	}
 	out := make([]sectionSpec, 0, len(order))
 	for _, key := range order {
@@ -568,15 +572,45 @@ func countImportableCodexSessions(env paths.Env) int {
 		return 0
 	}
 	imported := transcriptHashes(env.ProjectWT, "codex")
+	importedSessions := transcriptEvidenceSessionIDs(env, "project", "codex")
 	count := 0
 	for _, session := range sessions {
 		hash := fileSHA256(session.Path)
-		if hash == "" || imported[hash] {
+		if hash == "" || imported[hash] || importedSessions[transcriptSessionID("codex", session.Path)] {
 			continue
 		}
 		count++
 	}
 	return count
+}
+
+func transcriptEvidenceSessionIDs(env paths.Env, scope, source string) map[string]bool {
+	out := map[string]bool{}
+	manager := candidate.Manager{Env: env, Actor: "contextpack"}
+	records, err := manager.List(scope)
+	if err != nil {
+		return out
+	}
+	prefix := source + ":"
+	for _, rec := range records {
+		if rec.Meta.CandidateType != model.CandidateTypeTranscriptNotes {
+			continue
+		}
+		for _, id := range rec.Meta.SourceSessions {
+			id = strings.TrimSpace(id)
+			if strings.HasPrefix(id, prefix) {
+				out[id] = true
+			}
+		}
+	}
+	return out
+}
+
+func transcriptSessionID(source, path string) string {
+	if source == "" {
+		source = "manual"
+	}
+	return source + ":" + filepath.Base(path)
 }
 
 func countObservedCursorSessions(root string) int {

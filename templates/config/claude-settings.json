@@ -1,9 +1,5 @@
 {
   "worktrail": {
-    "mcp": {
-      "command": "worktrail",
-      "args": ["mcp", "serve", "--stdio"]
-    },
     "hooks": {
       "session-start": "worktrail hook claude session-start",
       "user-prompt": "worktrail hook claude user-prompt",

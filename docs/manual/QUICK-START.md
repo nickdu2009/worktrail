@@ -4,7 +4,7 @@
 ## 目标
 <div class="title-en">Goal</div>
 
-用最短路径完成一次可用的 Worktrail 初始化，并确认当前任务能拿到上下文。
+用最短路径完成一次可用的 Worktrail 初始化，并确认当前任务能拿到知识入口、工作记录和交接入口。
 
 这一章只保留第一次上手最需要的步骤。
 
@@ -76,7 +76,21 @@ worktrail note add \
 
 `note add` 只创建待评审候选知识，不会直接修改正式知识。
 
-### 5. 评审并应用候选知识
+### 5. 建立工作记录并写一次交接
+<div class="title-en">Write a Work Log and Handoff</div>
+
+长任务开始后，先建 active state；结束时写 durable handoff：
+
+```bash
+worktrail state start "task title"
+worktrail state update "what changed, validation, and next step"
+worktrail handoff "summary of current state, validation, risks, and next step"
+worktrail resume "continue the same task"
+```
+
+`worktrail handoff` 会直接写入 `.worktrail/handoffs/`；hooks 只会在需要时起草 pending handoff candidate。
+
+### 6. 评审并应用候选知识
 <div class="title-en">Review and Apply Candidate Knowledge</div>
 
 先看 pending candidates：
@@ -108,21 +122,17 @@ worktrail context "task description"
 
 ```bash
 worktrail state start "task title"
-worktrail state update --session latest "what changed and what remains"
+worktrail state update "what changed and what remains"
 worktrail state checkpoint --reason "safe checkpoint before next step"
 ```
 
-结束或切换工具前运行：
-
-```bash
-worktrail handoff "summary of current state, validation, risks, and next step"
-```
+结束或切换工具前运行 `worktrail handoff`；新 session 开始时优先运行 `worktrail resume`。
 
 ## 两个常见误区
 <div class="title-en">Two Common Mistakes</div>
 
 - 不要把 `context` 当成会修改知识的命令。它只读取知识、状态和维护提示。
-- 不要把 pending candidate 当成正式知识。`note add`、`import`、`distill apply`、`handoff` 默认都只生成候选或操作记录，真正进入正式知识需要显式 review 后再 `promote` 或 `merge`。
+- 不要把 pending candidate 当成正式知识。`note add`、`import`、`distill apply` 默认都只生成候选或操作记录，真正进入正式知识需要显式 review 后再 `promote` 或 `merge`。
 
 ## 接着读什么
 <div class="title-en">Read This Next</div>

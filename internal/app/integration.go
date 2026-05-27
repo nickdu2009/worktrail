@@ -8,7 +8,6 @@ import (
 
 	"github.com/nickdu2009/worktrail/internal/hooks"
 	"github.com/nickdu2009/worktrail/internal/integrations"
-	"github.com/nickdu2009/worktrail/internal/mcp"
 	"github.com/nickdu2009/worktrail/internal/paths"
 )
 
@@ -78,13 +77,6 @@ func runHook(ctx context.Context, env paths.Env, ioctx IO, args []string) error 
 		return errors.New("usage: worktrail hook <codex|claude|cursor> <event>")
 	}
 	return hooks.Run(ctx, env, args[0], args[1], ioctx.In, ioctx.Out)
-}
-
-func runMCP(ctx context.Context, env paths.Env, ioctx IO, args []string) error {
-	if len(args) != 2 || args[0] != "serve" || args[1] != "--stdio" {
-		return errors.New("usage: worktrail mcp serve --stdio")
-	}
-	return mcp.Serve(ctx, env, ioctx.In, ioctx.Out)
 }
 
 func integrationOptions(flags map[string]string) integrations.Options {

@@ -135,8 +135,16 @@ func printIndexRebuildFailure(ioctx IO, result indexRebuildResult) {
 }
 
 func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error {
+	if wantsFlagHelpOrLeadingHelp(args) {
+		printSearchHelp(ioctx.Out)
+		return nil
+	}
 	flags, positional := splitFlags(args)
-	query := joinArgs(positional)
+	query := strings.TrimSpace(joinArgs(positional))
+	if query == "" {
+		printSearchHelp(ioctx.Err)
+		return errors.New("search requires a keyword; example: worktrail search \"<keyword>\"")
+	}
 	scope := flagValue(flags, "scope", "project")
 	scopes := []string{scope}
 	if scope == "all" {
@@ -164,6 +172,17 @@ func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 		fmt.Fprintf(ioctx.Out, "%.1f\t%s\t%s\t%s\n", result.Score, result.Entry.Scope, result.Entry.Type, result.Entry.Title)
 	}
 	return nil
+}
+
+func printSearchHelp(out interface{ Write([]byte) (int, error) }) {
+	fmt.Fprintln(out, "usage: worktrail search [--scope project|user|all] [--type <type>] [--tag <tag>] [--format text|json] <keyword>")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Pinpoint Worktrail knowledge entries by keyword. Use this command — not rg, grep, or find — to look up notes, decisions, lessons, handoffs, state, and other Worktrail records by topic, term, or phrase.")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Examples:")
+	fmt.Fprintln(out, "  worktrail search \"webhook retry\"")
+	fmt.Fprintln(out, "  worktrail search --scope all \"deployment lesson\"")
+	fmt.Fprintln(out, "  worktrail search --type decision \"oauth\"")
 }
 
 func loadFreshSearchEntries(env paths.Env, scope string) ([]index.Entry, error) {

@@ -183,7 +183,7 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 		t.Fatalf("IncludeEvidence pending section unexpected: %+v", pending.Items)
 	}
 	rendered = RenderMarkdown(withEvidence)
-	if !strings.Contains(rendered, "Raw transcript evidence content.") || strings.Contains(rendered, "Hidden evidence candidates") {
+	if strings.Contains(rendered, "Raw transcript evidence content.") || strings.Contains(rendered, "Hidden evidence candidates") {
 		t.Fatalf("IncludeEvidence rendered pack unexpected:\n%s", rendered)
 	}
 
@@ -366,6 +366,52 @@ func TestBuildMaintenanceSurfacesImportableCodexSessions(t *testing.T) {
 	rendered := RenderMarkdown(pack)
 	if !strings.Contains(rendered, "Importable current-project Codex sessions: 1") || !strings.Contains(rendered, "`worktrail import codex --since 14d --all`") {
 		t.Fatalf("rendered maintenance hint missing import discovery:\n%s", rendered)
+	}
+}
+
+func TestBuildMaintenanceSkipsCodexSessionsAlreadyRepresentedByCandidate(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	project := filepath.Join(tmp, "project")
+	env := paths.Env{
+		Home:        home,
+		ProjectRoot: project,
+		UserRoot:    filepath.Join(home, ".worktrail"),
+		ProjectWT:   filepath.Join(project, ".worktrail"),
+	}
+	session := filepath.Join(home, ".codex", "sessions", "2026", "05", "26", "session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(session), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"timestamp":"` + time.Now().UTC().Format(time.RFC3339) + `","type":"session_meta","payload":{"id":"session-1","cwd":"` + filepath.ToSlash(project) + `"}}` + "\n"
+	if err := os.WriteFile(session, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writePackDoc(t, filepath.Join(env.ProjectWT, "candidates", "project", "codex-01-session.md"), map[string]any{
+		"schema":           "worktrail.candidate.v1",
+		"id":               "codex-01-session",
+		"scope":            "project",
+		"candidate_type":   "transcript_notes",
+		"target_path":      "imports/transcripts/codex-01-session.md",
+		"title":            "Transcript Notes",
+		"summary":          "Already imported transcript evidence.",
+		"operation":        "replace",
+		"status":           "pending",
+		"source_sessions":  []string{"codex:session.jsonl"},
+		"redaction_status": "clean",
+		"created_at":       time.Now().UTC(),
+		"updated_at":       time.Now().UTC(),
+	}, "Evidence body.")
+
+	pack, err := Build(env, Options{Task: "import discovery"})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if pack.Maintenance.ImportableCodexSessions != 0 {
+		t.Fatalf("importable codex = %d, want 0: %+v", pack.Maintenance.ImportableCodexSessions, pack.Maintenance)
+	}
+	if containsStep(pack.Maintenance.NextSteps, "worktrail import codex --since 14d --all") {
+		t.Fatalf("maintenance next steps should not re-import represented transcript: %+v", pack.Maintenance.NextSteps)
 	}
 }
 

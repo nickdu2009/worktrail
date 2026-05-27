@@ -28,15 +28,18 @@ const (
 )
 
 type StartOptions struct {
-	Scope          string
-	ID             string
-	Type           string
-	Title          string
-	SourceTool     string
-	SourceSessions []string
-	Tags           []string
-	Body           string
-	Actor          string
+	Scope                string
+	ID                   string
+	TaskID               string
+	Type                 string
+	Title                string
+	SourceTool           string
+	SourceSessions       []string
+	Tags                 []string
+	Body                 string
+	ResumedFromStateID   string
+	ResumedFromHandoffID string
+	Actor                string
 }
 
 type UpdateOptions struct {
@@ -104,28 +107,30 @@ type Capsule struct {
 }
 
 type CloseResult struct {
-	Capsule     Capsule
-	HandoffBody string
+	Capsule Capsule
 }
 
 type metadata struct {
-	Schema         string     `json:"schema"`
-	ID             string     `json:"id"`
-	Scope          string     `json:"scope"`
-	Type           string     `json:"type"`
-	Title          string     `json:"title"`
-	Status         string     `json:"status"`
-	SourceTool     string     `json:"source_tool"`
-	SourceSessions []string   `json:"source_sessions,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	Tags           []string   `json:"tags,omitempty"`
-	CheckpointID   string     `json:"checkpoint_id,omitempty"`
-	CheckpointOf   string     `json:"checkpoint_of,omitempty"`
-	CheckpointNote string     `json:"checkpoint_note,omitempty"`
-	CheckpointAt   *time.Time `json:"checkpoint_at,omitempty"`
-	ClosedAt       *time.Time `json:"closed_at,omitempty"`
-	ArchivedAt     *time.Time `json:"archived_at,omitempty"`
+	Schema               string     `json:"schema"`
+	ID                   string     `json:"id"`
+	Scope                string     `json:"scope"`
+	TaskID               string     `json:"task_id,omitempty"`
+	Type                 string     `json:"type"`
+	Title                string     `json:"title"`
+	Status               string     `json:"status"`
+	SourceTool           string     `json:"source_tool"`
+	SourceSessions       []string   `json:"source_sessions,omitempty"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
+	Tags                 []string   `json:"tags,omitempty"`
+	CheckpointID         string     `json:"checkpoint_id,omitempty"`
+	CheckpointOf         string     `json:"checkpoint_of,omitempty"`
+	CheckpointNote       string     `json:"checkpoint_note,omitempty"`
+	CheckpointAt         *time.Time `json:"checkpoint_at,omitempty"`
+	ClosedAt             *time.Time `json:"closed_at,omitempty"`
+	ArchivedAt           *time.Time `json:"archived_at,omitempty"`
+	ResumedFromStateID   string     `json:"resumed_from_state_id,omitempty"`
+	ResumedFromHandoffID string     `json:"resumed_from_handoff_id,omitempty"`
 }
 
 var now = time.Now
@@ -144,17 +149,20 @@ func Start(env paths.Env, opts StartOptions) (Capsule, error) {
 		id = newID("st", opts.Title, ts)
 	}
 	meta := metadata{
-		Schema:         model.SchemaState,
-		ID:             id,
-		Scope:          scope,
-		Type:           withDefault(opts.Type, defaultType),
-		Title:          strings.TrimSpace(opts.Title),
-		Status:         "active",
-		SourceTool:     withDefault(opts.SourceTool, defaultSourceTool),
-		SourceSessions: cleanList(opts.SourceSessions),
-		CreatedAt:      ts,
-		UpdatedAt:      ts,
-		Tags:           cleanList(opts.Tags),
+		Schema:               model.SchemaState,
+		ID:                   id,
+		Scope:                scope,
+		TaskID:               withDefault(opts.TaskID, "task-"+util.Slug(opts.Title)),
+		Type:                 withDefault(opts.Type, defaultType),
+		Title:                strings.TrimSpace(opts.Title),
+		Status:               "active",
+		SourceTool:           withDefault(opts.SourceTool, defaultSourceTool),
+		SourceSessions:       cleanList(opts.SourceSessions),
+		CreatedAt:            ts,
+		UpdatedAt:            ts,
+		Tags:                 cleanList(opts.Tags),
+		ResumedFromStateID:   strings.TrimSpace(opts.ResumedFromStateID),
+		ResumedFromHandoffID: strings.TrimSpace(opts.ResumedFromHandoffID),
 	}
 	path, err := statePath(root, DirActive, id)
 	if err != nil {
@@ -167,6 +175,10 @@ func Start(env paths.Env, opts StartOptions) (Capsule, error) {
 	}
 	cap, err := writeCapsule(path, DirActive, meta, opts.Body)
 	if err != nil {
+		return Capsule{}, err
+	}
+	if err := syncLatestAlias(root, cap); err != nil {
+		_ = os.Remove(path)
 		return Capsule{}, err
 	}
 	if err := appendEvent(root, "state.start", id, opts.Actor, map[string]any{"scope": scope, "path": relToRoot(root, path)}); err != nil {
@@ -216,6 +228,9 @@ func updateActive(env paths.Env, opts UpdateOptions, event string, extraEventDat
 	meta.UpdatedAt = now().UTC()
 	updated, err := writeCapsule(cap.Path, DirActive, meta, body)
 	if err != nil {
+		return Capsule{}, err
+	}
+	if err := syncLatestAlias(root, updated); err != nil {
 		return Capsule{}, err
 	}
 	eventData := map[string]any{"status": meta.Status, "path": relToRoot(root, cap.Path)}
@@ -292,18 +307,24 @@ func Close(env paths.Env, opts CloseOptions) (CloseResult, error) {
 	meta.Status = "closed"
 	meta.ClosedAt = &ts
 	meta.UpdatedAt = ts
-	closed, err := writeCapsule(cap.Path, DirActive, meta, body)
+	closedPath, err := statePath(root, DirArchived, meta.ID)
 	if err != nil {
 		return CloseResult{}, err
 	}
-	result := CloseResult{Capsule: closed}
-	if opts.Handoff {
-		result.HandoffBody = renderHandoffBody(closed, opts.Summary)
-	}
-	if err := appendEvent(root, "state.close", meta.ID, opts.Actor, map[string]any{"handoff": opts.Handoff, "path": relToRoot(root, cap.Path)}); err != nil {
+	closed, err := writeCapsule(closedPath, DirArchived, meta, body)
+	if err != nil {
 		return CloseResult{}, err
 	}
-	return result, nil
+	if err := os.Remove(cap.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return CloseResult{}, err
+	}
+	if err := syncLatestAliasFromActive(root); err != nil {
+		return CloseResult{}, err
+	}
+	if err := appendEvent(root, "state.close", meta.ID, opts.Actor, map[string]any{"handoff": opts.Handoff, "path": relToRoot(root, closedPath)}); err != nil {
+		return CloseResult{}, err
+	}
+	return CloseResult{Capsule: closed}, nil
 }
 
 func Archive(env paths.Env, opts ArchiveOptions) (Capsule, error) {
@@ -311,7 +332,7 @@ func Archive(env paths.Env, opts ArchiveOptions) (Capsule, error) {
 	if err != nil {
 		return Capsule{}, err
 	}
-	cap, meta, err := readByID(root, DirActive, opts.ID)
+	cap, meta, err := readByID(root, DirArchived, opts.ID)
 	if err != nil {
 		return Capsule{}, err
 	}
@@ -319,18 +340,11 @@ func Archive(env paths.Env, opts ArchiveOptions) (Capsule, error) {
 	meta.Status = "archived"
 	meta.ArchivedAt = &ts
 	meta.UpdatedAt = ts
-	archivePath, err := statePath(root, DirArchived, meta.ID)
+	archived, err := writeCapsule(cap.Path, DirArchived, meta, cap.Body)
 	if err != nil {
 		return Capsule{}, err
 	}
-	archived, err := writeCapsule(archivePath, DirArchived, meta, cap.Body)
-	if err != nil {
-		return Capsule{}, err
-	}
-	if err := os.Remove(cap.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return Capsule{}, err
-	}
-	if err := appendEvent(root, "state.archive", meta.ID, opts.Actor, map[string]any{"path": relToRoot(root, archivePath)}); err != nil {
+	if err := appendEvent(root, "state.archive", meta.ID, opts.Actor, map[string]any{"path": relToRoot(root, cap.Path)}); err != nil {
 		return Capsule{}, err
 	}
 	return archived, nil
@@ -362,7 +376,7 @@ func List(env paths.Env, opts ListOptions) ([]Capsule, error) {
 			return nil, err
 		}
 		for _, entry := range entries {
-			if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" || (dir == DirActive && entry.Name() == latestAliasName) {
 				continue
 			}
 			path, err := paths.SafeJoin(dirPath, entry.Name())
@@ -383,6 +397,25 @@ func List(env paths.Env, opts ListOptions) ([]Capsule, error) {
 		return out[i].Path < out[j].Path
 	})
 	return out, nil
+}
+
+func LatestActive(env paths.Env, scope string) (Capsule, error) {
+	items, err := List(env, ListOptions{Scope: scope, Directory: DirActive})
+	if err != nil {
+		return Capsule{}, err
+	}
+	if len(items) == 0 {
+		return Capsule{}, os.ErrNotExist
+	}
+	return items[0], nil
+}
+
+func TaskID(cap Capsule) string {
+	meta, err := decodeMetadata(cap.Metadata)
+	if err != nil {
+		return ""
+	}
+	return meta.TaskID
 }
 
 func Show(env paths.Env, opts ShowOptions) (Capsule, error) {
@@ -437,6 +470,25 @@ func validateDirectory(dir string) error {
 }
 
 func readByID(root, dir, id string) (Capsule, metadata, error) {
+	if dir == DirActive && id == "latest" {
+		path, err := latestAliasPath(root)
+		if err != nil {
+			return Capsule{}, metadata{}, err
+		}
+		if cap, err := readCapsule(path, dir); err == nil {
+			meta, err := decodeMetadata(cap.Metadata)
+			return cap, meta, err
+		}
+		caps, err := List(paths.Env{ProjectWT: root}, ListOptions{Directory: DirActive})
+		if err != nil {
+			return Capsule{}, metadata{}, err
+		}
+		if len(caps) == 0 {
+			return Capsule{}, metadata{}, os.ErrNotExist
+		}
+		meta, err := decodeMetadata(caps[0].Metadata)
+		return caps[0], meta, err
+	}
 	path, err := statePath(root, dir, id)
 	if err != nil {
 		return Capsule{}, metadata{}, err
@@ -599,4 +651,40 @@ func relToRoot(root, path string) string {
 		return path
 	}
 	return rel
+}
+
+const latestAliasName = "latest.md"
+
+func latestAliasPath(root string) (string, error) {
+	return paths.SafeJoin(root, "state", DirActive, latestAliasName)
+}
+
+func syncLatestAlias(root string, cap Capsule) error {
+	aliasPath, err := latestAliasPath(root)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(cap.Path)
+	if err != nil {
+		return err
+	}
+	return util.AtomicWrite(aliasPath, data, 0o644)
+}
+
+func syncLatestAliasFromActive(root string) error {
+	caps, err := List(paths.Env{ProjectWT: root}, ListOptions{Directory: DirActive})
+	if err != nil {
+		return err
+	}
+	if len(caps) == 0 {
+		aliasPath, aliasErr := latestAliasPath(root)
+		if aliasErr != nil {
+			return aliasErr
+		}
+		if err := os.Remove(aliasPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	return syncLatestAlias(root, caps[0])
 }

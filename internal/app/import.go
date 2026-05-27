@@ -13,22 +13,26 @@ import (
 
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/transcript"
+	"github.com/nickdu2009/worktrail/internal/util"
 )
 
 type importReport struct {
-	Source      string                         `json:"source"`
-	Project     string                         `json:"project"`
-	Matched     int                            `json:"matched"`
-	Observed    int                            `json:"observed,omitempty"`
-	Synced      int                            `json:"synced"`
-	Extracted   int                            `json:"extracted"`
-	Skipped     int                            `json:"skipped"`
-	Blocked     int                            `json:"blocked,omitempty"`
-	DryRun      bool                           `json:"dry_run"`
-	Sessions    []transcript.DiscoveredSession `json:"sessions,omitempty"`
-	Candidates  []string                       `json:"candidates,omitempty"`
-	NextSteps   []string                       `json:"next_steps,omitempty"`
-	GitGuidance []string                       `json:"git_guidance,omitempty"`
+	Source             string                         `json:"source"`
+	Project            string                         `json:"project"`
+	Matched            int                            `json:"matched"`
+	Observed           int                            `json:"observed,omitempty"`
+	AlreadyImported    int                            `json:"already_imported,omitempty"`
+	Synced             int                            `json:"synced"`
+	Extracted          int                            `json:"extracted"`
+	Skipped            int                            `json:"skipped"`
+	Reused             int                            `json:"reused,omitempty"`
+	Blocked            int                            `json:"blocked,omitempty"`
+	DryRun             bool                           `json:"dry_run"`
+	Sessions           []transcript.DiscoveredSession `json:"sessions,omitempty"`
+	Candidates         []string                       `json:"candidates,omitempty"`
+	ExistingCandidates []string                       `json:"existing_candidates,omitempty"`
+	NextSteps          []string                       `json:"next_steps,omitempty"`
+	GitGuidance        []string                       `json:"git_guidance,omitempty"`
 }
 
 func runImport(_ context.Context, env paths.Env, ioctx IO, args []string) error {
@@ -59,23 +63,30 @@ func runImport(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	if err != nil {
 		return err
 	}
-	report := importReport{
-		Source:   source,
-		Project:  env.ProjectRoot,
-		Matched:  len(sessions),
-		DryRun:   flags["all"] != "true",
-		Sessions: sessions,
-	}
-	report.NextSteps = importNextSteps(report.DryRun)
-	report.GitGuidance = importGitGuidance()
-	if report.DryRun {
-		return printImportReport(ioctx, report, flagValue(flags, "format", "text"))
-	}
 	root, err := env.ScopeRoot(scope)
 	if err != nil {
 		return err
 	}
+	report := importReport{
+		Source:             source,
+		Project:            env.ProjectRoot,
+		Matched:            len(sessions),
+		DryRun:             flags["all"] != "true",
+		Sessions:           sessions,
+		ExistingCandidates: existingTranscriptEvidenceIDs(root, scope, source, sessions),
+	}
+	report.AlreadyImported = len(report.ExistingCandidates)
+	report.NextSteps = importNextSteps(report.DryRun, report.Matched-report.AlreadyImported)
+	report.GitGuidance = importGitGuidance()
+	if report.DryRun {
+		return printImportReport(ioctx, report, flagValue(flags, "format", "text"))
+	}
 	for _, session := range sessions {
+		if _, ok := existingTranscriptEvidence(root, scope, source, session.Path); ok {
+			report.Skipped++
+			report.Reused++
+			continue
+		}
 		meta, err := transcript.Sync(session.Path, root, transcript.SyncOptions{Source: source, Scope: scope})
 		if err != nil {
 			return err
@@ -113,19 +124,26 @@ func runImportCursor(env paths.Env, ioctx IO, flags map[string]string, scope str
 	}
 	sessions = transcript.BoundSessions(sessions, bounds)
 	report := importReport{
-		Source:   "cursor",
-		Project:  env.ProjectRoot,
-		Matched:  len(sessions),
-		Observed: len(sessions),
-		DryRun:   flags["all"] != "true",
-		Sessions: sessions,
+		Source:             "cursor",
+		Project:            env.ProjectRoot,
+		Matched:            len(sessions),
+		Observed:           len(sessions),
+		DryRun:             flags["all"] != "true",
+		Sessions:           sessions,
+		ExistingCandidates: existingTranscriptEvidenceIDs(root, scope, "cursor", sessions),
 	}
-	report.NextSteps = cursorImportNextSteps(report.DryRun)
+	report.AlreadyImported = len(report.ExistingCandidates)
+	report.NextSteps = cursorImportNextSteps(report.DryRun, report.Matched-report.AlreadyImported)
 	report.GitGuidance = importGitGuidance()
 	if report.DryRun {
 		return printImportReport(ioctx, report, flagValue(flags, "format", "text"))
 	}
 	for _, session := range sessions {
+		if _, ok := existingTranscriptEvidence(root, scope, "cursor", session.Path); ok {
+			report.Skipped++
+			report.Reused++
+			continue
+		}
 		if _, err := os.Stat(session.Path); err != nil {
 			report.Blocked++
 			continue
@@ -181,6 +199,31 @@ func parseImportSince(value string) (time.Duration, error) {
 		return time.Duration(days) * 24 * time.Hour, nil
 	}
 	return time.ParseDuration(value)
+}
+
+func existingTranscriptEvidenceIDs(root, scope, source string, sessions []transcript.DiscoveredSession) []string {
+	var ids []string
+	for _, session := range sessions {
+		if id, ok := existingTranscriptEvidence(root, scope, source, session.Path); ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func existingTranscriptEvidence(root, scope, source, path string) (string, bool) {
+	id := transcriptEvidenceCandidateID(source, path)
+	if id == "" {
+		return "", false
+	}
+	if _, err := os.Stat(filepath.Join(root, "candidates", scope, id+".md")); err == nil {
+		return id, true
+	}
+	return "", false
+}
+
+func transcriptEvidenceCandidateID(source, path string) string {
+	return util.Slug(extractionCandidateID(source, path, 0, ""))
 }
 
 func cursorImportSessions(root, explicitFile string) ([]transcript.DiscoveredSession, error) {
@@ -241,27 +284,42 @@ func printImportReport(ioctx IO, report importReport, format string) error {
 	if report.Observed > 0 {
 		fmt.Fprintf(ioctx.Out, "observed: %d\n", report.Observed)
 	}
+	if report.AlreadyImported > 0 {
+		fmt.Fprintf(ioctx.Out, "already_imported: %d\n", report.AlreadyImported)
+	}
 	if report.DryRun {
 		fmt.Fprintln(ioctx.Out, "dry_run: true")
 		for _, session := range report.Sessions {
 			fmt.Fprintf(ioctx.Out, "%s\t%s\n", session.ID, session.Path)
 		}
+		for _, id := range report.ExistingCandidates {
+			fmt.Fprintf(ioctx.Out, "existing_candidate: %s\n", id)
+		}
 		printImportGuidance(ioctx, report)
 		return nil
 	}
 	fmt.Fprintf(ioctx.Out, "synced: %d\nextracted: %d\nskipped: %d\n", report.Synced, report.Extracted, report.Skipped)
+	if report.Reused > 0 {
+		fmt.Fprintf(ioctx.Out, "reused: %d\n", report.Reused)
+	}
 	if report.Blocked > 0 {
 		fmt.Fprintf(ioctx.Out, "blocked: %d\n", report.Blocked)
 	}
 	for _, id := range report.Candidates {
 		fmt.Fprintf(ioctx.Out, "candidate: %s\n", id)
 	}
+	for _, id := range report.ExistingCandidates {
+		fmt.Fprintf(ioctx.Out, "existing_candidate: %s\n", id)
+	}
 	printImportGuidance(ioctx, report)
 	return nil
 }
 
-func importNextSteps(dryRun bool) []string {
+func importNextSteps(dryRun bool, unimported int) []string {
 	if dryRun {
+		if unimported <= 0 {
+			return []string{"no unimported Codex sessions found in the current bounds; run `worktrail distill --pending --summary` if transcript_notes evidence is already pending"}
+		}
 		return []string{"rerun the bounded import with `--all`, for example `worktrail import codex --since 14d --all`, to sync transcripts and create pending transcript_notes evidence"}
 	}
 	return []string{
@@ -272,11 +330,14 @@ func importNextSteps(dryRun bool) []string {
 	}
 }
 
-func cursorImportNextSteps(dryRun bool) []string {
+func cursorImportNextSteps(dryRun bool, unimported int) []string {
 	if dryRun {
+		if unimported <= 0 {
+			return []string{"no unimported Cursor sessions found in the current bounds; run `worktrail distill --pending --summary` if transcript_notes evidence is already pending"}
+		}
 		return []string{"rerun the bounded import with `--all`, for example `worktrail import cursor --limit 20 --all`, to sync observed Cursor transcripts and create pending transcript_notes evidence"}
 	}
-	return importNextSteps(false)
+	return importNextSteps(false, unimported)
 }
 
 func importGitGuidance() []string {

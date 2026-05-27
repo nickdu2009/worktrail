@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 	wlog "github.com/nickdu2009/worktrail/internal/log"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
+	wtstate "github.com/nickdu2009/worktrail/internal/state"
 	"github.com/nickdu2009/worktrail/internal/store"
 	"github.com/nickdu2009/worktrail/internal/transcript"
 	"github.com/nickdu2009/worktrail/internal/util"
@@ -125,38 +127,44 @@ func ensureWorktrail(root string) error {
 }
 
 func writeState(env paths.Env, tool, event string, payload map[string]any, hc hookContext) (string, error) {
-	now := time.Now()
 	if !hc.HasSignal {
 		return "", nil
 	}
 	title := titleFromHookContext(hc, event)
 	session := sessionFromPayload(tool, payload)
-	state := model.State{
-		Schema:         model.SchemaState,
-		ID:             "st_" + now.Format("20060102_150405") + "_" + util.Slug(title),
+	body := stateBody(title, tool, event, durablePayload(tool, payload), hc)
+	active, err := wtstate.LatestActive(env, "project")
+	if err == nil {
+		updated, err := wtstate.Update(env, wtstate.UpdateOptions{
+			Scope:          "project",
+			ID:             active.State.ID,
+			SourceSessions: optionalList(session),
+			ReplaceBody:    &body,
+			Actor:          "hook:" + tool + "-" + event,
+		})
+		if err != nil {
+			return "", err
+		}
+		return updated.Path, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	cap, err := wtstate.Start(env, wtstate.StartOptions{
 		Scope:          "project",
+		TaskID:         "task-" + util.Slug(title),
 		Type:           "implementation",
 		Title:          title,
-		Status:         "active",
 		SourceTool:     sourceTool(tool),
 		SourceSessions: optionalList(session),
-		CreatedAt:      now,
-		UpdatedAt:      now,
 		Tags:           []string{tool, event},
-	}
-	body := stateBody(title, tool, event, durablePayload(tool, payload), hc)
-	data, err := store.RenderMarkdown(state, body)
+		Body:           body,
+		Actor:          "hook:" + tool + "-" + event,
+	})
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(env.ProjectWT, "state", "active", "latest.md")
-	if err := util.AtomicWrite(path, data, 0o644); err != nil {
-		return "", err
-	}
-	if err := wlog.Append(env.ProjectWT, "state.update", state.ID, "hook:"+tool+"-"+event, map[string]any{"path": path}); err != nil {
-		return "", err
-	}
-	return path, nil
+	return cap.Path, nil
 }
 
 func writeCheckpoint(env paths.Env, tool, event string, payload map[string]any, statePath string, hc hookContext) (string, error) {

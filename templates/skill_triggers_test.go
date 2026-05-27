@@ -7,10 +7,12 @@ import (
 
 func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 	expected := map[string][]string{
-		"worktrail-context":     {"worktrail context", "continue a previous task"},
-		"worktrail-doc-preview": {"worktrail preview", "preview entry path", "--no-open", "Do not use the target project's dev server"},
+		"worktrail-context":     {"worktrail context", "load context", "worktrail resume"},
+		"worktrail-doc-preview": {"worktrail preview", "preview entry path", "--no-open", "Do not use `worktrail preview` for keyword lookup requests"},
+		"worktrail-search":      {"worktrail search", "keyword", "Do not substitute `worktrail context` or `worktrail preview`", "Do not substitute generic shell tools such as `rg`, `grep`, or `find`"},
 		"worktrail-init":        {"worktrail init", "worktrail install cursor|codex|claude|all", "worktrail doctor <tool>", "worktrail` is available in `PATH", "Do not initialize the target application's language"},
-		"worktrail-state":       {"worktrail state", "save progress"},
+		"worktrail-state":       {"worktrail state", "save progress", "worktrail resume"},
+		"worktrail-resume":      {"worktrail resume", "latest state", "durable handoff", "worktrail state inject", "worktrail state list", "worktrail state show"},
 		"worktrail-handoff":     {"worktrail handoff", "new conversation", "end current chat", "Do not only output a copyable text handoff"},
 		"worktrail-import":      {"worktrail import", "--since 14d", "--limit 20", "worktrail sync", "worktrail migrate kdd"},
 		"worktrail-distill":     {"worktrail distill --pending --summary", "worktrail.distill.proposal.v1"},
@@ -83,11 +85,12 @@ func TestPlaceholderIsOnlyUsedByRootRuleTemplates(t *testing.T) {
 		"config/codex-hooks.json",
 		"config/claude-settings.json",
 		"config/cursor-hooks.json",
-		"config/cursor-mcp.json",
 		"skills/worktrail-context/SKILL.md",
 		"skills/worktrail-doc-preview/SKILL.md",
+		"skills/worktrail-search/SKILL.md",
 		"skills/worktrail-init/SKILL.md",
 		"skills/worktrail-state/SKILL.md",
+		"skills/worktrail-resume/SKILL.md",
 		"skills/worktrail-handoff/SKILL.md",
 		"skills/worktrail-import/SKILL.md",
 		"skills/worktrail-distill/SKILL.md",
@@ -107,10 +110,12 @@ func TestPlaceholderIsOnlyUsedByRootRuleTemplates(t *testing.T) {
 
 func TestSkillTemplatesExposeTriggerIntent(t *testing.T) {
 	expected := map[string][]string{
-		"worktrail-context":     {"description:", "Use this skill when", "starting", "resuming", "continuing", ".worktrail/"},
+		"worktrail-context":     {"description:", "Use this skill when", "starting", "continuing", "load context", ".worktrail/"},
 		"worktrail-doc-preview": {"description:", "Use this skill when", "preview", "overall", "candidate", ".worktrail/"},
+		"worktrail-search":      {"description:", "Use this skill when", "search", "keyword", "do not substitute", ".worktrail/"},
 		"worktrail-init":        {"description:", "Use this skill when", "initialize Worktrail", "install", "doctor", "worktrail --help", ".worktrail/"},
-		"worktrail-state":       {"description:", "Use this skill when", "long", "risky", "checkpoint", ".worktrail/"},
+		"worktrail-state":       {"description:", "Use this skill when", "long", "risky", "checkpoint", "worktrail-resume", ".worktrail/"},
+		"worktrail-resume":      {"description:", "Use this skill when", "resume", "latest state", "state inject", ".worktrail/"},
 		"worktrail-handoff":     {"description:", "Use this skill", "new conversation", "end current chat", "worktrail handoff", "do not only output", ".worktrail/"},
 		"worktrail-import":      {"description:", "Use this skill when", "import", "sync", "migrate", ".worktrail/"},
 		"worktrail-distill":     {"description:", "Use this skill when", "transcript_notes", "migration_source", "semantic Worktrail candidates", ".worktrail/"},

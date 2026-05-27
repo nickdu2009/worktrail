@@ -11,14 +11,17 @@ func TestLoadCases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cases) != 21 {
-		t.Fatalf("len(cases) = %d, want 21", len(cases))
+	if len(cases) != 30 {
+		t.Fatalf("len(cases) = %d, want 30", len(cases))
 	}
 	seen := map[string]bool{}
 	for _, c := range cases {
 		seen[c.ID] = true
 	}
 	for _, id := range []string{
+		"codex-preview-project-knowledge",
+		"codex-search-knowledge-keyword",
+		"codex-resume-latest-session",
 		"codex-handoff-new-conversation",
 		"codex-distill-validate-proposal",
 		"codex-maintain-evidence-plan",

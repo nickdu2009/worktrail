@@ -1,6 +1,6 @@
 # Worktrail
 
-`worktrail` is a local-first AI coding session knowledge and state layer for Codex, Claude Code, and Cursor.
+`worktrail` is a local-first knowledge base, work log, and handoff tool for AI coding sessions in Codex, Claude Code, and Cursor.
 
 The command name is `worktrail`; the Go module path is `github.com/nickdu2009/worktrail`.
 
@@ -8,11 +8,11 @@ Hard boundaries:
 
 - no TUI
 - no Web UI or dashboard
-- no HTTP MCP server
+- no MCP server
 - no daemon, watcher, or background service
 - no embedding or vector database
 - no custom external command provider
-- no default MCP promote, merge, discard, restore, retire, delete, or replace tools
+- no hidden background write surface
 
 Formal knowledge is Markdown with JSON frontmatter. Local indexes are rebuildable acceleration data, not source of truth.
 
@@ -44,33 +44,33 @@ worktrail preview --scope user
 
 If you already installed Worktrail-managed skills or rules for Cursor, Codex, or Claude, rerun `worktrail install <tool> --user` (and `--project` where applicable) after upgrading so agents pick up the new preview contract.
 
-## Minimal workflow
+## Main workflow
 
 ```bash
 worktrail init
 worktrail context "current task"
-worktrail note add --type rule --target rules/example.md --title "Example Rule" --summary "Example rule" --evidence-label "manual note" "Rule body."
-worktrail review
-worktrail review plan --format json
-worktrail candidates diff <candidate-id>
-worktrail promote <candidate-id>
-worktrail index rebuild
-worktrail index diff
-worktrail doctor delete rules/example.md
-worktrail context "current task"
+worktrail preview
+worktrail search "keyword"
+worktrail state start "task title"
+worktrail state update "progress, validation, and next step"
+worktrail handoff "summary, validation, risks, and next step"
+worktrail resume "continue the task"
+worktrail doctor knowledge
 ```
 
 `worktrail note add` is the low-friction path for capturing a confirmed finding
 as a pending semantic candidate. It does not edit formal knowledge or promote
 candidates; use `review`, `promote`, or `merge` for the explicit review step.
 
-`worktrail review` shows the pending semantic inbox by default and reports hidden evidence candidates plus non-semantic operational candidates such as handoffs. Semantic candidates include `source_candidate_ids` details when present, source health warnings, target/duplicate warnings, and a focused `worktrail candidates diff <id>` next step. Use `worktrail review --evidence` for evidence candidates such as `transcript_notes` and `migration_source`, or `worktrail review --all` when operational candidates also need inspection.
+`worktrail review` shows the pending semantic inbox by default and reports hidden evidence candidates plus non-semantic operational candidates such as hook-generated handoff drafts. Semantic candidates include `source_candidate_ids` details when present, source health warnings, target/duplicate warnings, and a focused `worktrail candidates diff <id>` next step. Use `worktrail review --evidence` for evidence candidates such as `transcript_notes` and `migration_source`, or `worktrail review --all` when operational candidates also need inspection.
 
 `worktrail review plan --format json` emits the read-only agent contract `worktrail.review.plan.v1`. It groups pending semantic candidates into deterministic recommendations: `promote`, `merge`, `discard`, or `needs_human_review`. The command never changes candidate state or formal knowledge; state-changing commands still require explicit user confirmation.
 
-`worktrail context <task>` hides pending evidence by default and reports how many evidence candidates are hidden. It also skips stale indexed entries instead of surfacing deleted or outdated cached content. Use `worktrail context --evidence <task>` when evidence candidates need to be included in the Pending Candidates section, and use `worktrail index diff` or `worktrail index rebuild` when context reports a stale index.
+`worktrail context <task>` is the read-only navigation entry for a task. It prioritizes active state and durable handoffs, hides pending evidence by default, reports how many evidence candidates are hidden, and skips stale indexed entries instead of surfacing deleted or outdated cached content. Use `worktrail context --evidence <task>` when evidence candidates need to be included in the Pending Candidates section, and use `worktrail index diff` or `worktrail index rebuild` when context reports a stale index.
 
-Stop and session-end hooks now prefer runtime-first capture: they keep writing `state/` and audit logs, but they only create a pending `handoff` candidate when the captured context suggests an actual follow-up is needed. Routine hook noise should no longer accumulate in the default pending inbox.
+`worktrail handoff` now writes a durable handoff record under `.worktrail/handoffs/`. Stop and session-end hooks keep writing `state/` and audit logs, but they only create a pending `handoff` candidate when the captured context suggests an actual follow-up is needed. Routine hook noise should no longer accumulate in the default pending inbox.
+
+`worktrail resume [<task>]` creates a fresh active state from the latest active state and/or latest durable handoff, so a new session can continue without manually stitching together `context`, `state show`, and handoff files.
 
 Project knowledge can use `.worktrail/requirements/` for PRDs, user goals, persona or primary-user scope, workflow problems, MVP boundaries, out-of-scope notes, requirement-level acceptance criteria, business capability requirements, failure exits, and requirement-stage open questions. This complements, rather than replaces, `architecture/`, `decisions/`, `validation/`, and `workflows/`.
 
@@ -96,11 +96,11 @@ Allowed stages are `requirements`, `design`, `decision`, `implementation`, `vali
 Worktrail supports multiple local agent surfaces in the same repository. Install scope is explicit:
 
 - User scope installs the agent capabilities that should follow the human across repositories. The bundled `templates/root/**` and `templates/skills/**` files are user-level instructions, rules, and skills.
-- Project scope installs runtime integration config for the current repository only, such as hooks, MCP/settings files, and the managed `.gitignore` entries needed for those runtime files. `--project` does not install project-level rules or project-level skills from `templates/root/**` or `templates/skills/**`.
+- Project scope installs runtime integration config for the current repository only, such as hooks, tool settings files, and the managed `.gitignore` entries needed for those runtime files. `--project` does not install project-level rules or project-level skills from `templates/root/**` or `templates/skills/**`.
 - User-level instructions and skills are gated by project opt-in: agents should only run automatic Worktrail workflows when `.worktrail/` exists at the current workspace or repository root. In directories without that marker, Worktrail remains available only for explicit init, install, inspect, or repair requests.
 
-Install the Worktrail CLI before installing agent integrations. Installed skills,
-hooks, and MCP configs invoke the `worktrail` command, so `worktrail` must be
+Install the Worktrail CLI before installing agent integrations. Installed skills
+and hooks invoke the `worktrail` command, so `worktrail` must be
 available in `PATH`; from this repository, use `go install ./cmd/worktrail` or a
 packaged binary.
 
@@ -117,7 +117,7 @@ worktrail install <tool> --user
 worktrail install <tool> --project
 ```
 
-When Worktrail updates bundled rules, skills, hooks, or MCP templates, rerun `worktrail install <tool> --user --project` for the affected tool so the managed integration files pick up the new contract.
+When Worktrail updates bundled rules, skills, or hook/settings templates, rerun `worktrail install <tool> --user --project` for the affected tool so the managed integration files pick up the new contract.
 
 Use `worktrail install all --user --project` to set up Codex, Claude Code, and Cursor together, or explicit targets such as `worktrail install codex --user --project` and `worktrail install claude --user --project` when only a subset should be installed.
 
@@ -125,7 +125,7 @@ Current capability matrix:
 
 - Codex: user instructions and skills, project hooks/runtime config, doctor, uninstall, current-project `import codex` discovery, and explicit transcript `sync`/`extract`.
 - Claude Code: user instructions and skills, project hooks/settings runtime config, doctor, uninstall, and explicit transcript `sync claude <file>` / `extract --source claude`. There is no automatic `import claude` discovery yet.
-- Cursor: user-level rule and skills, project MCP/hooks runtime config, doctor, uninstall, safe observed transcript metadata, and `import cursor` from explicit `--file` paths or Worktrail-observed transcript metadata. Cursor user install manages the Cursor-visible Worktrail rule and skills; Cursor project install does not create project rules or project skills. Cursor import does not scan undocumented private Cursor directories.
+- Cursor: user-level rule and skills, project hooks runtime config, doctor, uninstall, safe observed transcript metadata, and `import cursor` from explicit `--file` paths or Worktrail-observed transcript metadata. Cursor user install manages the Cursor-visible Worktrail rule and skills; Cursor project install does not create project rules or project skills. Cursor import does not scan undocumented private Cursor directories.
 
 Cursor can see user-level Worktrail skills through compatible roots such as `$HOME/.agents/skills`, `$HOME/.codex/skills`, and `$HOME/.claude/skills`. Cursor user install reuses visible managed skills by default and installs to `$HOME/.cursor/skills` only when no visible copy exists; `doctor cursor --user` reports duplicate visible skills as warnings, not failures.
 

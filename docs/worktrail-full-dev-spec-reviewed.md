@@ -550,7 +550,7 @@ archive
 
 ```bash
 worktrail state start "<title>" --type bug --scope project
-worktrail state update --session latest
+worktrail state update
 worktrail state checkpoint --reason pre-compact
 worktrail state inject "<task>"
 worktrail state close --to handoff
@@ -1072,7 +1072,7 @@ worktrail context "$ARGUMENTS"
 
 ```bash
 worktrail state start "$ARGUMENTS"
-worktrail state update --session latest
+worktrail state update
 worktrail state checkpoint --reason manual
 worktrail state inject "$ARGUMENTS"
 ```
@@ -1228,7 +1228,7 @@ worktrail search "<query>"
 
 # State Capsule
 worktrail state start "<title>" --type bug --scope project
-worktrail state update --session latest
+worktrail state update
 worktrail state checkpoint --reason pre-compact
 worktrail state inject "<task>"
 worktrail state close --to handoff

@@ -157,8 +157,10 @@ type integrationConfig struct {
 var worktrailUserSkills = []string{
 	"worktrail-context",
 	"worktrail-doc-preview",
+	"worktrail-search",
 	"worktrail-init",
 	"worktrail-state",
+	"worktrail-resume",
 	"worktrail-handoff",
 	"worktrail-import",
 	"worktrail-distill",
@@ -219,7 +221,6 @@ func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
 			},
 			userSkills: worktrailUserSkills,
 			projectJSONs: []jsonTemplate{
-				{path: filepath.Join(env.ProjectRoot, ".cursor", "mcp.json"), template: "config/cursor-mcp.json"},
 				{path: filepath.Join(env.ProjectRoot, ".cursor", "hooks.json"), template: "config/cursor-hooks.json"},
 			},
 		}, nil
@@ -290,6 +291,9 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 		if err := mergeJSONTemplate(cfg.projectJSONPath, cfg.projectJSONTmpl); err != nil {
 			return err
 		}
+		if err := removeLegacyMCPConfig(cfg.projectJSONPath); err != nil {
+			return err
+		}
 		report.Actions = append(report.Actions, Action{Path: cfg.projectJSONPath, Action: "worktrail-json-merged"})
 	}
 	jsons := cfg.userJSONs
@@ -304,6 +308,9 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 	}
 	for _, jt := range jsons {
 		if err := mergeJSONTemplate(jt.path, jt.template); err != nil {
+			return err
+		}
+		if err := removeLegacyMCPConfig(jt.path); err != nil {
 			return err
 		}
 		report.Actions = append(report.Actions, Action{Path: jt.path, Action: "worktrail-json-merged"})
@@ -350,6 +357,9 @@ func uninstallScope(cfg integrationConfig, scope string, report *Report) error {
 		if err := removeJSONWorktrail(cfg.projectJSONPath); err != nil {
 			return err
 		}
+		if err := removeLegacyMCPConfig(cfg.projectJSONPath); err != nil {
+			return err
+		}
 		report.Actions = append(report.Actions, Action{Path: cfg.projectJSONPath, Action: "worktrail-json-removed"})
 	}
 	jsons := cfg.userJSONs
@@ -358,6 +368,9 @@ func uninstallScope(cfg integrationConfig, scope string, report *Report) error {
 	}
 	for _, jt := range jsons {
 		if err := removeJSONTemplate(jt.path, jt.template); err != nil {
+			return err
+		}
+		if err := removeLegacyMCPConfig(jt.path); err != nil {
 			return err
 		}
 		report.Actions = append(report.Actions, Action{Path: jt.path, Action: "worktrail-json-removed"})
@@ -437,14 +450,14 @@ func worktrailCommandCheck() Check {
 			Name: "worktrail command available",
 			Path: "worktrail",
 			OK:   false,
-			Note: "not found in PATH; install the Worktrail CLI with `go install ./cmd/worktrail` or add the worktrail binary to PATH before relying on installed skills, hooks, or MCP",
+			Note: "not found in PATH; install the Worktrail CLI with `go install ./cmd/worktrail` or add the worktrail binary to PATH before relying on installed skills or hooks",
 		}
 	}
 	return Check{
 		Name: "worktrail command available",
 		Path: path,
 		OK:   true,
-		Note: "available in PATH for installed skills, hooks, and MCP",
+		Note: "available in PATH for installed skills and hooks",
 	}
 }
 
@@ -546,6 +559,10 @@ func cleanupLegacyProjectAgentFiles(cfg integrationConfig, report *Report) error
 	}
 	if changed {
 		report.Actions = append(report.Actions, Action{Path: rulePath, Action: "legacy-managed-block-removed"})
+	}
+	cursorMCPPath := filepath.Join(cfg.projectRoot, ".cursor", "mcp.json")
+	if err := removeLegacyMCPConfig(cursorMCPPath); err != nil {
+		return err
 	}
 	for _, root := range []string{
 		filepath.Join(cfg.projectRoot, ".agents", "skills"),
@@ -669,6 +686,49 @@ func removeJSONWorktrail(path string) error {
 		return err
 	}
 	delete(current, "worktrail")
+	return writeJSONObject(path, current)
+}
+
+func removeLegacyMCPConfig(path string) error {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return nil
+	}
+	current := map[string]any{}
+	if err := json.Unmarshal(data, &current); err != nil {
+		return err
+	}
+	changed := false
+	if worktrail, ok := current["worktrail"].(map[string]any); ok {
+		if _, has := worktrail["mcp"]; has {
+			delete(worktrail, "mcp")
+			changed = true
+		}
+		if len(worktrail) == 0 {
+			delete(current, "worktrail")
+		}
+	}
+	if servers, ok := current["mcpServers"].(map[string]any); ok {
+		if _, has := servers["worktrail"]; has {
+			delete(servers, "worktrail")
+			changed = true
+		}
+		if len(servers) == 0 {
+			delete(current, "mcpServers")
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if len(current) == 0 {
+		return os.Remove(path)
+	}
 	return writeJSONObject(path, current)
 }
 

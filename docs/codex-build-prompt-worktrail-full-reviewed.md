@@ -105,7 +105,7 @@ worktrail search "<query>"
 
 # State Capsule
 worktrail state start "<title>" --type bug --scope project
-worktrail state update --session latest
+worktrail state update
 worktrail state checkpoint --reason pre-compact
 worktrail state inject "<task>"
 worktrail state close --to handoff

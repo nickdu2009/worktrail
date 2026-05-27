@@ -70,7 +70,7 @@ make docs-manual-serve PORT=3001
 
 - [快速开始](QUICK-START.md): 用最短路径初始化并读取一次上下文
 - [设计理念](DESIGN-PHILOSOPHY.md): 解释 local-first、chat-native review 和知识分层背后的原因
-- [自动化](AUTOMATION.md): 解释 hooks、skills、MCP 和 maintenance hints 的自动化边界
+- [自动化](AUTOMATION.md): 解释 hooks、skills 和 maintenance hints 的自动化边界
 - [安装说明](INSTALLATION.md): 说明 CLI、用户级/项目级 scope 和 Agent 集成
 - [常见工作流](COMMON-WORKFLOWS.md): 给出任务前、任务中、任务后、知识维护的典型流程
 - [故障排查](TROUBLESHOOTING.md): 汇总安装、scope、候选知识、预览和导入问题

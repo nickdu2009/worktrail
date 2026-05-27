@@ -2,15 +2,19 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
+	"github.com/nickdu2009/worktrail/internal/handoff"
 	"github.com/nickdu2009/worktrail/internal/paths"
+	wtstate "github.com/nickdu2009/worktrail/internal/state"
 	"github.com/nickdu2009/worktrail/internal/util"
 )
 
@@ -24,22 +28,34 @@ func runHandoff(_ context.Context, env paths.Env, ioctx IO, args []string) error
 	title := flagValue(flags, "title", "Handoff")
 	summary := joinArgs(positional)
 	if summary == "" {
-		summary = "Draft handoff generated from the current Worktrail state."
+		summary = "Worktrail handoff generated from the latest active state."
 	}
-	stamp := time.Now().UTC().Format("20060102-150405")
-	rec, err := (candidate.Manager{Env: env, Actor: "cli:handoff"}).Create(candidate.CreateRequest{
-		Scope:         scope,
-		CandidateType: "handoff",
-		TargetPath:    filepath.ToSlash(filepath.Join("handoffs", stamp+"-"+util.Slug(title)+".md")),
-		Title:         title,
-		Summary:       summary,
-		Operation:     "create",
-		Body:          "# Handoff: " + title + "\n\n" + summary + "\n",
+	sourceState, err := latestStateIfAny(env, scope)
+	if err != nil {
+		return handoffWriteError(env, scope, err)
+	}
+	if title == "Handoff" && sourceState != nil {
+		title = sourceState.State.Title
+	}
+	latestHandoff, err := latestHandoffIfAny(env, scope)
+	if err != nil {
+		return handoffWriteError(env, scope, err)
+	}
+	rec, err := handoff.Create(env, handoff.CreateOptions{
+		Scope:             scope,
+		Title:             title,
+		Summary:           summary,
+		TaskID:            taskIDForHandoff(sourceState, latestHandoff, title),
+		SourceStateID:     sourceStateID(sourceState),
+		PreviousHandoffID: previousHandoffID(latestHandoff),
+		Tags:              []string{"handoff", "manual"},
+		Body:              renderHandoffRecordBody(title, summary, sourceState, "", latestHandoff),
+		Actor:             "cli:handoff",
 	})
 	if err != nil {
 		return handoffWriteError(env, scope, err)
 	}
-	return printCandidate(ioctx, rec, flagValue(flags, "format", "text"))
+	return printHandoffRecord(ioctx, rec, flagValue(flags, "format", "text"))
 }
 
 func handoffWriteError(env paths.Env, scope string, err error) error {
@@ -47,14 +63,12 @@ func handoffWriteError(env paths.Env, scope string, err error) error {
 	if rootErr != nil {
 		return err
 	}
-	return fmt.Errorf("handoff write failed for target %s; ensure the sandbox allows writes to %s: %w", filepath.Join(root, "candidates", scope), strings.Join(requiredWorktrailWriteDirs(root), ", "), err)
+	return fmt.Errorf("handoff write failed for target %s; ensure the sandbox allows writes to %s: %w", filepath.Join(root, "handoffs"), strings.Join(requiredWorktrailWriteDirs(root), ", "), err)
 }
 
 func requiredWorktrailWriteDirs(root string) []string {
 	return []string{
-		filepath.Join(root, "state", "active"),
-		filepath.Join(root, "state", "checkpoints"),
-		filepath.Join(root, "candidates"),
+		filepath.Join(root, "handoffs"),
 		filepath.Join(root, "logs"),
 	}
 }
@@ -62,7 +76,106 @@ func requiredWorktrailWriteDirs(root string) []string {
 func printHandoffHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail handoff [--scope project|user] [--title <title>] [--format text|json] <summary>")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Creates a pending handoff candidate without promoting formal knowledge.")
+	fmt.Fprintln(out, "Writes a durable handoff record under `.worktrail/handoffs/` without modifying formal knowledge outside the handoff log.")
+}
+
+func printHandoffRecord(ioctx IO, rec handoff.Record, format string) error {
+	if format == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(rec)
+	}
+	fmt.Fprintf(ioctx.Out, "%s\t%s\n", rec.Meta.ID, rec.Path)
+	return nil
+}
+
+func latestStateIfAny(env paths.Env, scope string) (*wtstate.Capsule, error) {
+	cap, err := wtstate.LatestActive(env, scope)
+	if err == nil {
+		return &cap, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return nil, err
+}
+
+func latestHandoffIfAny(env paths.Env, scope string) (*handoff.Record, error) {
+	rec, err := handoff.Latest(env, scope)
+	if err == nil {
+		return &rec, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return nil, err
+}
+
+func taskIDForHandoff(sourceState *wtstate.Capsule, previous *handoff.Record, title string) string {
+	if sourceState != nil {
+		if taskID := wtstate.TaskID(*sourceState); taskID != "" {
+			return taskID
+		}
+	}
+	if previous != nil && strings.TrimSpace(previous.Meta.TaskID) != "" {
+		return previous.Meta.TaskID
+	}
+	return "task-" + util.Slug(title)
+}
+
+func sourceStateID(sourceState *wtstate.Capsule) string {
+	if sourceState == nil {
+		return ""
+	}
+	return sourceState.State.ID
+}
+
+func previousHandoffID(previous *handoff.Record) string {
+	if previous == nil {
+		return ""
+	}
+	return previous.Meta.ID
+}
+
+func renderHandoffRecordBody(title, summary string, sourceState *wtstate.Capsule, sourceStatePath string, previous *handoff.Record) string {
+	var b strings.Builder
+	b.WriteString("# Handoff: ")
+	b.WriteString(title)
+	b.WriteString("\n\n## Summary\n\n")
+	b.WriteString(strings.TrimSpace(summary))
+	b.WriteString("\n\n")
+	if sourceState != nil {
+		path := sourceStatePath
+		if strings.TrimSpace(path) == "" {
+			path = sourceState.Path
+		}
+		b.WriteString("## Source State\n\n")
+		fmt.Fprintf(&b, "- State ID: %s\n- Task ID: %s\n- Path: `%s`\n\n", sourceState.State.ID, wtstate.TaskID(*sourceState), filepathToSlash(path))
+		b.WriteString("## State Snapshot\n\n")
+		b.WriteString(strings.TrimSpace(sourceState.Body))
+		b.WriteString("\n\n")
+	}
+	if previous != nil {
+		b.WriteString("## Previous Handoff\n\n")
+		fmt.Fprintf(&b, "- Handoff ID: %s\n- Path: `%s`\n\n", previous.Meta.ID, filepathToSlash(previous.Path))
+	}
+	b.WriteString("## Next Step\n\n")
+	if sourceState != nil {
+		b.WriteString("Read the linked state and continue from the latest validated point.\n")
+	} else {
+		b.WriteString("Read the linked knowledge and update the active state before continuing.\n")
+	}
+	return b.String()
+}
+
+func projectedArchivedStatePath(env paths.Env, scope, id string) string {
+	root, err := env.ScopeRoot(scope)
+	if err != nil || strings.TrimSpace(id) == "" {
+		return ""
+	}
+	return filepath.Join(root, "state", wtstate.DirArchived, id+".md")
+}
+
+func filepathToSlash(path string) string {
+	return strings.ReplaceAll(path, "\\", "/")
 }
 
 func runADR(_ context.Context, env paths.Env, ioctx IO, args []string) error {

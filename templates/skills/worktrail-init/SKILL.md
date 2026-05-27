@@ -1,6 +1,6 @@
 ---
 name: worktrail-init
-description: Initialize Worktrail and install Worktrail agent integrations. Use when the user asks to initialize Worktrail, set up Worktrail, install Worktrail for Cursor, Codex, Claude, or all agents, configure Worktrail hooks, MCP, rules, skills, or says 初始化 Worktrail.
+description: Initialize Worktrail and install Worktrail agent integrations. Use when the user asks to initialize Worktrail, set up Worktrail, install Worktrail for Cursor, Codex, Claude, or all agents, configure Worktrail hooks, rules, skills, tool settings, or says 初始化 Worktrail.
 ---
 
 # Worktrail Init
@@ -13,7 +13,7 @@ Use this skill when initializing Worktrail or installing Worktrail-managed agent
 - Do not require the target project to have Node, Python, Go, package manifests, or any app structure.
 - Do not overwrite non-Worktrail configuration.
 - Explain write impact before running commands that install or merge Worktrail integration files.
-- Worktrail-managed skills, hooks, and MCP configs call the `worktrail` command. Before installing integrations, ensure the Worktrail CLI is installed and available in `PATH`.
+- Worktrail-managed skills, hooks, and tool settings call the `worktrail` command. Before installing integrations, ensure the Worktrail CLI is installed and available in `PATH`.
 
 ## Workflow
 
@@ -24,7 +24,6 @@ Use this skill when initializing Worktrail or installing Worktrail-managed agent
 3. Inspect current Worktrail state:
    - `.worktrail/config.json`
    - `.gitignore`
-   - `.cursor/mcp.json`
    - `.cursor/hooks.json`
    - `.codex/hooks.json`
    - `.claude/settings.json`
@@ -42,9 +41,9 @@ Use this skill when initializing Worktrail or installing Worktrail-managed agent
 ## Scope Notes
 
 - `--user` installs user-level Worktrail instructions and skills where supported.
-- `--project` installs local project integration files where supported, such as Cursor MCP/hooks config.
+- `--project` installs local project integration files where supported, such as Cursor hooks and tool settings.
 - User-level instructions and skills must not auto-run Worktrail in a project unless `.worktrail/` exists at that workspace or repository root; project initialization or project install creates the project opt-in marker.
-- Cursor project installs do not create project-level skills or rules; they merge `.cursor/mcp.json` and `.cursor/hooks.json`.
+- Cursor project installs do not create project-level skills or rules; they merge `.cursor/hooks.json`.
 
 ## Output
 

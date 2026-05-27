@@ -10,7 +10,7 @@ Worktrail 有三件事需要区分：
 
 - CLI：本机可执行的 `worktrail` 命令
 - Worktrail scope：用户级 `~/.worktrail/` 和项目级 `.worktrail/`
-- Agent 集成：给 Codex、Claude Code、Cursor 安装规则、skills、hooks 或 MCP 配置
+- Agent 集成：给 Codex、Claude Code、Cursor 安装规则、skills、hooks 或工具配置
 
 普通使用者可以按这个顺序理解：
 
@@ -94,7 +94,7 @@ worktrail install codex --project
 worktrail install claude --project
 ```
 
-项目级安装主要写入当前仓库需要的 hooks、MCP/settings 配置和 `.gitignore` 运行时条目。它不会从 `templates/root/**` 或 `templates/skills/**` 安装项目级规则或项目级 skills。
+项目级安装主要写入当前仓库需要的 hooks、settings 配置和 `.gitignore` 运行时条目。它不会从 `templates/root/**` 或 `templates/skills/**` 安装项目级规则或项目级 skills。
 
 ### 一次安装用户级和项目级
 <div class="title-en">Install Both Scopes</div>

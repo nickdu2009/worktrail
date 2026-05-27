@@ -43,7 +43,11 @@ func installFakeWorktrailCommand(t *testing.T) {
 
 var allWorktrailSkills = []string{
 	"worktrail-context",
+	"worktrail-doc-preview",
+	"worktrail-search",
+	"worktrail-init",
 	"worktrail-state",
+	"worktrail-resume",
 	"worktrail-handoff",
 	"worktrail-import",
 	"worktrail-distill",
@@ -328,11 +332,11 @@ func TestInstallClaudeUserInstallsAllSkillsAndProjectRuntimeOnly(t *testing.T) {
 
 func TestInstallCursorProjectManagesNativeConfigWithoutIgnoringCursor(t *testing.T) {
 	env := testEnv(t)
-	mcpPath := filepath.Join(env.ProjectRoot, ".cursor", "mcp.json")
-	if err := os.MkdirAll(filepath.Dir(mcpPath), 0o755); err != nil {
+	hooksPath := filepath.Join(env.ProjectRoot, ".cursor", "hooks.json")
+	if err := os.MkdirAll(filepath.Dir(hooksPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{"existing":{"command":"existing"}}}`), 0o644); err != nil {
+	if err := os.WriteFile(hooksPath, []byte(`{"version":1,"hooks":{"existing":[{"command":"existing"}]}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -344,7 +348,6 @@ func TestInstallCursorProjectManagesNativeConfigWithoutIgnoringCursor(t *testing
 		t.Fatal("expected install actions")
 	}
 	for _, path := range []string{
-		filepath.Join(env.ProjectRoot, ".cursor", "mcp.json"),
 		filepath.Join(env.ProjectRoot, ".cursor", "hooks.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
@@ -353,7 +356,7 @@ func TestInstallCursorProjectManagesNativeConfigWithoutIgnoringCursor(t *testing
 	}
 	assertNoPath(t, filepath.Join(env.ProjectRoot, ".cursor", "rules", "worktrail.mdc"))
 	assertNoInstalledSkills(t, filepath.Join(env.ProjectRoot, ".cursor", "skills"))
-	raw, err := os.ReadFile(mcpPath)
+	raw, err := os.ReadFile(hooksPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,12 +364,12 @@ func TestInstallCursorProjectManagesNativeConfigWithoutIgnoringCursor(t *testing
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	servers := cfg["mcpServers"].(map[string]any)
-	if _, ok := servers["existing"]; !ok {
-		t.Fatalf("existing MCP server was not preserved: %s", raw)
+	hooks := cfg["hooks"].(map[string]any)
+	if _, ok := hooks["existing"]; !ok {
+		t.Fatalf("existing hook configuration was not preserved: %s", raw)
 	}
-	if _, ok := servers["worktrail"]; !ok {
-		t.Fatalf("worktrail MCP server missing: %s", raw)
+	if _, ok := hooks["stop"]; !ok {
+		t.Fatalf("worktrail cursor hooks missing: %s", raw)
 	}
 	gitignore, err := os.ReadFile(filepath.Join(env.ProjectRoot, ".gitignore"))
 	if err != nil {
@@ -403,7 +406,6 @@ func TestInstallCursorUserDoctorChecksRuleAndAllSkills(t *testing.T) {
 		}
 	}
 	for _, path := range []string{
-		filepath.Join(env.Home, ".cursor", "mcp.json"),
 		filepath.Join(env.Home, ".cursor", "hooks.json"),
 	} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -628,7 +630,11 @@ func assertRenderedTriggerRouting(t *testing.T, path string) {
 		"Project activation gate",
 		"`.worktrail/` exists",
 		"### worktrail-context",
+		"### worktrail-doc-preview",
+		"### worktrail-search",
+		"### worktrail-init",
 		"### worktrail-state",
+		"### worktrail-resume",
 		"### worktrail-handoff",
 		"### worktrail-import",
 		"### worktrail-distill",

@@ -18,7 +18,7 @@ var skillTriggers = []SkillTrigger{
 	{
 		Skill: "worktrail-context",
 		UseWhen: []string{
-			"starting substantial project work, resuming an old task, continuing previous work, loading project memory, or when the user asks to start work, continue a previous task, load context, or load project context",
+			"starting substantial project work, loading project memory, or when the user asks to start work, load context, or load project context",
 		},
 		RequiredActions: []string{
 			"Run `/worktrail-context` or `worktrail context \"<task>\"` before substantial work.",
@@ -26,6 +26,7 @@ var skillTriggers = []SkillTrigger{
 		},
 		Never: []string{
 			"Do not skip Worktrail context for substantial project work unless no project knowledge exists.",
+			"Do not use `worktrail context` as the recovery command for a new session that should continue prior state or handoff; use `worktrail resume` instead.",
 		},
 	},
 	{
@@ -35,23 +36,40 @@ var skillTriggers = []SkillTrigger{
 		},
 		RequiredActions: []string{
 			"Run `worktrail preview --scope <scope>` or `worktrail preview --scope <scope> --no-open`.",
-			"Use browser verification when available and report the preview entry path, scope, and validation result.",
+			"Use browser verification when available for preview flows, and report the preview entry path, scope, and validation result.",
 		},
 		Never: []string{
+			"Do not use `worktrail preview` for keyword lookup requests; use `worktrail search` instead.",
 			"Do not use the target project's dev server, docs site, package manager, or framework for Worktrail document preview.",
 			"Do not preview non-Worktrail content or modify target project business files.",
 		},
 	},
 	{
-		Skill: "worktrail-init",
+		Skill: "worktrail-search",
 		UseWhen: []string{
-			"the user asks to initialize Worktrail, set up Worktrail, install Worktrail for Cursor, Codex, Claude, or all agents, configure Worktrail hooks, MCP, rules, or skills",
+			"the user asks to search Worktrail knowledge, find a Worktrail document by keyword, locate a rule or lesson in Worktrail, or pinpoint Worktrail knowledge without opening the full preview site",
 		},
 		RequiredActions: []string{
-			"Ensure the Worktrail CLI is installed and `worktrail` is available in `PATH` before installing Worktrail-managed skills, hooks, or MCP configs.",
+			"Run `worktrail search \"<keyword>\"` for keyword lookup when the user wants to pinpoint Worktrail knowledge quickly.",
+			"Report the keyword used, the scope if relevant, and the search result or next step.",
+		},
+		Never: []string{
+			"Do not substitute `worktrail context` or `worktrail preview` for the initial keyword lookup.",
+			"Do not substitute generic shell tools such as `rg`, `grep`, or `find` for Worktrail keyword lookup.",
+			"Do not open the preview site unless the user also asked to browse rendered Worktrail pages.",
+			"Do not use browser verification for search-only flows.",
+		},
+	},
+	{
+		Skill: "worktrail-init",
+		UseWhen: []string{
+			"the user asks to initialize Worktrail, set up Worktrail, install Worktrail for Cursor, Codex, Claude, or all agents, configure Worktrail hooks, rules, skills, or tool settings",
+		},
+		RequiredActions: []string{
+			"Ensure the Worktrail CLI is installed and `worktrail` is available in `PATH` before installing Worktrail-managed skills, hooks, or tool settings.",
 			"Run `worktrail init` for Worktrail user and project initialization.",
 			"Run `worktrail install cursor|codex|claude|all --user|--project` as requested and verify with `worktrail doctor <tool> --user|--project`.",
-			"Report the Worktrail-managed files affected, including `.worktrail`, `.gitignore`, agent hooks, MCP config, rules, and skills as applicable.",
+			"Report the Worktrail-managed files affected, including `.worktrail`, `.gitignore`, agent hooks, tool settings, rules, and skills as applicable.",
 		},
 		Never: []string{
 			"Do not initialize the target application's language, framework, package manager, or git repository.",
@@ -64,11 +82,26 @@ var skillTriggers = []SkillTrigger{
 			"the task is long, risky, multi-step, likely to compact, needs a checkpoint, or the user asks to record current state, update state, create a checkpoint, inject state, or save progress",
 		},
 		RequiredActions: []string{
-			"Use `worktrail state start`, `worktrail state update --session latest`, `worktrail state checkpoint --reason <reason>`, or `worktrail state inject \"<task>\"` as appropriate.",
+			"Use `worktrail state start`, `worktrail state update \"<note>\"`, `worktrail state checkpoint --reason <reason>`, or `worktrail state inject \"<task>\"` as appropriate.",
 			"Keep state factual: goal, constraints, evidence, decisions, work done, validation, open questions, and next step.",
 		},
 		Never: []string{
+			"Do not use `worktrail state start` or `worktrail state inject` when the user is resuming prior Worktrail work in a new session; use `worktrail resume` instead.",
 			"Do not store secrets, raw credentials, or private runtime payloads in state.",
+		},
+	},
+	{
+		Skill: "worktrail-resume",
+		UseWhen: []string{
+			"starting a new session that should continue prior work, resuming from the latest state or handoff, or when the user asks to continue the previous Worktrail session",
+		},
+		RequiredActions: []string{
+			"Run `worktrail resume \"<task>\"` when a new session should continue from the latest state and/or durable handoff.",
+			"Read the resumed state output and continue work from the linked records instead of reconstructing context manually.",
+		},
+		Never: []string{
+			"Do not use `worktrail context`, `worktrail state inject`, `worktrail state start`, `worktrail state list`, or `worktrail state show` as substitutes when the intent is to resume prior Worktrail state.",
+			"Do not skip reading the resumed records before continuing risky work.",
 		},
 	},
 	{
@@ -77,7 +110,7 @@ var skillTriggers = []SkillTrigger{
 			"ending a session, compacting context, switching tools or agents, opening a new chat or new conversation, handing off work, requests to end current chat, or when the user says handoff, compact, switch chat, or switch agent",
 		},
 		RequiredActions: []string{
-			"Run `/worktrail-handoff` or `worktrail handoff \"<summary>\"` and create a Worktrail handoff candidate.",
+			"Run `/worktrail-handoff` or `worktrail handoff \"<summary>\"` and write a durable Worktrail handoff record.",
 			"Summarize active state, current diff intent, validation, risks, open questions, and the next step.",
 		},
 		Never: []string{

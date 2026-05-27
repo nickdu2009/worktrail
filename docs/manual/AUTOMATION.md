@@ -19,7 +19,7 @@ Worktrail 的自动化目标很克制：
 
 在 Worktrail 里，自动化主要来自四层：
 
-1. agent 集成安装后的运行时文件，例如 hooks、MCP 配置和用户级 skills
+1. agent 集成安装后的运行时文件，例如 hooks、settings 配置和用户级 skills
 2. 对话内 skills，例如 `/worktrail-context`、`/worktrail-review`、`/worktrail-distill`、`/worktrail-maintain`、`/worktrail-handoff`
 3. `context` 暴露的 maintenance hints 和只读计划命令
 4. hooks 在特定事件点生成 state、checkpoint、candidate 或 handoff 的能力
@@ -44,7 +44,7 @@ worktrail install <tool> --user --project
 这里要区分两件事：
 
 - `worktrail init` 负责初始化用户级和项目级 Worktrail 根目录
-- `worktrail install ...` 负责安装工具集成文件，例如 hooks、MCP/settings 和用户级 rules/skills
+- `worktrail install ...` 负责安装工具集成文件，例如 hooks、settings 和用户级 rules/skills
 
 用户级 Worktrail skills 不应在没有 `.worktrail/` 的项目里自动跑常规工作流；没有这个标记时，Worktrail 仍然只适合显式 init、install、inspect 或 repair 请求。
 
@@ -57,7 +57,7 @@ hooks 的职责是把会话事件转换成 Worktrail 可用的运行材料。
 
 - 在会话开始或恢复时帮助载入上下文
 - 在 compact、stop 或 session end 之类的事件点更新 active state 或写入 checkpoint
-- 生成候选知识、handoff 或其他操作记录
+- 生成工作记录、checkpoint、handoff candidate 或其他操作记录
 - 把某些事件转化为后续 review/maintenance 可见的输入
 
 它们不适合做的事情包括：
@@ -84,24 +84,14 @@ skills 是 Worktrail 的对话内工作流入口。它们把多步命令链包�
 
 skills 自动化的是流程编排，不是绕过边界。
 
-## MCP 在自动化里的角色
-<div class="title-en">What MCP Does in Automation</div>
+## Hooks 和 Skills 的边界
+<div class="title-en">Hook and Skill Boundaries</div>
 
-MCP 在 Worktrail 里是本地 stdio 工具层，不是单独的服务平台。
+Worktrail 只保留 CLI、hooks 和 skills 这三类自动化入口。
 
-它的角色是：
-
-- 让 Agent 读取上下文、候选、预览或其他本地 Worktrail 数据
-- 为 chat-native review 和 draft 生成提供工具入口
-- 在不离开当前对话的前提下，让 Agent 调用本地能力
-
-它明确不做的事情包括：
-
-- 不提供 HTTP MCP server
-- 不默认暴露危险写工具
-- 不把 `promote`、`merge`、`discard` 这类高风险动作做成默认 MCP 写入口
-
-高风险写动作仍然应通过非交互 CLI，在用户确认后执行。
+- hooks 负责在明确事件点自动写工作记录、checkpoint、handoff draft candidate 和日志
+- skills 负责在对话里编排 `context`、`review`、`distill`、`handoff`、`resume` 等流程
+- 高风险写动作仍然通过显式 CLI 执行，并保留人工确认边界
 
 ## 低干预维护如何自动发现工作
 <div class="title-en">How Low-Intervention Maintenance Works</div>
@@ -135,10 +125,8 @@ Worktrail 明确不做这些自动化：
 
 - 不做后台 daemon、watcher 或 scheduler
 - 不做 Web dashboard 或 TUI
-- 不做 HTTP MCP server
 - 不做自动 promote / merge / discard / archive
 - 不做 hooks 自动采纳知识
-- 不做默认 MCP 危险写工具
 - 不做隐式后台 transcript 扫描和后台同步
 
 这些边界不是缺点，而是为了避免自动化越过 review、权限和可解释性边界。

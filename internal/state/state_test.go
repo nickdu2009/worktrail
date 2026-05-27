@@ -38,6 +38,7 @@ func TestLifecycleWritesMarkdownLogsAndHandoff(t *testing.T) {
 		t.Fatalf("unexpected started state: %+v", started.State)
 	}
 	assertMarkdownMeta(t, started.Path, "st_test", "active")
+	assertMarkdownMeta(t, filepath.Join(env.ProjectWT, "state", "active", "latest.md"), "st_test", "active")
 
 	updatedBody := "# Current\n\nReplaced body."
 	updated, err := Update(env, UpdateOptions{
@@ -81,11 +82,17 @@ func TestLifecycleWritesMarkdownLogsAndHandoff(t *testing.T) {
 	if closed.Capsule.State.Status != "closed" {
 		t.Fatalf("closed status = %s", closed.Capsule.State.Status)
 	}
-	if !strings.Contains(closed.HandoffBody, "# Handoff: Test State") || !strings.Contains(closed.HandoffBody, "Ready for the next agent.") {
-		t.Fatalf("handoff body = %q", closed.HandoffBody)
+	if closed.Capsule.Directory != DirArchived || closed.Capsule.Path != filepath.Join(env.ProjectWT, "state", "archived", "st_test.md") {
+		t.Fatalf("closed capsule = %+v", closed.Capsule)
 	}
 	if _, err := os.Stat(filepath.Join(env.ProjectWT, "candidates")); !os.IsNotExist(err) {
 		t.Fatalf("close should not write candidates, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.ProjectWT, "state", "active", "st_test.md")); !os.IsNotExist(err) {
+		t.Fatalf("close should remove active state file, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.ProjectWT, "state", "active", "latest.md")); !os.IsNotExist(err) {
+		t.Fatalf("close should remove latest alias, err=%v", err)
 	}
 
 	listed, err := List(env, ListOptions{Scope: "project", Directory: "all"})
@@ -128,6 +135,27 @@ func TestStateIDRejectsPathEscape(t *testing.T) {
 	}
 	if _, err := Show(env, ShowOptions{ID: "../bad"}); err == nil {
 		t.Fatal("expected path separator error")
+	}
+}
+
+func TestStartCleansUpOnLatestAliasFailure(t *testing.T) {
+	env := testEnv(t)
+	if _, err := Start(env, StartOptions{Scope: "project", ID: "st_ok", Title: "Okay", Actor: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	latestPath := filepath.Join(env.ProjectWT, "state", "active", "latest.md")
+	if err := os.Remove(latestPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(latestPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Start(env, StartOptions{Scope: "project", ID: "st_fail", Title: "Fails", Actor: "test"}); err == nil {
+		t.Fatal("expected latest alias sync failure")
+	}
+	if _, err := os.Stat(filepath.Join(env.ProjectWT, "state", "active", "st_fail.md")); !os.IsNotExist(err) {
+		t.Fatalf("failed start should not leave active file, err=%v", err)
 	}
 }
 

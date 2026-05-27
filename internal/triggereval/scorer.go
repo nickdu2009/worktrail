@@ -120,18 +120,53 @@ func observedForbidden(c Case, e Evidence) []string {
 }
 
 func commandObserved(want string, commands []string) bool {
-	want = canonicalWorktrailCommand(want)
-	if want == "" {
+	if canonical := canonicalWorktrailCommand(want); canonical != "" {
+		for _, got := range commands {
+			for _, got := range extractedWorktrailCommands(got) {
+				if got == canonical || strings.HasPrefix(got, canonical+" ") {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	target := strings.ToLower(strings.TrimSpace(want))
+	if target == "" {
 		return false
 	}
 	for _, got := range commands {
-		for _, got := range extractedWorktrailCommands(got) {
-			if got == want || strings.HasPrefix(got, want+" ") {
+		for _, segment := range extractedShellSegments(got) {
+			if segment == target || strings.HasPrefix(segment, target+" ") {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func extractedShellSegments(command string) []string {
+	command = strings.TrimSpace(strings.TrimPrefix(command, "$"))
+	if command == "" {
+		return nil
+	}
+	payload := command
+	if shell, ok := shellPayload(command); ok {
+		payload = shell
+	}
+	var out []string
+	for _, segment := range splitShellSegments(payload) {
+		tokens, err := SplitCommandLine(strings.TrimSpace(segment))
+		if err != nil || len(tokens) == 0 {
+			continue
+		}
+		tokens = stripEnvAssignments(tokens)
+		if len(tokens) == 0 {
+			continue
+		}
+		tokens[0] = tokenBase(tokens[0])
+		out = append(out, strings.ToLower(strings.Join(tokens, " ")))
+	}
+	return uniqueStrings(out)
 }
 
 func normalizeCommand(cmd string) string {
@@ -326,6 +361,17 @@ func hasWorktrailEvidence(e Evidence) bool {
 }
 
 func hasNegativeTriggerEvidence(c Case, e Evidence) bool {
+	if len(c.ForbiddenPatterns) > 0 {
+		for _, pattern := range c.ForbiddenPatterns {
+			if strings.Contains(pattern, "=") {
+				continue
+			}
+			if commandObserved(pattern, e.CommandsObserved) {
+				return true
+			}
+		}
+		return false
+	}
 	for _, cmd := range e.CommandsObserved {
 		for _, got := range extractedWorktrailCommands(cmd) {
 			if negativeCommandMatches(c, got) {
@@ -356,8 +402,14 @@ func skillCommandPrefix(skill string) string {
 	switch skill {
 	case SkillContext:
 		return "worktrail context"
+	case SkillDocPreview:
+		return "worktrail preview"
+	case SkillSearch:
+		return "worktrail search"
 	case SkillState:
 		return "worktrail state"
+	case SkillResume:
+		return "worktrail resume"
 	case SkillHandoff:
 		return "worktrail handoff"
 	case SkillImport:
@@ -404,8 +456,14 @@ func skillKeywords(skill string) []string {
 	switch skill {
 	case SkillContext:
 		return []string{"context"}
+	case SkillDocPreview:
+		return []string{"preview", "browse", "rendered"}
+	case SkillSearch:
+		return []string{"search", "keyword", "find"}
 	case SkillState:
 		return []string{"state", "checkpoint", "progress"}
+	case SkillResume:
+		return []string{"resume", "continue", "handoff", "session"}
 	case SkillHandoff:
 		return []string{"handoff"}
 	case SkillImport:

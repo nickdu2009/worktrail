@@ -7,13 +7,16 @@ const (
 )
 
 const (
-	SkillContext  = "worktrail-context"
-	SkillState    = "worktrail-state"
-	SkillHandoff  = "worktrail-handoff"
-	SkillImport   = "worktrail-import"
-	SkillDistill  = "worktrail-distill"
-	SkillReview   = "worktrail-review"
-	SkillMaintain = "worktrail-maintain"
+	SkillContext    = "worktrail-context"
+	SkillDocPreview = "worktrail-doc-preview"
+	SkillSearch     = "worktrail-search"
+	SkillState      = "worktrail-state"
+	SkillResume     = "worktrail-resume"
+	SkillHandoff    = "worktrail-handoff"
+	SkillImport     = "worktrail-import"
+	SkillDistill    = "worktrail-distill"
+	SkillReview     = "worktrail-review"
+	SkillMaintain   = "worktrail-maintain"
 )
 
 const (
@@ -129,7 +132,10 @@ type JudgeSummary struct {
 func WorktrailSkills() []string {
 	return []string{
 		SkillContext,
+		SkillDocPreview,
+		SkillSearch,
 		SkillState,
+		SkillResume,
 		SkillHandoff,
 		SkillImport,
 		SkillDistill,

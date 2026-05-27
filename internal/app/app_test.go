@@ -222,12 +222,13 @@ func TestTopLevelHelpIncludesCandidateApplyCommands(t *testing.T) {
 		t.Fatalf("Run help: %v stderr=%s", err, errb.String())
 	}
 	for _, want := range []string{
-		"worktrail promote <candidate-id>",
-		"worktrail merge <candidate-id>",
-		"worktrail discard <candidate-id>",
-		"worktrail index diff [--scope project|user|all]",
-		"worktrail doctor delete <path>",
-		"worktrail context --include-lifecycle historical <task>",
+		"worktrail preview [--scope project|user] [--no-open]",
+		"worktrail search <keyword>",
+		"worktrail state start <title>",
+		"worktrail state update <note>",
+		"worktrail handoff <summary>",
+		"worktrail resume [<task>]",
+		"worktrail doctor knowledge",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("top-level help missing %q:\n%s", want, out.String())
@@ -258,6 +259,7 @@ func TestCLIHelpSmokeDoesNotMutateState(t *testing.T) {
 		{name: "state checkpoint", args: []string{"state", "checkpoint", "--help"}, want: "checkpoint"},
 		{name: "state inject", args: []string{"state", "inject", "--help"}, want: "inject"},
 		{name: "handoff", args: []string{"handoff", "--help"}, want: "usage: worktrail handoff"},
+		{name: "resume", args: []string{"resume", "--help"}, want: "usage: worktrail resume"},
 		{name: "import", args: []string{"import", "--help"}, want: "usage: worktrail import codex"},
 		{name: "review", args: []string{"review", "--help"}, want: "usage: worktrail review"},
 		{name: "distill", args: []string{"distill", "--help"}, want: "usage: worktrail distill"},
@@ -300,7 +302,7 @@ func TestCLIHelpSmokeDoesNotMutateState(t *testing.T) {
 	if err := Run(context.Background(), []string{"handoff", "need", "help", "later"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run handoff with help summary word: %v stderr=%s", err, errb.String())
 	}
-	if strings.Contains(out.String(), "usage: worktrail handoff") || !strings.Contains(out.String(), "handoff-") {
+	if strings.Contains(out.String(), "usage: worktrail handoff") || !strings.Contains(out.String(), filepath.Join(".worktrail", "handoffs")) {
 		t.Fatalf("handoff summary word help was treated as help output:\n%s", out.String())
 	}
 }
@@ -425,7 +427,6 @@ func TestInstallAllIncludesCursorAndPreservesCompatibleSkills(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(project, ".codex", "hooks.json"),
 		filepath.Join(project, ".claude", "settings.json"),
-		filepath.Join(project, ".cursor", "mcp.json"),
 		filepath.Join(project, ".cursor", "hooks.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
@@ -704,19 +705,87 @@ func TestHandoffWriteFailureReportsWorktrailWriteDirs(t *testing.T) {
 	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
 	var out, errb bytes.Buffer
 	runApp(t, &out, &errb, "init")
-	if err := os.RemoveAll(filepath.Join(project, ".worktrail", "candidates")); err != nil {
+	if err := os.RemoveAll(filepath.Join(project, ".worktrail", "handoffs")); err != nil {
 		t.Fatal(err)
 	}
-	writeTextFile(t, filepath.Join(project, ".worktrail", "candidates"), "not a directory\n")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "handoffs"), "not a directory\n")
 
-	err := Run(context.Background(), []string{"handoff", "cannot write candidate"}, nil, &out, &errb)
+	err := Run(context.Background(), []string{"handoff", "cannot write handoff"}, nil, &out, &errb)
 	if err == nil {
 		t.Fatalf("handoff unexpectedly succeeded")
 	}
-	for _, want := range []string{"handoff write failed", filepath.Join(project, ".worktrail", "candidates", "project"), filepath.Join(project, ".worktrail", "state", "active"), filepath.Join(project, ".worktrail", "logs")} {
+	for _, want := range []string{"handoff write failed", filepath.Join(project, ".worktrail", "handoffs"), filepath.Join(project, ".worktrail", "logs")} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("handoff error missing %q:\n%v", want, err)
 		}
+	}
+}
+
+func TestStateCloseToHandoffFailureKeepsActiveState(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "state", "start", "Close Safety")
+	if err := os.RemoveAll(filepath.Join(project, ".worktrail", "handoffs")); err != nil {
+		t.Fatal(err)
+	}
+	writeTextFile(t, filepath.Join(project, ".worktrail", "handoffs"), "not a directory\n")
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"state", "close", "--to", "handoff", "need durable handoff"}, nil, &out, &errb)
+	if err == nil {
+		t.Fatalf("state close unexpectedly succeeded")
+	}
+	active := nonAliasStateFiles(t, filepath.Join(project, ".worktrail", "state", "active", "*.md"))
+	if len(active) != 1 {
+		t.Fatalf("active state files = %v, want 1 active state", active)
+	}
+	archived := nonAliasStateFiles(t, filepath.Join(project, ".worktrail", "state", "archived", "*.md"))
+	if len(archived) != 0 {
+		t.Fatalf("archived state files = %v, want none", archived)
+	}
+}
+
+func TestResumeFailureKeepsSourceStateActive(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "state", "start", "Resume Safety")
+
+	latestPath := filepath.Join(project, ".worktrail", "state", "active", "latest.md")
+	if err := os.Remove(latestPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(latestPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"resume", "Resume Safety Continued"}, nil, &out, &errb)
+	if err == nil {
+		t.Fatalf("resume unexpectedly succeeded")
+	}
+	active := nonAliasStateFiles(t, filepath.Join(project, ".worktrail", "state", "active", "*.md"))
+	if len(active) != 1 {
+		t.Fatalf("active state files = %v, want source state only", active)
+	}
+	archived := nonAliasStateFiles(t, filepath.Join(project, ".worktrail", "state", "archived", "*.md"))
+	if len(archived) != 0 {
+		t.Fatalf("archived state files = %v, want none", archived)
 	}
 }
 
@@ -932,7 +1001,7 @@ func TestMigrateKDDCreatesProjectAndUserCandidates(t *testing.T) {
 
 	runApp(t, &out, &errb, "promote", "kdd-project-architecture-system")
 	text := runApp(t, &out, &errb, "context", "architecture")
-	if !strings.Contains(text, "Architecture") || !strings.Contains(text, "Architecture body.") {
+	if !strings.Contains(text, "Architecture") || !strings.Contains(text, "architecture/system.md") {
 		t.Fatalf("context missing promoted architecture:\n%s", text)
 	}
 }
@@ -1480,7 +1549,7 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"context", "--evidence", "task"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run context evidence: %v stderr=%s", err, errb.String())
 	}
-	if !strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "Evidence body.") || !strings.Contains(out.String(), "rule-1") || strings.Contains(out.String(), "Hidden evidence candidates") {
+	if !strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "rule-1") || strings.Contains(out.String(), "Evidence body.") || strings.Contains(out.String(), "Hidden evidence candidates") {
 		t.Fatalf("context evidence output unexpected:\n%s", out.String())
 	}
 
@@ -1808,7 +1877,7 @@ func TestDistillProposalEndToEndPromoteContextFromMigrationSource(t *testing.T) 
 	runApp(t, &out, &errb, "promote", createdID)
 	runApp(t, &out, &errb, "index", "rebuild")
 	text = runApp(t, &out, &errb, "context", "distilled term")
-	if !strings.Contains(text, "glossary/distilled-term.md") || !strings.Contains(text, "Definition from split source evidence.") {
+	if !strings.Contains(text, "glossary/distilled-term.md") || strings.Contains(text, "Definition from split source evidence.") {
 		t.Fatalf("migration source promoted context output unexpected:\n%s", text)
 	}
 }
@@ -2138,14 +2207,14 @@ func TestAppSmokeCoreCLILifecycle(t *testing.T) {
 	}
 
 	text = runApp(t, &out, &errb, "context", "--evidence", "smoke task")
-	if !strings.Contains(text, "smoke-rule") || !strings.Contains(text, "smoke-note") || !strings.Contains(text, "Smoke evidence body.") || strings.Contains(text, "Hidden evidence candidates") {
+	if !strings.Contains(text, "smoke-rule") || !strings.Contains(text, "smoke-note") || strings.Contains(text, "Smoke evidence body.") || strings.Contains(text, "Hidden evidence candidates") {
 		t.Fatalf("smoke context evidence output unexpected:\n%s", text)
 	}
 
 	runApp(t, &out, &errb, "promote", "smoke-rule")
 	runApp(t, &out, &errb, "index", "rebuild")
 	text = runApp(t, &out, &errb, "context", "promoted smoke rule")
-	if !strings.Contains(text, "rules/smoke-rule.md") || !strings.Contains(text, "Smoke rule body.") {
+	if !strings.Contains(text, "rules/smoke-rule.md") || strings.Contains(text, "Smoke rule body.") {
 		t.Fatalf("smoke promoted context output unexpected:\n%s", text)
 	}
 
@@ -2355,4 +2424,20 @@ func writeTextFile(t *testing.T, path string, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func nonAliasStateFiles(t *testing.T, pattern string) []string {
+	t.Helper()
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if filepath.Base(match) == "latest.md" {
+			continue
+		}
+		out = append(out, match)
+	}
+	return out
 }

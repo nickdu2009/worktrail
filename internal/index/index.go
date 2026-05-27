@@ -520,7 +520,7 @@ func buildEntry(root, path, rel, scope string) (Entry, bool, error) {
 
 func shouldSkip(rel string) bool {
 	base := filepath.Base(rel)
-	return base == "config.json" || base == ".DS_Store"
+	return base == "config.json" || base == ".DS_Store" || rel == "state/active/latest.md"
 }
 
 func inferScope(root string) string {

@@ -50,11 +50,11 @@ worktrail context --stage implementation "implement cursor import limits"
 1. 开始时创建状态。
 2. 每个关键决策、验证结果或剩余风险发生变化时追加更新。
 3. 在进入高风险步骤前创建 checkpoint。
-4. 结束时关闭状态，或生成 handoff。
+4. 结束时关闭状态，必要时顺手写 durable handoff。
 
 ```bash
 worktrail state start "review import workflow docs"
-worktrail state update --session latest "Read manual style and selected docs/manual layout."
+worktrail state update "Read manual style and selected docs/manual layout."
 worktrail state checkpoint --reason "before applying documentation patch"
 worktrail state close "manual created and linked from README"
 ```
@@ -63,6 +63,12 @@ worktrail state close "manual created and linked from README"
 
 ```bash
 worktrail state close --to handoff "continue from validation and README link review"
+```
+
+如果你只是想在当前任务节点单独写一份交接记录：
+
+```bash
+worktrail handoff "Goal, current diff intent, validation, risks, open questions, and next step."
 ```
 
 ## 工作流 3：沉淀一条人工确认的知识
@@ -176,11 +182,14 @@ worktrail maintain knowledge --format json
 ### 如何运行
 <div class="title-en">How It Runs</div>
 
-```bash
-worktrail handoff "Goal, current diff intent, validation, risks, open questions, and next step."
-```
+`handoff` 会写一份真实的 `.worktrail/handoffs/*.md` 交接记录，不会提升正式知识。hooks 在 `stop` / `session-end` 里只会起草 pending handoff candidate；如果其中内容值得长期复用，再进入 review 或 distill 路径。
 
-handoff 会创建 pending handoff candidate，不会提升正式知识。后续如需把其中可复用的内容沉淀为规则、决策或工作流，应先 distill 或手动创建 semantic candidate，再进入 review。
+新 session 开始时优先用：
+
+```bash
+worktrail resume
+worktrail resume "continue from latest handoff"
+```
 
 ## 工作流 7：预览 Worktrail 文档
 <div class="title-en">Workflow 7: Preview Worktrail Documents</div>

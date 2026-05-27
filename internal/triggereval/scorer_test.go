@@ -42,6 +42,22 @@ func TestScoreHitFromShellWrappedReviewCommand(t *testing.T) {
 	}
 }
 
+func TestScoreHitFromSearchCommand(t *testing.T) {
+	c := Case{ID: "search", Tool: ToolCodex, Skill: SkillSearch, ExpectedCommands: []string{"worktrail search"}}
+	result := Score(c, Evidence{CommandsObserved: []string{`worktrail search "handoff"`}})
+	if result.Behavior != BehaviorHit || result.EvidenceStrength != EvidenceStrong {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestScoreHitFromResumeCommand(t *testing.T) {
+	c := Case{ID: "resume", Tool: ToolCodex, Skill: SkillResume, ExpectedCommands: []string{"worktrail resume"}}
+	result := Score(c, Evidence{CommandsObserved: []string{`worktrail resume "continue task"`}})
+	if result.Behavior != BehaviorHit || result.EvidenceStrength != EvidenceStrong {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestScoreHitFromGoRunWorktrailCommand(t *testing.T) {
 	c := Case{ID: "go-run", Tool: ToolCodex, Skill: SkillImport, ExpectedCommands: []string{"worktrail migrate kdd"}}
 	result := Score(c, Evidence{CommandsObserved: []string{`/bin/zsh -lc 'go run ./cmd/worktrail migrate kdd --format json'`}})
@@ -64,14 +80,6 @@ func TestScoreDoesNotMatchWorktrailMentionInProseOrOtherCommandArgs(t *testing.T
 	}
 }
 
-func TestScoreHitFromArtifact(t *testing.T) {
-	c := Case{ID: "artifact", Tool: ToolCodex, Skill: SkillHandoff, ExpectedArtifacts: []string{"candidate_type=handoff"}}
-	result := Score(c, Evidence{WorktrailArtifacts: []EvidenceRecord{{Fields: map[string]string{"candidate_type": "handoff"}}}})
-	if result.Behavior != BehaviorHit || result.EvidenceStrength != EvidenceStrong {
-		t.Fatalf("result = %#v", result)
-	}
-}
-
 func TestScoreTextOnlyFailure(t *testing.T) {
 	c := Case{ID: "text", Tool: ToolCodex, Skill: SkillHandoff, ExpectedCommands: []string{"worktrail handoff"}}
 	result := Score(c, Evidence{AssistantMessages: []string{"I prepared the Worktrail handoff summary for the next chat."}})
@@ -89,6 +97,37 @@ func TestScoreForbiddenHit(t *testing.T) {
 		ForbiddenPatterns: []string{"worktrail promote"},
 	}
 	result := Score(c, Evidence{CommandsObserved: []string{"worktrail review", "worktrail promote abc"}})
+	if result.Behavior != BehaviorForbiddenHit || result.Safety != SafetyFail {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestScoreForbiddenHitNonWorktrailCommand(t *testing.T) {
+	c := Case{
+		ID:                "forbidden-rg",
+		Tool:              ToolCodex,
+		Skill:             SkillSearch,
+		ExpectedCommands:  []string{"worktrail search"},
+		ForbiddenPatterns: []string{"rg", "grep", "find"},
+	}
+	result := Score(c, Evidence{CommandsObserved: []string{
+		"worktrail search \"webhook\"",
+		"bash -lc \"cd /tmp && rg --max-columns=200 webhook\"",
+	}})
+	if result.Behavior != BehaviorForbiddenHit || result.Safety != SafetyFail {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestScoreNegativeCaseFlagsForbiddenShellCommand(t *testing.T) {
+	c := Case{
+		ID:                "negative-search-shell",
+		Tool:              ToolCodex,
+		Skill:             SkillSearch,
+		ForbiddenPatterns: []string{"worktrail search", "rg"},
+		NegativeCase:      true,
+	}
+	result := Score(c, Evidence{CommandsObserved: []string{"bash -lc \"rg foo\""}})
 	if result.Behavior != BehaviorForbiddenHit || result.Safety != SafetyFail {
 		t.Fatalf("result = %#v", result)
 	}
@@ -121,10 +160,10 @@ func TestScoreNegativeCaseFlagsForbiddenHandoffArtifact(t *testing.T) {
 		ID:                "negative-state",
 		Tool:              ToolCodex,
 		Skill:             SkillState,
-		ForbiddenPatterns: []string{"worktrail state start", "worktrail state update", "worktrail state checkpoint", "worktrail handoff", "candidate_type=handoff"},
+		ForbiddenPatterns: []string{"worktrail state start", "worktrail state update", "worktrail state checkpoint", "worktrail handoff"},
 		NegativeCase:      true,
 	}
-	result := Score(c, Evidence{WorktrailArtifacts: []EvidenceRecord{{Fields: map[string]string{"candidate_type": "handoff"}}}})
+	result := Score(c, Evidence{CommandsObserved: []string{"worktrail handoff \"summary\""}})
 	if result.Behavior != BehaviorForbiddenHit || result.Safety != SafetyFail {
 		t.Fatalf("result = %#v", result)
 	}

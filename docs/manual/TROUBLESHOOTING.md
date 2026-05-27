@@ -35,7 +35,7 @@ worktrail context "debug current worktrail setup"
 worktrail --help
 ```
 
-Agent 集成会调用 `worktrail` 命令，所以 CLI 不可用时，hooks、skills 或 MCP 相关能力也会失败。
+Agent 集成会调用 `worktrail` 命令，所以 CLI 不可用时，hooks、skills 或 settings 相关能力也会失败。
 
 ## 上下文里没有项目知识
 <div class="title-en">No Project Knowledge in Context</div>

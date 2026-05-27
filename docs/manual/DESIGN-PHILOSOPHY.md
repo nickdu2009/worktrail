@@ -77,7 +77,7 @@ Worktrail 明确不做 TUI，也不做独立 Web UI 或 dashboard。
 - 工具需要多维护一套交互层、状态层和权限边界
 - review 的上下文会被拆散，不再和当前任务对话保持一致
 
-所以 Worktrail 的设计是：CLI、skills 和 MCP 提供读取与执行能力，真正的人审和确认留在对话里完成。
+所以 Worktrail 的设计是：CLI、skills 和 hooks 提供读取与执行能力，真正的人审和确认留在对话里完成。
 
 ## 为什么写操作必须显式确认
 <div class="title-en">Why Explicit Confirmation Is the Write Boundary</div>
@@ -101,7 +101,7 @@ Worktrail 不把“自动判断对不对”当成默认前提，而把“明确�
 Worktrail 明确不做这些东西：
 
 - daemon、watcher、后台常驻服务
-- HTTP MCP server
+- MCP server
 - Web dashboard
 - embedding / vector database
 - custom external command provider
@@ -112,7 +112,7 @@ Worktrail 更偏向显式触发：
 
 - CLI 在需要时运行
 - hooks 在明确事件点运行
-- MCP 只通过 stdio 由 Agent 启动
+- hooks 只在明确事件点写工作记录
 - maintenance 通过上下文提示和只读计划逐步展开
 
 这让系统更可理解，也更容易在本地环境里长期稳定运行。
