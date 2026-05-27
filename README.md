@@ -40,7 +40,7 @@ worktrail preview
 worktrail preview --scope user
 ```
 
-`worktrail preview` renders a local HTML file for the selected scope and opens it in the browser. It does not start a long-running HTTP preview service.
+`worktrail preview` renders a local multi-page static site for the selected scope and opens the entry page in the browser. The entry path is stable under `.worktrail/.cache/preview/index.html`, and the command does not start a long-running HTTP preview service.
 
 If you already installed Worktrail-managed skills or rules for Cursor, Codex, or Claude, rerun `worktrail install <tool> --user` (and `--project` where applicable) after upgrading so agents pick up the new preview contract.
 
@@ -62,11 +62,13 @@ worktrail context "current task"
 as a pending semantic candidate. It does not edit formal knowledge or promote
 candidates; use `review`, `promote`, or `merge` for the explicit review step.
 
-`worktrail review` shows pending semantic candidates by default and reports hidden transcript evidence plus non-semantic operational candidates such as handoffs. Semantic candidates include `source_candidate_ids` details when present, source health warnings, target/duplicate warnings, and a focused `worktrail candidates diff <id>` next step. Use `worktrail review --evidence` for raw transcript evidence, or `worktrail review --all` when operational candidates also need inspection.
+`worktrail review` shows the pending semantic inbox by default and reports hidden evidence candidates plus non-semantic operational candidates such as handoffs. Semantic candidates include `source_candidate_ids` details when present, source health warnings, target/duplicate warnings, and a focused `worktrail candidates diff <id>` next step. Use `worktrail review --evidence` for evidence candidates such as `transcript_notes` and `migration_source`, or `worktrail review --all` when operational candidates also need inspection.
 
 `worktrail review plan --format json` emits the read-only agent contract `worktrail.review.plan.v1`. It groups pending semantic candidates into deterministic recommendations: `promote`, `merge`, `discard`, or `needs_human_review`. The command never changes candidate state or formal knowledge; state-changing commands still require explicit user confirmation.
 
-`worktrail context <task>` hides pending transcript evidence by default and reports how many evidence candidates are hidden. Use `worktrail context --evidence <task>` when the raw transcript notes themselves need to be included in the Pending Candidates section.
+`worktrail context <task>` hides pending evidence by default and reports how many evidence candidates are hidden. Use `worktrail context --evidence <task>` when those evidence candidates need to be included in the Pending Candidates section.
+
+Stop and session-end hooks now prefer runtime-first capture: they keep writing `state/` and audit logs, but they only create a pending `handoff` candidate when the captured context suggests an actual follow-up is needed. Routine hook noise should no longer accumulate in the default pending inbox.
 
 Project knowledge can use `.worktrail/requirements/` for PRDs, user goals, persona or primary-user scope, workflow problems, MVP boundaries, out-of-scope notes, requirement-level acceptance criteria, business capability requirements, failure exits, and requirement-stage open questions. This complements, rather than replaces, `architecture/`, `decisions/`, `validation/`, and `workflows/`.
 
@@ -111,6 +113,8 @@ worktrail install <tool> --user
 worktrail install <tool> --project
 ```
 
+When Worktrail updates bundled rules, skills, hooks, or MCP templates, rerun `worktrail install <tool> --user --project` for the affected tool so the managed integration files pick up the new contract.
+
 Use `worktrail install all --user --project` to set up Codex, Claude Code, and Cursor together, or explicit targets such as `worktrail install codex --user --project` and `worktrail install claude --user --project` when only a subset should be installed.
 
 Current capability matrix:
@@ -130,7 +134,7 @@ worktrail distill --pending --summary --scope user
 worktrail evidence plan --format json --scope user
 ```
 
-For routine upkeep, use the installed `/worktrail-maintain` skill. It chains `context "maintenance"`, `distill --pending --summary`, `review plan --format json`, `evidence plan --format json`, and `maintain knowledge --format json` when a proposal workflow is needed, then waits for explicit confirmation before any state-changing command.
+For routine upkeep, use the installed `/worktrail-maintain` skill. It chains `context "maintenance"`, `distill --pending --summary`, `review plan --format json`, `evidence plan --format json`, and `maintain knowledge --format json` when a proposal workflow is needed, then waits for explicit confirmation before any state-changing command. Maintenance counts track the default pending inbox (semantic review + evidence lanes); operational candidates remain inspectable through `worktrail review --all` and preview, but do not count as default review work.
 
 Saved review plans can be applied only with confirmation:
 

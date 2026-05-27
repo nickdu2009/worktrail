@@ -588,7 +588,7 @@ func writeRecord(rec Record) error {
 }
 
 func resolveTarget(root, target string) (string, error) {
-	target = strings.TrimSpace(target)
+	target = model.NormalizeTargetPath(target)
 	if target == "" {
 		return "", errors.New("target path is required")
 	}

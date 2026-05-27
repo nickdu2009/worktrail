@@ -98,7 +98,7 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 		Schema:                   "worktrail.context_pack.v1",
 		Task:                     opts.Task,
 		CreatedAt:                now,
-		HiddenEvidenceCandidates: countPendingTranscriptEvidence(entries),
+		HiddenEvidenceCandidates: countPendingEvidence(entries),
 		Maintenance:              buildMaintenance(env),
 		EvidenceIncluded:         opts.IncludeEvidence,
 	}
@@ -209,7 +209,7 @@ func RenderMarkdown(pack Pack) string {
 	}
 	if pack.HiddenEvidenceCandidates > 0 && !pack.EvidenceIncluded {
 		b.WriteString("## Hidden Evidence\n\n")
-		fmt.Fprintf(&b, "Hidden transcript evidence candidates: %d. Use `worktrail context --evidence <task>` to include them.\n\n", pack.HiddenEvidenceCandidates)
+		fmt.Fprintf(&b, "Hidden evidence candidates: %d. Use `worktrail context --evidence <task>` to include them.\n\n", pack.HiddenEvidenceCandidates)
 	}
 	return strings.TrimSpace(b.String()) + "\n"
 }
@@ -362,23 +362,20 @@ func validStage(stage string) bool {
 }
 
 func pendingCandidateVisible(entry index.Entry, includeEvidence bool) bool {
-	if entry.Type != "candidate" || entry.Status != "pending" {
+	if entry.Type != "candidate" {
 		return false
 	}
-	if entry.CandidateType == model.CandidateTypeTranscriptNotes || entry.CandidateType == model.CandidateTypeMigrationSource {
-		return includeEvidence
-	}
-	return isSemanticCandidateType(entry.CandidateType)
+	return model.PendingInboxVisible(entry.Status, entry.CandidateType, includeEvidence)
 }
 
 func isSemanticCandidateType(typ string) bool {
 	return model.IsSemanticCandidateType(typ)
 }
 
-func countPendingTranscriptEvidence(entries []index.Entry) int {
+func countPendingEvidence(entries []index.Entry) int {
 	count := 0
 	for _, entry := range entries {
-		if entry.Type == "candidate" && entry.Status == "pending" && entry.CandidateType == model.CandidateTypeTranscriptNotes {
+		if entry.Type == "candidate" && model.PendingInboxVisible(entry.Status, entry.CandidateType, true) && model.CandidateSurface(entry.CandidateType) == model.CandidateSurfaceEvidence {
 			count++
 		}
 	}
@@ -394,12 +391,12 @@ func buildMaintenance(env paths.Env) Maintenance {
 		if rec.Meta.Status != candidate.StatusPending {
 			continue
 		}
-		if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+		switch model.CandidateSurface(rec.Meta.CandidateType) {
+		case model.CandidateSurfaceEvidence:
 			maintenance.PendingEvidenceCandidates++
 			pendingEvidenceByScope[rec.Meta.Scope]++
 			continue
-		}
-		if model.IsSemanticCandidateType(rec.Meta.CandidateType) {
+		case model.CandidateSurfaceSemantic:
 			maintenance.PendingSemanticCandidates++
 			pendingSemanticByScope[rec.Meta.Scope]++
 		}

@@ -148,7 +148,7 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	if !strings.Contains(rendered, "[stage:requirements] [topic:delivery] [source_of_truth]") || !strings.Contains(rendered, "[superseded_by:requirements/new.md]") {
 		t.Fatalf("rendered pack missing governance metadata:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "Hidden transcript evidence candidates: 1") || !strings.Contains(rendered, "worktrail context --evidence <task>") {
+	if !strings.Contains(rendered, "Hidden evidence candidates: 1") || !strings.Contains(rendered, "worktrail context --evidence <task>") {
 		t.Fatalf("rendered pack missing hidden evidence guidance:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "## Maintenance") || !strings.Contains(rendered, "Pending evidence candidates: 1") || !strings.Contains(rendered, "Pending review candidates: 1") {
@@ -178,7 +178,7 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 		t.Fatalf("IncludeEvidence pending section unexpected: %+v", pending.Items)
 	}
 	rendered = RenderMarkdown(withEvidence)
-	if !strings.Contains(rendered, "Raw transcript evidence content.") || strings.Contains(rendered, "Hidden transcript evidence candidates") {
+	if !strings.Contains(rendered, "Raw transcript evidence content.") || strings.Contains(rendered, "Hidden evidence candidates") {
 		t.Fatalf("IncludeEvidence rendered pack unexpected:\n%s", rendered)
 	}
 }

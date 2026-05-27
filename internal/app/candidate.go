@@ -114,7 +114,7 @@ func filterCandidateRecords(records []candidate.Record, filters candidateFilters
 		if filters.Semantic && !isSemanticCandidateType(rec.Meta.CandidateType) {
 			continue
 		}
-		if filters.Evidence && rec.Meta.CandidateType != model.CandidateTypeTranscriptNotes {
+		if filters.Evidence && model.CandidateSurface(rec.Meta.CandidateType) != model.CandidateSurfaceEvidence {
 			continue
 		}
 		filtered = append(filtered, rec)
@@ -153,7 +153,8 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 		if rec.Meta.Status != candidate.StatusPending {
 			continue
 		}
-		if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+		surface := model.CandidateSurface(rec.Meta.CandidateType)
+		if surface == model.CandidateSurfaceEvidence {
 			if !showEvidence && !showAll {
 				hiddenEvidence++
 				continue
@@ -161,11 +162,11 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 		} else if showEvidence {
 			continue
 		}
-		if !showAll && !showEvidence && !isSemanticCandidateType(rec.Meta.CandidateType) {
+		if !showAll && !showEvidence && surface == model.CandidateSurfaceOperational {
 			hiddenNonSemantic++
 			continue
 		}
-		if showSemantic && !isSemanticCandidateType(rec.Meta.CandidateType) {
+		if showSemantic && surface != model.CandidateSurfaceSemantic {
 			continue
 		}
 		fmt.Fprintf(ioctx.Out, "- `%s` %s -> `%s` [%s, redaction=%s]\n", rec.Meta.ID, rec.Meta.Title, rec.Meta.TargetPath, rec.Meta.CandidateType, rec.Meta.RedactionStatus)
@@ -189,7 +190,7 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 		}
 	}
 	if hiddenEvidence > 0 {
-		fmt.Fprintf(ioctx.Out, "\nHidden transcript evidence candidates: %d. Use `worktrail review --evidence` to inspect them or `worktrail distill --pending --limit 5` to distill them.\n", hiddenEvidence)
+		fmt.Fprintf(ioctx.Out, "\nHidden evidence candidates: %d. Use `worktrail review --evidence` to inspect them. Distill transcript notes with `worktrail distill --pending --limit 5`, or include migration and split-source distillation inputs with `worktrail distill --pending --split-sources --limit 5`.\n", hiddenEvidence)
 	}
 	if hiddenNonSemantic > 0 {
 		fmt.Fprintf(ioctx.Out, "\nHidden non-semantic pending candidates: %d. Use `worktrail review --all` to inspect them.\n", hiddenNonSemantic)
@@ -290,7 +291,7 @@ func missingAppliedCandidateTargets(env paths.Env, records []candidate.Record) (
 		if err != nil {
 			return nil, err
 		}
-		target := filepath.Join(root, filepath.FromSlash(rec.Meta.TargetPath))
+		target := filepath.Join(root, filepath.FromSlash(model.NormalizeTargetPath(rec.Meta.TargetPath)))
 		rel, err := filepath.Rel(root, target)
 		if err != nil {
 			return nil, err
@@ -490,7 +491,7 @@ func printCandidatesHelp(out io.Writer, subcommand string) {
 		fmt.Fprintln(out, "  --status pending|promoted|merged|discarded|retired|archived")
 		fmt.Fprintln(out, "  --type <candidate_type>")
 		fmt.Fprintln(out, "  --semantic     semantic knowledge candidates only")
-		fmt.Fprintln(out, "  --evidence     transcript_notes only")
+		fmt.Fprintln(out, "  --evidence     evidence candidates such as transcript_notes and migration_source")
 		fmt.Fprintln(out, "  --format json")
 	}
 }
@@ -527,9 +528,9 @@ func printReviewHelp(out io.Writer) {
 	fmt.Fprintln(out, "       worktrail review apply-candidates --merge <id...> [--scope project|user]")
 	fmt.Fprintln(out, "       worktrail review apply-candidates --discard <id...> [--scope project|user]")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "By default, review shows pending semantic candidates and hides transcript_notes evidence plus non-semantic operational candidates.")
+	fmt.Fprintln(out, "By default, review shows pending semantic candidates and hides evidence candidates plus non-semantic operational candidates.")
 	fmt.Fprintln(out, "Scope defaults to project; pass --scope user for user-level candidates.")
 	fmt.Fprintln(out, "Use review plan for the read-only agent contract grouped by recommended action.")
-	fmt.Fprintln(out, "Use --evidence to inspect transcript evidence, or --all to show every pending candidate.")
+	fmt.Fprintln(out, "Use --evidence to inspect evidence candidates such as transcript_notes and migration_source, or --all to show every pending candidate.")
 	fmt.Fprintln(out, "When an applied target is missing, review suggests restore for accidental deletion or retire for intentional deletion.")
 }

@@ -81,6 +81,56 @@ func TestCreateListShowAndDiff(t *testing.T) {
 	}
 }
 
+func TestLegacyWorktrailPrefixedTargetPathRemainsUsable(t *testing.T) {
+	m := testManager(t)
+	target := filepath.Join(m.Env.ProjectWT, "handoffs", "legacy.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("old handoff\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec, err := m.Create(CreateRequest{
+		ID:            "legacy-handoff",
+		Scope:         "project",
+		CandidateType: "handoff",
+		TargetPath:    "handoffs/legacy.md",
+		Title:         "Legacy Handoff",
+		Body:          "new handoff\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Meta.TargetPath = ".worktrail/handoffs/legacy.md"
+	if err := writeRecord(rec); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := m.Diff("project", "legacy-handoff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "-old handoff") || !strings.Contains(diff, "+new handoff") {
+		t.Fatalf("legacy-target diff unexpected:\n%s", diff)
+	}
+
+	result, err := m.Promote("project", "legacy-handoff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StatusPromoted {
+		t.Fatalf("status = %q", result.Status)
+	}
+	body, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "new handoff\n" {
+		t.Fatalf("target body = %q", body)
+	}
+}
+
 func TestPromoteBacksUpWritesAtomicallyUpdatesStatusAndLogs(t *testing.T) {
 	m := testManager(t)
 	target := filepath.Join(m.Env.ProjectWT, "decisions", "adr.md")

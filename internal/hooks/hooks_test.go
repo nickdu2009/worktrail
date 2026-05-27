@@ -57,6 +57,9 @@ func TestCodexStopCreatesStateCandidateAndLogsWithoutPromotion(t *testing.T) {
 	if !strings.Contains(string(data), `"status": "pending"`) {
 		t.Fatalf("candidate was not left pending:\n%s", data)
 	}
+	if !strings.Contains(string(data), `"target_path": "handoffs/`) || strings.Contains(string(data), `".worktrail/handoffs/`) {
+		t.Fatalf("hook candidate should target formal handoffs path:\n%s", data)
+	}
 	events, err := os.ReadFile(filepath.Join(env.ProjectWT, "logs", "events.jsonl"))
 	if err != nil {
 		t.Fatal(err)
@@ -99,6 +102,38 @@ func TestEventOnlyStopDoesNotOverwriteLatestState(t *testing.T) {
 	}
 	if !strings.Contains(string(events), "hook.run") {
 		t.Fatalf("event-only hook should still log hook.run:\n%s", events)
+	}
+	if strings.Contains(out.String(), `"candidate"`) {
+		t.Fatalf("event-only hook should not create a candidate: %s", out.String())
+	}
+	candidates, err := filepath.Glob(filepath.Join(env.ProjectWT, "candidates", "project", "cand_*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("event-only hook should not write candidates, got %d", len(candidates))
+	}
+}
+
+func TestStopWithCommandsButNoFollowupDoesNotCreateCandidate(t *testing.T) {
+	env := hookEnv(t)
+	var out bytes.Buffer
+	payload := `{"task":"Investigate candidate inbox noise","commands":["go test ./internal/hooks"]}`
+	if err := Run(context.Background(), env, "codex", "stop", strings.NewReader(payload), &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.ProjectWT, "state", "active", "latest.md")); err != nil {
+		t.Fatalf("expected latest state: %v", err)
+	}
+	if strings.Contains(out.String(), `"candidate"`) {
+		t.Fatalf("commands-only stop should not create a candidate: %s", out.String())
+	}
+	candidates, err := filepath.Glob(filepath.Join(env.ProjectWT, "candidates", "project", "cand_*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("commands-only stop should not write candidates, got %d", len(candidates))
 	}
 }
 
@@ -198,6 +233,9 @@ func TestCursorStopSanitizesDurablePayloadAndRecordsObservedTranscript(t *testin
 	if !strings.Contains(out.String(), "cursor transcript observed") {
 		t.Fatalf("expected observed transcript warning in output: %s", out.String())
 	}
+	if strings.Contains(out.String(), `"candidate"`) {
+		t.Fatalf("cursor stop with transcript-only signal should not create a candidate: %s", out.String())
+	}
 	observed, err := filepath.Glob(filepath.Join(env.ProjectWT, "raw", "cursor", "observed-*.metadata.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -212,29 +250,18 @@ func TestCursorStopSanitizesDurablePayloadAndRecordsObservedTranscript(t *testin
 	if !strings.Contains(string(registry), filepath.ToSlash(transcript)) {
 		t.Fatalf("registry should keep private transcript path for local import:\n%s", registry)
 	}
+	state, err := os.ReadFile(filepath.Join(env.ProjectWT, "state", "active", "latest.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(state), "hello") {
+		t.Fatalf("state should retain transcript-derived goal context:\n%s", state)
+	}
 	candidates, err := filepath.Glob(filepath.Join(env.ProjectWT, "candidates", "project", "cand_*.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 1 {
-		t.Fatalf("expected one candidate, got %d", len(candidates))
-	}
-	candidate, err := os.ReadFile(candidates[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(candidate)
-	for _, forbidden := range []string{
-		"person@example.com",
-		filepath.ToSlash(transcript),
-		"cursor-conversation-secret",
-		"cursor-generation-secret",
-	} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("durable candidate leaked %q:\n%s", forbidden, text)
-		}
-	}
-	if !strings.Contains(text, filepath.Base(transcript)) {
-		t.Fatalf("durable candidate should keep transcript basename only:\n%s", text)
+	if len(candidates) != 0 {
+		t.Fatalf("expected no candidate for transcript-only signal, got %d", len(candidates))
 	}
 }

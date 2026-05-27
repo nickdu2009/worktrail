@@ -1,25 +1,29 @@
 # Evidence Lifecycle Requirements
 
-Last updated: 2026-05-15
+Last updated: 2026-05-27
 
 Status: proposed
 
 ## Summary
 
-Worktrail needs an explicit lifecycle for `transcript_notes` evidence and KDD
-split-source candidates after they have been distilled into semantic pending
-candidates. Evidence should remain available for traceability while review is
-active, then be cleaned up or archived only through an explicit workflow.
+Worktrail needs an explicit lifecycle for `transcript_notes`, `migration_source`,
+and KDD split-source evidence after they have been distilled into semantic
+pending candidates. Evidence should remain available for traceability while
+review is active, then be cleaned up or archived only through an explicit
+workflow.
 
 This requirement does not change the rule that formal knowledge can only be
 created through review and explicit promote or merge.
+
+It also does not redefine the default pending inbox: default `review` and
+`context` hide evidence unless the caller explicitly asks for it.
 
 ## Goals
 
 - Help agents identify evidence that has already been distilled.
 - Separate evidence cleanup from semantic candidate review.
-- Avoid promoting raw `transcript_notes` or KDD split-source lessons as formal
-  knowledge.
+- Avoid promoting raw evidence such as `transcript_notes`, `migration_source`,
+  or KDD split-source lessons as formal knowledge.
 - Provide a safe path to archive or discard obsolete evidence with explicit
   confirmation.
 - Keep source traceability available until referenced semantic candidates are

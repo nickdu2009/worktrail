@@ -193,7 +193,7 @@ handoff 会创建 pending handoff candidate，不会提升正式知识。后续�
 ### 如何运行
 <div class="title-en">How It Runs</div>
 
-`preview` 现在默认渲染当前 scope 的整体知识库页面。项目级正式知识通常在 `.worktrail/` 下；页面会合并正式知识和 `Pending Candidates`，不再要求传文件路径或 candidate id。
+`preview` 现在默认渲染当前 scope 的整体知识库静态多页站点。项目级正式知识通常在 `.worktrail/` 下；入口页会先展示 sections、统计信息和 `Pending Candidates` 分组，再通过分区页、文档页和 candidate 详情页逐层展开，不再要求传文件路径或 candidate id。
 
 ```bash
 worktrail preview
@@ -206,6 +206,8 @@ worktrail preview --scope user
 worktrail preview --no-open
 worktrail preview --scope user --no-open
 ```
+
+`--no-open` 输出的是站点入口页路径，通常是 `.worktrail/.cache/preview/index.html`。
 
 如果需要清理预览缓存：
 

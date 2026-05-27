@@ -46,6 +46,31 @@ func TestDistillPendingSuggestsOtherScope(t *testing.T) {
 	}
 }
 
+func TestDistillSplitSourcesSummaryUsesSplitSourcesNextStep(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "migration-source", "--type", model.CandidateTypeMigrationSource, "--target", "imports/kdd/project/active-knowledge-log.md", "--title", "Migration Source", "Migration source body.")
+
+	text := runApp(t, &out, &errb, "distill", "--pending", "--split-sources", "--summary")
+	if !strings.Contains(text, "candidate: migration-source") {
+		t.Fatalf("split-sources distill summary missing migration source:\n%s", text)
+	}
+	if !strings.Contains(text, "worktrail distill --pending --split-sources --limit 5 --offset <N>") {
+		t.Fatalf("split-sources distill summary missing split-sources next step:\n%s", text)
+	}
+	if strings.Contains(text, "worktrail distill --pending --limit 5 --offset <N>` or `worktrail distill --pending --all") {
+		t.Fatalf("split-sources distill summary leaked transcript-only next step:\n%s", text)
+	}
+}
+
 func TestDistillApplyTextGroupsReportItems(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")

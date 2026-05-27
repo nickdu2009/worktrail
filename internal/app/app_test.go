@@ -83,13 +83,42 @@ func TestPreviewBuildsProjectKnowledgeHTML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read preview HTML: %v", err)
 	}
-	for _, want := range []string{"Project Knowledge", "Pending Candidates", "Preview Candidate", "Decision body."} {
+	for _, want := range []string{"Project Knowledge", "Pending Candidates", "Preview Candidate", "sections/decisions.html", "candidates/index.html"} {
 		if !bytes.Contains(body, []byte(want)) {
 			t.Fatalf("preview HTML missing %q:\n%s", want, body)
 		}
 	}
-	if !strings.Contains(indexPath, filepath.Join(".worktrail", ".cache", "preview")) {
+	for _, absent := range []string{"Decision body.", "Pending body."} {
+		if bytes.Contains(body, []byte(absent)) {
+			t.Fatalf("preview entry page should not inline %q:\n%s", absent, body)
+		}
+	}
+	if !strings.Contains(indexPath, filepath.Join(".worktrail", ".cache", "preview", "index.html")) {
 		t.Fatalf("preview index path should live in cache, got %s", indexPath)
+	}
+
+	docBody, err := os.ReadFile(filepath.Join(filepath.Dir(indexPath), "docs", "decisions-choice.html"))
+	if err != nil {
+		t.Fatalf("read document page: %v", err)
+	}
+	if !bytes.Contains(docBody, []byte("Decision body.")) {
+		t.Fatalf("document page missing full body:\n%s", docBody)
+	}
+
+	candidatesBody, err := os.ReadFile(filepath.Join(filepath.Dir(indexPath), "candidates", "index.html"))
+	if err != nil {
+		t.Fatalf("read candidates page: %v", err)
+	}
+	if !bytes.Contains(candidatesBody, []byte("Preview Candidate")) {
+		t.Fatalf("candidates page missing candidate title:\n%s", candidatesBody)
+	}
+
+	candidateBody, err := os.ReadFile(filepath.Join(filepath.Dir(indexPath), "candidates", "preview-note.html"))
+	if err != nil {
+		t.Fatalf("read candidate detail page: %v", err)
+	}
+	if !bytes.Contains(candidateBody, []byte("Pending body.")) {
+		t.Fatalf("candidate detail page missing body:\n%s", candidateBody)
 	}
 }
 
@@ -114,6 +143,9 @@ func TestPreviewScopeUserAndClearCache(t *testing.T) {
 	indexPath := parseTabValue(t, out.String(), "index")
 	if _, err := os.Stat(indexPath); err != nil {
 		t.Fatalf("user preview file missing: %v", err)
+	}
+	if !strings.HasSuffix(indexPath, filepath.Join(".cache", "preview", "index.html")) {
+		t.Fatalf("user preview should use stable index.html, got %s", indexPath)
 	}
 	out.Reset()
 	errb.Reset()
@@ -1238,7 +1270,7 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"review"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run review: %v stderr=%s", err, errb.String())
 	}
-	if strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "handoff-noise") || !strings.Contains(out.String(), "Hidden transcript evidence candidates: 2") || !strings.Contains(out.String(), "Hidden non-semantic pending candidates: 1") {
+	if strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "handoff-noise") || !strings.Contains(out.String(), "Hidden evidence candidates: 2") || !strings.Contains(out.String(), "Hidden non-semantic pending candidates: 1") {
 		t.Fatalf("review did not hide evidence or non-semantic candidates:\n%s", out.String())
 	}
 
@@ -1254,7 +1286,7 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"review", "--all"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run review all: %v stderr=%s", err, errb.String())
 	}
-	if !strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "rule-1") || !strings.Contains(out.String(), "handoff-noise") || strings.Contains(out.String(), "Hidden transcript evidence candidates") || strings.Contains(out.String(), "Hidden non-semantic pending candidates") {
+	if !strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "rule-1") || !strings.Contains(out.String(), "handoff-noise") || strings.Contains(out.String(), "Hidden evidence candidates") || strings.Contains(out.String(), "Hidden non-semantic pending candidates") {
 		t.Fatalf("review all output unexpected:\n%s", out.String())
 	}
 
@@ -1262,7 +1294,7 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"context", "task"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run context: %v stderr=%s", err, errb.String())
 	}
-	if strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "Evidence body.") || !strings.Contains(out.String(), "Hidden transcript evidence candidates: 2") || !strings.Contains(out.String(), "rule-1") {
+	if strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "Evidence body.") || !strings.Contains(out.String(), "Hidden evidence candidates: 2") || !strings.Contains(out.String(), "rule-1") {
 		t.Fatalf("context did not hide transcript evidence:\n%s", out.String())
 	}
 
@@ -1270,7 +1302,7 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"context", "--evidence", "task"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run context evidence: %v stderr=%s", err, errb.String())
 	}
-	if !strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "Evidence body.") || !strings.Contains(out.String(), "rule-1") || strings.Contains(out.String(), "Hidden transcript evidence candidates") {
+	if !strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "Evidence body.") || !strings.Contains(out.String(), "rule-1") || strings.Contains(out.String(), "Hidden evidence candidates") {
 		t.Fatalf("context evidence output unexpected:\n%s", out.String())
 	}
 
@@ -1891,17 +1923,17 @@ func TestAppSmokeCoreCLILifecycle(t *testing.T) {
 	runApp(t, &out, &errb, "index", "rebuild")
 
 	text := runApp(t, &out, &errb, "review")
-	if !strings.Contains(text, "smoke-rule") || strings.Contains(text, "smoke-note") || !strings.Contains(text, "Hidden transcript evidence candidates: 1") {
+	if !strings.Contains(text, "smoke-rule") || strings.Contains(text, "smoke-note") || !strings.Contains(text, "Hidden evidence candidates: 1") {
 		t.Fatalf("smoke review output unexpected:\n%s", text)
 	}
 
 	text = runApp(t, &out, &errb, "context", "smoke task")
-	if !strings.Contains(text, "smoke-rule") || strings.Contains(text, "smoke-note") || strings.Contains(text, "Smoke evidence body.") || !strings.Contains(text, "Hidden transcript evidence candidates: 1") {
+	if !strings.Contains(text, "smoke-rule") || strings.Contains(text, "smoke-note") || strings.Contains(text, "Smoke evidence body.") || !strings.Contains(text, "Hidden evidence candidates: 1") {
 		t.Fatalf("smoke context output unexpected:\n%s", text)
 	}
 
 	text = runApp(t, &out, &errb, "context", "--evidence", "smoke task")
-	if !strings.Contains(text, "smoke-rule") || !strings.Contains(text, "smoke-note") || !strings.Contains(text, "Smoke evidence body.") || strings.Contains(text, "Hidden transcript evidence candidates") {
+	if !strings.Contains(text, "smoke-rule") || !strings.Contains(text, "smoke-note") || !strings.Contains(text, "Smoke evidence body.") || strings.Contains(text, "Hidden evidence candidates") {
 		t.Fatalf("smoke context evidence output unexpected:\n%s", text)
 	}
 

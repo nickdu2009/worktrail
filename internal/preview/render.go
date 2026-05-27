@@ -2,14 +2,12 @@ package preview
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
+	"fmt"
 	"html/template"
+	"os"
+	"path"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/nickdu2009/worktrail/internal/util"
 	"github.com/yuin/goldmark"
@@ -17,86 +15,90 @@ import (
 )
 
 func Render(src Source, outDir string) (RenderResult, error) {
-	if err := ensureDir(outDir); err != nil {
-		return RenderResult{}, err
-	}
-
 	md := goldmark.New(goldmark.WithExtensions(extension.GFM))
-
 	title := src.Title
 	if title == "" {
 		title = "Untitled Worktrail Preview"
 	}
-	data, err := buildPageData(md, src, title)
+	site, err := buildSite(md, src, title)
 	if err != nil {
 		return RenderResult{}, err
 	}
-
-	var page bytes.Buffer
-	if err := pageTemplate.Execute(&page, data); err != nil {
+	stageDir, err := stageSiteDir(outDir)
+	if err != nil {
 		return RenderResult{}, err
 	}
-	indexPath := filepath.Join(outDir, renderFileName(src.Scope, page.Bytes()))
-	if err := util.AtomicWrite(indexPath, page.Bytes(), 0o644); err != nil {
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(stageDir)
+		}
+	}()
+	entryHTML, err := writeSite(stageDir, site)
+	if err != nil {
 		return RenderResult{}, err
 	}
+	if err := publishSite(stageDir, outDir); err != nil {
+		return RenderResult{}, err
+	}
+	published = true
+	indexPath := filepath.Join(outDir, filepath.FromSlash(site.HomePath))
 	return RenderResult{
 		Source:    src,
-		HTML:      page.Bytes(),
+		HTML:      entryHTML,
 		OutputDir: outDir,
 		IndexPath: indexPath,
 	}, nil
 }
 
-func buildPageData(md goldmark.Markdown, src Source, title string) (pageData, error) {
-	data := pageData{
-		Title:    title,
-		Source:   src,
-		Metadata: sortedMetadata(src.Metadata),
+func writeSite(root string, site site) ([]byte, error) {
+	if err := writeSiteFile(root, path.Join("assets", "site.css"), []byte(siteCSS)); err != nil {
+		return nil, err
 	}
-	usedAnchors := map[string]int{}
-	sectionsByKey := map[string]*sectionItem{}
-	for _, child := range src.Children {
-		rendered, err := renderMarkdown(md, child.Body)
+	entryHTML, err := renderPage(homeTemplate, buildHomePageData(site))
+	if err != nil {
+		return nil, err
+	}
+	if err := writeSiteFile(root, site.HomePath, entryHTML); err != nil {
+		return nil, err
+	}
+	for _, section := range site.Sections {
+		sectionHTML, err := renderPage(sectionTemplate, buildSectionPageData(site, section))
 		if err != nil {
-			return pageData{}, err
+			return nil, err
 		}
-		key, sectionTitle := sectionForPath(child.Path)
-		section, ok := sectionsByKey[key]
-		if !ok {
-			data.Sections = append(data.Sections, sectionItem{
-				ID:    "section-" + key,
-				Title: sectionTitle,
-			})
-			section = &data.Sections[len(data.Sections)-1]
-			sectionsByKey[key] = section
+		if err := writeSiteFile(root, section.OutputPath, sectionHTML); err != nil {
+			return nil, err
 		}
-		section.Documents = append(section.Documents, documentItem{
-			Title:    child.Title,
-			Path:     child.Path,
-			Anchor:   uniqueAnchor("doc-"+anchorFromPath(child.Path), usedAnchors),
-			Metadata: sortedMetadata(child.Metadata),
-			Content:  rendered,
-		})
+		for _, doc := range section.Documents {
+			docHTML, err := renderPage(documentTemplate, buildDocumentPageData(site, section, doc))
+			if err != nil {
+				return nil, err
+			}
+			if err := writeSiteFile(root, doc.OutputPath, docHTML); err != nil {
+				return nil, err
+			}
+		}
 	}
-	sort.SliceStable(data.Sections, func(i, j int) bool {
-		return sectionOrder(data.Sections[i].Title) < sectionOrder(data.Sections[j].Title)
-	})
-	for _, pending := range src.PendingCandidates {
-		rendered, err := renderMarkdown(md, pending.Body)
-		if err != nil {
-			return pageData{}, err
-		}
-		data.PendingCandidates = append(data.PendingCandidates, candidateItem{
-			ID:       pending.ID,
-			Title:    pending.Title,
-			Path:     pending.Path,
-			Anchor:   uniqueAnchor("candidate-"+anchorFromPath(pending.ID), usedAnchors),
-			Metadata: sortedMetadata(pending.Metadata),
-			Content:  rendered,
-		})
+	candidatesHTML, err := renderPage(candidatesTemplate, buildCandidatesPageData(site))
+	if err != nil {
+		return nil, err
 	}
-	return data, nil
+	if err := writeSiteFile(root, site.CandidatesPath, candidatesHTML); err != nil {
+		return nil, err
+	}
+	for _, bucket := range site.CandidateBuckets {
+		for _, candidate := range bucket.Candidates {
+			candidateHTML, err := renderPage(candidateTemplate, buildCandidatePageData(site, bucket, candidate))
+			if err != nil {
+				return nil, err
+			}
+			if err := writeSiteFile(root, candidate.OutputPath, candidateHTML); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return entryHTML, nil
 }
 
 func renderMarkdown(md goldmark.Markdown, body string) (template.HTML, error) {
@@ -107,24 +109,57 @@ func renderMarkdown(md goldmark.Markdown, body string) (template.HTML, error) {
 	return template.HTML(rendered.String()), nil
 }
 
-func renderFileName(scope string, html []byte) string {
-	sum := sha256.Sum256(html)
-	return scope + "-" + hex.EncodeToString(sum[:8]) + ".html"
+func renderPage(tmpl *template.Template, data any) ([]byte, error) {
+	var page bytes.Buffer
+	if err := tmpl.Execute(&page, data); err != nil {
+		return nil, err
+	}
+	return page.Bytes(), nil
 }
 
-func anchorFromPath(path string) string {
-	var b strings.Builder
-	for _, r := range path {
-		switch {
-		case unicode.IsLetter(r), unicode.IsDigit(r):
-			b.WriteRune(unicode.ToLower(r))
-		case r == '-' || r == '_':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('-')
-		}
+func writeSiteFile(root, outputPath string, data []byte) error {
+	target := filepath.Join(root, filepath.FromSlash(outputPath))
+	return util.AtomicWrite(target, data, 0o644)
+}
+
+func stageSiteDir(outDir string) (string, error) {
+	parent := filepath.Dir(outDir)
+	if err := ensureDir(parent); err != nil {
+		return "", err
 	}
-	return strings.TrimRight(b.String(), "-")
+	return os.MkdirTemp(parent, ".preview-site-*")
+}
+
+func publishSite(stageDir, outDir string) error {
+	return publishSiteWithOps(stageDir, outDir, os.Stat, os.Rename, os.RemoveAll)
+}
+
+func publishSiteWithOps(
+	stageDir, outDir string,
+	stat func(string) (os.FileInfo, error),
+	rename func(string, string) error,
+	removeAll func(string) error,
+) error {
+	if _, err := stat(outDir); err != nil {
+		if os.IsNotExist(err) {
+			return rename(stageDir, outDir)
+		}
+		return err
+	}
+	backupDir := outDir + ".bak"
+	if err := removeAll(backupDir); err != nil {
+		return err
+	}
+	if err := rename(outDir, backupDir); err != nil {
+		return err
+	}
+	if err := rename(stageDir, outDir); err != nil {
+		if rollbackErr := rename(backupDir, outDir); rollbackErr != nil {
+			return fmt.Errorf("publish preview site: activate failed: %w; rollback failed: %v", err, rollbackErr)
+		}
+		return fmt.Errorf("publish preview site: activate failed: %w", err)
+	}
+	return removeAll(backupDir)
 }
 
 func sectionForPath(path string) (string, string) {
@@ -187,15 +222,6 @@ func sectionOrder(title string) int {
 		return value
 	}
 	return 1000
-}
-
-func uniqueAnchor(base string, used map[string]int) string {
-	count := used[base]
-	used[base] = count + 1
-	if count == 0 {
-		return base
-	}
-	return base + "-" + strconv.Itoa(count+1)
 }
 
 func prettySectionTitle(name string) string {

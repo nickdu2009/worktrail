@@ -212,7 +212,7 @@ make docs-manual-serve PORT=3001
 worktrail preview --no-open
 ```
 
-命令会输出本地预览文件路径，例如 `index\t/path/to/.worktrail/.cache/preview/project-xxxx.html`。确认文件存在后，再手动打开它。
+命令会输出站点入口页路径，例如 `index\t/path/to/.worktrail/.cache/preview/index.html`。确认这个入口文件存在后，再手动打开它。
 
 如果要看用户级知识库，用：
 
@@ -226,6 +226,8 @@ worktrail preview --scope user --no-open
 worktrail preview --clear-cache
 worktrail preview --scope user --clear-cache
 ```
+
+`worktrail preview` 现在生成的是一组相互链接的静态页面，所以排查时要打开入口页，而不是只移动或单独打开缓存目录里的某一个子页面。
 
 ## 维护提示太多
 <div class="title-en">Too Many Maintenance Hints</div>

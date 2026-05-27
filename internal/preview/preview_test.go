@@ -1,12 +1,14 @@
 package preview
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
+	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
 )
@@ -119,14 +121,46 @@ Visible content.
 func TestRenderBuildsStableKnowledgePage(t *testing.T) {
 	env := previewTestEnv(t)
 	writePreviewFile(t, filepath.Join(env.ProjectWT, "decisions", "choice.md"), "# Choice\n\nDecision body.")
-	writePreviewFile(t, filepath.Join(env.ProjectWT, "workflows", "release.md"), "# Release\n\nWorkflow body.")
+	writePreviewFile(t, filepath.Join(env.ProjectWT, "workflows", "release.md"), "# Release\n\n```sh\necho ship\n```\n\n<script>alert(1)</script>\n\nWorkflow body.")
 	if _, err := (candidate.Manager{Env: env, Actor: "test"}).Create(candidate.CreateRequest{
 		Scope:         "project",
-		ID:            "pending-rule",
+		ID:            "semantic-rule",
 		CandidateType: "rule",
-		TargetPath:    "rules/pending-rule.md",
-		Title:         "Pending Rule",
-		Body:          "# Pending Rule\n\n<script>alert(1)</script>\n\nCandidate body.",
+		TargetPath:    "rules/semantic-rule.md",
+		Title:         "Semantic Rule",
+		Body:          "# Semantic Rule\n\n```text\ncandidate noise\n```\n\n<script>alert(1)</script>\n\nSemantic candidate body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (candidate.Manager{Env: env, Actor: "test"}).Create(candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "evidence-note",
+		CandidateType: model.CandidateTypeTranscriptNotes,
+		TargetPath:    "imports/transcripts/evidence-note.md",
+		Title:         "Evidence Note",
+		Body:          "# Evidence Note\n\nEvidence candidate body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (candidate.Manager{Env: env, Actor: "test"}).Create(candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "handoff-note",
+		CandidateType: "handoff",
+		TargetPath:    "handoffs/handoff-note.md",
+		Title:         "Handoff Note",
+		Body:          "# Handoff Note\n\nOperational candidate body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (candidate.Manager{Env: env, Actor: "test"}).Create(candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "split-source",
+		CandidateType: "lesson",
+		TargetPath:    "lessons/kdd-active-knowledge-log.md",
+		Title:         "Split Source",
+		Summary:       "Do not promote directly.",
+		Tags:          []string{"kdd", "split-source"},
+		Body:          "# Split Source\n\nDo not promote directly.\n\nEvidence bucket body.",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +173,7 @@ func TestRenderBuildsStableKnowledgePage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render first: %v", err)
 	}
+	writePreviewFile(t, filepath.Join(cacheDir, "stale.html"), "<html>stale</html>")
 	second, err := Render(source, cacheDir)
 	if err != nil {
 		t.Fatalf("Render second: %v", err)
@@ -146,17 +181,90 @@ func TestRenderBuildsStableKnowledgePage(t *testing.T) {
 	if first.IndexPath != second.IndexPath {
 		t.Fatalf("stable cache path mismatch: %s vs %s", first.IndexPath, second.IndexPath)
 	}
-	body := string(first.HTML)
-	for _, want := range []string{"Worktrail Preview", "Decisions", "Workflows", "Pending Candidates", "Decision body.", "Workflow body.", "Pending Rule"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("knowledge preview missing %q:\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, "<script>") {
-		t.Fatalf("rendered HTML includes raw script:\n%s", body)
+	if first.IndexPath != filepath.Join(cacheDir, "index.html") {
+		t.Fatalf("index path = %s", first.IndexPath)
 	}
 	if _, err := os.Stat(first.IndexPath); err != nil {
 		t.Fatalf("expected preview file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "stale.html")); !os.IsNotExist(err) {
+		t.Fatalf("stale file still exists after full-site rewrite: %v", err)
+	}
+
+	indexBody := string(first.HTML)
+	for _, want := range []string{"Worktrail Preview", "Decisions", "Workflows", "Pending Candidates", "Semantic Candidates", "Evidence Candidates", "Operational Candidates", "sections/decisions.html", "candidates/index.html", "candidates/semantic-rule.html"} {
+		if !strings.Contains(indexBody, want) {
+			t.Fatalf("index preview missing %q:\n%s", want, indexBody)
+		}
+	}
+	for _, absent := range []string{"Decision body.", "Workflow body.", "Semantic candidate body.", "<script>"} {
+		if strings.Contains(indexBody, absent) {
+			t.Fatalf("index preview should not include %q:\n%s", absent, indexBody)
+		}
+	}
+
+	sectionBody := mustReadPreviewFile(t, filepath.Join(cacheDir, "sections", "decisions.html"))
+	if !strings.Contains(sectionBody, "Choice") || !strings.Contains(sectionBody, "../docs/decisions-choice.html") {
+		t.Fatalf("section page missing document link:\n%s", sectionBody)
+	}
+	if strings.Contains(sectionBody, `<article class="panel prose">`) {
+		t.Fatalf("section page should not render full document articles:\n%s", sectionBody)
+	}
+
+	documentBody := mustReadPreviewFile(t, filepath.Join(cacheDir, "docs", "decisions-choice.html"))
+	if !strings.Contains(documentBody, "Decision body.") {
+		t.Fatalf("document page missing full body:\n%s", documentBody)
+	}
+
+	workflowBody := mustReadPreviewFile(t, filepath.Join(cacheDir, "docs", "workflows-release.html"))
+	if !strings.Contains(workflowBody, "Workflow body.") {
+		t.Fatalf("workflow page missing body:\n%s", workflowBody)
+	}
+	if strings.Contains(workflowBody, "<script>") {
+		t.Fatalf("workflow page leaked raw script:\n%s", workflowBody)
+	}
+
+	workflowSectionBody := mustReadPreviewFile(t, filepath.Join(cacheDir, "sections", "workflows.html"))
+	if !strings.Contains(workflowSectionBody, "Workflow body.") {
+		t.Fatalf("workflow section missing readable summary:\n%s", workflowSectionBody)
+	}
+	for _, absent := range []string{"<script>", "alert(1)", "echo ship"} {
+		if strings.Contains(workflowSectionBody, absent) {
+			t.Fatalf("workflow section summary leaked %q:\n%s", absent, workflowSectionBody)
+		}
+	}
+
+	candidatesBody := mustReadPreviewFile(t, filepath.Join(cacheDir, "candidates", "index.html"))
+	for _, want := range []string{"Semantic Candidates", "Evidence Candidates", "Operational Candidates", "Semantic Rule", "Evidence Note", "Handoff Note", "Split Source"} {
+		if !strings.Contains(candidatesBody, want) {
+			t.Fatalf("candidates page missing %q:\n%s", want, candidatesBody)
+		}
+	}
+	if !strings.Contains(candidatesBody, "Semantic candidate body.") {
+		t.Fatalf("candidates page missing readable semantic summary:\n%s", candidatesBody)
+	}
+	for _, absent := range []string{"<script>", "alert(1)", "candidate noise"} {
+		if strings.Contains(candidatesBody, absent) {
+			t.Fatalf("candidates summary leaked %q:\n%s", absent, candidatesBody)
+		}
+	}
+
+	semanticBody := mustReadPreviewFile(t, filepath.Join(cacheDir, "candidates", "semantic-rule.html"))
+	if !strings.Contains(semanticBody, "Semantic candidate body.") {
+		t.Fatalf("semantic candidate page missing body:\n%s", semanticBody)
+	}
+	if strings.Contains(semanticBody, "<script>") {
+		t.Fatalf("candidate page leaked raw script:\n%s", semanticBody)
+	}
+
+	evidenceBody := mustReadPreviewFile(t, filepath.Join(cacheDir, "candidates", "evidence-note.html"))
+	if !strings.Contains(evidenceBody, "Evidence candidate body.") {
+		t.Fatalf("evidence candidate page missing body:\n%s", evidenceBody)
+	}
+
+	splitSourceBody := mustReadPreviewFile(t, filepath.Join(cacheDir, "candidates", "split-source.html"))
+	if !strings.Contains(splitSourceBody, "Do not promote directly.") {
+		t.Fatalf("split-source candidate page missing body:\n%s", splitSourceBody)
 	}
 }
 
@@ -179,6 +287,36 @@ func TestClearCacheRemovesPreviewDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("cache dir still exists: %v", err)
+	}
+}
+
+func TestPublishSiteRestoresPreviousSiteOnActivationFailure(t *testing.T) {
+	root := t.TempDir()
+	outDir := filepath.Join(root, "preview")
+	stageDir := filepath.Join(root, "stage")
+	writePreviewFile(t, filepath.Join(outDir, "index.html"), "<html>old</html>")
+	writePreviewFile(t, filepath.Join(stageDir, "index.html"), "<html>new</html>")
+
+	renameCalls := 0
+	err := publishSiteWithOps(stageDir, outDir, os.Stat, func(oldPath, newPath string) error {
+		renameCalls++
+		if renameCalls == 2 {
+			return errors.New("activate failed")
+		}
+		return os.Rename(oldPath, newPath)
+	}, os.RemoveAll)
+	if err == nil || !strings.Contains(err.Error(), "activate failed") {
+		t.Fatalf("expected activation failure, got %v", err)
+	}
+
+	if got := mustReadPreviewFile(t, filepath.Join(outDir, "index.html")); !strings.Contains(got, "old") {
+		t.Fatalf("rollback did not restore previous site:\n%s", got)
+	}
+	if got := mustReadPreviewFile(t, filepath.Join(stageDir, "index.html")); !strings.Contains(got, "new") {
+		t.Fatalf("staged site should remain available after failed activation:\n%s", got)
+	}
+	if _, err := os.Stat(outDir + ".bak"); !os.IsNotExist(err) {
+		t.Fatalf("backup directory should not remain after rollback: %v", err)
 	}
 }
 
@@ -225,4 +363,13 @@ func writePreviewFile(t *testing.T, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func mustReadPreviewFile(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read preview file %s: %v", path, err)
+	}
+	return string(body)
 }

@@ -35,7 +35,7 @@ var skillTriggers = []SkillTrigger{
 		},
 		RequiredActions: []string{
 			"Run `worktrail preview --scope <scope>` or `worktrail preview --scope <scope> --no-open`.",
-			"Use browser verification when available and report the preview file path, scope, and validation result.",
+			"Use browser verification when available and report the preview entry path, scope, and validation result.",
 		},
 		Never: []string{
 			"Do not use the target project's dev server, docs site, package manager, or framework for Worktrail document preview.",

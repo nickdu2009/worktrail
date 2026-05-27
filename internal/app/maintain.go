@@ -301,7 +301,7 @@ func applyMaintainProposal(env paths.Env, proposal maintainProposal, report *mai
 }
 
 func filepathJoinSlash(root, rel string) string {
-	return filepath.Join(root, filepath.FromSlash(rel))
+	return filepath.Join(root, filepath.FromSlash(model.NormalizeTargetPath(rel)))
 }
 
 func renderMaintainProposalReport(out io.Writer, report maintainProposalReport) {

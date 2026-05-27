@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
+	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
 )
@@ -28,6 +29,8 @@ type Source struct {
 	Title             string            `json:"title"`
 	Path              string            `json:"path"`
 	Body              string            `json:"-"`
+	Summary           string            `json:"summary,omitempty"`
+	Tags              []string          `json:"tags,omitempty"`
 	Metadata          map[string]string `json:"metadata,omitempty"`
 	Children          []Source          `json:"children,omitempty"`
 	PendingCandidates []Source          `json:"pending_candidates,omitempty"`
@@ -132,19 +135,22 @@ func resolvePendingCandidates(env paths.Env, scope string) ([]Source, error) {
 			title = rec.Meta.ID
 		}
 		pending = append(pending, Source{
-			Kind:  SourceCandidate,
-			Scope: rec.Meta.Scope,
-			ID:    rec.Meta.ID,
-			Title: title,
-			Path:  filepath.ToSlash(filepath.Join("candidates", rec.Meta.Scope, rec.Meta.ID+".md")),
-			Body:  rec.Body,
+			Kind:    SourceCandidate,
+			Scope:   rec.Meta.Scope,
+			ID:      rec.Meta.ID,
+			Title:   title,
+			Path:    filepath.ToSlash(filepath.Join("candidates", rec.Meta.Scope, rec.Meta.ID+".md")),
+			Body:    rec.Body,
+			Summary: rec.Meta.Summary,
+			Tags:    append([]string(nil), rec.Meta.Tags...),
 			Metadata: map[string]string{
-				"candidate_id":     rec.Meta.ID,
-				"status":           rec.Meta.Status,
-				"candidate_type":   rec.Meta.CandidateType,
-				"operation":        rec.Meta.Operation,
-				"target_path":      rec.Meta.TargetPath,
-				"redaction_status": rec.Meta.RedactionStatus,
+				"candidate_id":      rec.Meta.ID,
+				"candidate_surface": model.CandidateSurface(rec.Meta.CandidateType),
+				"status":            rec.Meta.Status,
+				"candidate_type":    rec.Meta.CandidateType,
+				"operation":         rec.Meta.Operation,
+				"target_path":       rec.Meta.TargetPath,
+				"redaction_status":  rec.Meta.RedactionStatus,
 			},
 		})
 	}

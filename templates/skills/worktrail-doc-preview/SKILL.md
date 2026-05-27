@@ -5,7 +5,7 @@ description: Preview the overall Worktrail knowledge library in a browser. Use w
 
 # Worktrail Doc Preview
 
-Use this skill when previewing the overall Worktrail knowledge view for a project or user scope.
+Use this skill when previewing the overall Worktrail knowledge view for a project or user scope through the static multi-page preview site.
 
 ## Rules
 
@@ -25,13 +25,13 @@ Use this skill when previewing the overall Worktrail knowledge view for a projec
    - Use `--scope user` for user-level workflows, profile, prompts, or lessons.
 3. Run one of:
    - `worktrail preview --scope <scope>`
-   - `worktrail preview --scope <scope> --no-open` when you only need the preview file path
+   - `worktrail preview --scope <scope> --no-open` when you only need the preview entry path
 4. In Cursor, verify the browser result:
    - list tabs before interacting
-   - open the generated local preview file if needed
+   - open the generated local preview entry page if needed
    - inspect a fresh snapshot when browser automation supports the page
-   - confirm the title and the relevant section or pending candidate are visible
-5. Report the scope, preview file path, and validation result.
+   - confirm the title is correct and that the relevant section, document page, or pending candidate is reachable from the site
+5. Report the scope, preview entry path, and validation result.
 
 ## Output
 

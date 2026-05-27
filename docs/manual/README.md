@@ -39,7 +39,7 @@ make docs-manual-serve PORT=3001
 这和 `worktrail preview` 不是同一件事：
 
 - `make docs-manual-serve` 预览的是这套使用手册站点
-- `worktrail preview` 预览的是当前 scope 下的 Worktrail 知识库整体页面
+- `worktrail preview` 预览的是当前 scope 下的 Worktrail 知识库静态多页站点入口页
 
 ## 推荐阅读顺序
 <div class="title-en">Recommended Reading Order</div>

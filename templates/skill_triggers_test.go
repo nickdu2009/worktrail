@@ -8,7 +8,7 @@ import (
 func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 	expected := map[string][]string{
 		"worktrail-context":     {"worktrail context", "continue a previous task"},
-		"worktrail-doc-preview": {"worktrail preview", "preview file path", "--no-open", "Do not use the target project's dev server"},
+		"worktrail-doc-preview": {"worktrail preview", "preview entry path", "--no-open", "Do not use the target project's dev server"},
 		"worktrail-init":        {"worktrail init", "worktrail install cursor|codex|claude|all", "worktrail doctor <tool>", "worktrail` is available in `PATH", "Do not initialize the target application's language"},
 		"worktrail-state":       {"worktrail state", "save progress"},
 		"worktrail-handoff":     {"worktrail handoff", "new conversation", "end current chat", "Do not only output a copyable text handoff"},

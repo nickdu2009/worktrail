@@ -523,7 +523,7 @@ func buildReviewPlan(env wtpaths.Env, scope string, records []candidate.Record, 
 		Items:       []reviewPlanItem{},
 	}
 	for _, rec := range records {
-		if rec.Meta.Status != candidate.StatusPending || !model.IsSemanticCandidateType(rec.Meta.CandidateType) {
+		if rec.Meta.Status != candidate.StatusPending || model.CandidateSurface(rec.Meta.CandidateType) != model.CandidateSurfaceSemantic {
 			continue
 		}
 		item, err := buildReviewPlanItem(env, scope, records, rec, analysis)
@@ -599,7 +599,7 @@ func newReviewPlanAnalysis(records []candidate.Record) reviewPlanAnalysis {
 	groups := map[string][]candidate.Record{}
 	for _, rec := range records {
 		analysis.ByID[rec.Meta.ID] = rec
-		if rec.Meta.Status != candidate.StatusPending || !model.IsSemanticCandidateType(rec.Meta.CandidateType) {
+		if rec.Meta.Status != candidate.StatusPending || model.CandidateSurface(rec.Meta.CandidateType) != model.CandidateSurfaceSemantic {
 			continue
 		}
 		analysis.SameTargetCounts[rec.Meta.TargetPath]++
@@ -787,7 +787,7 @@ func reviewPlanTargetExists(env wtpaths.Env, scope string, targetPath string) (b
 	if err != nil {
 		return false, err
 	}
-	target, err := wtpaths.SafeJoin(root, filepath.FromSlash(targetPath))
+	target, err := wtpaths.SafeJoin(root, filepath.FromSlash(model.NormalizeTargetPath(targetPath)))
 	if err != nil {
 		return false, err
 	}

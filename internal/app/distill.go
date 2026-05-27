@@ -264,7 +264,11 @@ func printDistillSummary(out io.Writer, summary distillSummary) {
 	if summary.WritePack != "" {
 		fmt.Fprintln(out, "next: have the current AI agent read the pack, write proposal JSON, then run `worktrail distill validate <proposal.json>` and `worktrail distill apply <proposal.json>`")
 	} else {
-		fmt.Fprintln(out, "next: run `worktrail distill --pending --limit 5 --offset <N>` or `worktrail distill --pending --all --write-pack distill.md`")
+		if summary.Mode == "distillation_sources" {
+			fmt.Fprintln(out, "next: run `worktrail distill --pending --split-sources --limit 5 --offset <N>` or `worktrail distill --pending --split-sources --all --write-pack distill.md`")
+		} else {
+			fmt.Fprintln(out, "next: run `worktrail distill --pending --limit 5 --offset <N>` or `worktrail distill --pending --all --write-pack distill.md`")
+		}
 	}
 }
 
@@ -368,7 +372,7 @@ func printDistillHelp(out io.Writer) {
 	fmt.Fprintln(out, "bulk options:")
 	fmt.Fprintln(out, "  --pending            select pending transcript_notes")
 	fmt.Fprintln(out, "  --scope <scope>      project or user (default project)")
-	fmt.Fprintln(out, "  --split-sources      include allowed pending split-source lessons with transcript_notes")
+	fmt.Fprintln(out, "  --split-sources      include migration_source and allowed pending split-source lessons with transcript_notes")
 	fmt.Fprintln(out, "  --limit N            output at most N evidence candidates (default 5)")
 	fmt.Fprintln(out, "  --offset N           skip N evidence candidates for paging")
 	fmt.Fprintln(out, "  --all                select all pending sources for the chosen mode")
