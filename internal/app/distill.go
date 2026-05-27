@@ -195,7 +195,7 @@ func renderDistillPack(out io.Writer, records []candidate.Record) error {
 	fmt.Fprintln(out, "You are the current AI coding agent. Distill the evidence below into a semantic Worktrail proposal JSON.")
 	fmt.Fprintln(out, "Do not promote, merge, discard, restore, retire, or write formal knowledge from this pack.")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Create only useful pending candidates with semantic knowledge types such as `rule`, `decision`, `architecture`, `integration`, `validation`, `glossary`, `lesson`, `project`, `prompt`, or `workflow`.")
+	fmt.Fprintln(out, "Create only useful pending candidates with semantic knowledge types such as `rule`, `decision`, `architecture`, `integration`, `validation`, `glossary`, `lesson`, `project`, `index`, `prompt`, or `workflow`.")
 	fmt.Fprintln(out, "Prefer a small number of durable, reusable items over transcript summaries.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Write a JSON file, then run `worktrail distill validate <proposal.json>` and `worktrail distill apply <proposal.json>`.")
@@ -203,7 +203,7 @@ func renderDistillPack(out io.Writer, records []candidate.Record) error {
 	fmt.Fprintln(out, "Proposal JSON shape:")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "```json")
-	fmt.Fprintln(out, `{"schema":"worktrail.distill.proposal.v1","source_candidate_ids":["source-id"],"candidates":[{"candidate_type":"rule|decision|architecture|integration|validation|glossary|lesson|project|prompt|workflow","title":"Durable knowledge title","summary":"Short semantic summary","target_path":"rules/name.md|decisions/name.md|architecture/name.md|integrations/name.md|validation/name.md|glossary/name.md|lessons/name.md|project.md|prompts/name.md|workflows/name.md","operation":"replace|merge","tags":["tag"],"evidence_label":"Pending Verification","confidence":0.7,"body":"Markdown content to create as a pending candidate"}]}`)
+	fmt.Fprintln(out, `{"schema":"worktrail.distill.proposal.v1","source_candidate_ids":["source-id"],"candidates":[{"candidate_type":"rule|decision|architecture|integration|validation|glossary|lesson|project|index|prompt|workflow","title":"Durable knowledge title","summary":"Short semantic summary","target_path":"rules/name.md|decisions/name.md|architecture/name.md|integrations/name.md|validation/name.md|glossary/name.md|lessons/name.md|project.md|index.md|prompts/name.md|workflows/name.md","operation":"replace|merge","tags":["tag"],"evidence_label":"Pending Verification","confidence":0.7,"body":"Markdown content to create as a pending candidate"}]}`)
 	fmt.Fprintln(out, "```")
 	for _, rec := range records {
 		fmt.Fprintln(out)

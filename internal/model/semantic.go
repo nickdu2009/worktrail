@@ -16,7 +16,7 @@ var semanticTargetPrefixes = map[string]string{
 }
 
 func IsSemanticCandidateType(typ string) bool {
-	if typ == "project" {
+	if typ == "project" || typ == "index" {
 		return true
 	}
 	_, ok := semanticTargetPrefixes[typ]
@@ -25,8 +25,11 @@ func IsSemanticCandidateType(typ string) bool {
 
 func SemanticTargetPathMatches(typ, targetPath string) bool {
 	targetPath = strings.TrimSpace(targetPath)
-	if typ == "project" {
+	switch typ {
+	case "project":
 		return targetPath == "project.md"
+	case "index":
+		return targetPath == "index.md"
 	}
 	prefix, ok := semanticTargetPrefixes[typ]
 	return ok && strings.HasPrefix(targetPath, prefix)
