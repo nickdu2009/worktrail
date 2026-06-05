@@ -182,7 +182,7 @@ worktrail maintain knowledge --format json
 ### 如何运行
 <div class="title-en">How It Runs</div>
 
-`handoff` 会写一份真实的 `.worktrail/handoffs/*.md` 交接记录，不会提升正式知识。hooks 在 `stop` / `session-end` 里只会起草 pending handoff candidate；如果其中内容值得长期复用，再进入 review 或 distill 路径。
+`handoff` 会写一份真实的 `.worktrail/handoffs/*.md` durable 交接记录，不会提升正式知识。`stop` / `session-end` hooks 现在默认只写 runtime records（`state/` 与 checkpoint/audit 路径），不再把 routine 退出噪音堆进 pending review inbox。
 
 新 session 开始时优先用：
 
@@ -197,12 +197,12 @@ worktrail resume "continue from latest handoff"
 ### 何时使用
 <div class="title-en">When to Use</div>
 
-适合整体浏览当前 scope 下的正式知识和 pending candidates，而不是单独预览某一个文件。
+适合整体浏览当前 scope 下的正式知识、runtime 恢复入口和 pending drafts/evidence，而不是单独预览某一个文件。
 
 ### 如何运行
 <div class="title-en">How It Runs</div>
 
-`preview` 现在默认渲染当前 scope 的整体知识库静态多页站点。项目级正式知识通常在 `.worktrail/` 下；入口页会先展示 sections、统计信息和 `Pending Candidates` 分组，再通过分区页、文档页和 candidate 详情页逐层展开，不再要求传文件路径或 candidate id。
+`preview` 现在默认渲染当前 scope 的整体知识库静态多页站点。项目级正式知识通常在 `.worktrail/` 下；入口页会先展示 sections、统计信息和 pending drafts/evidence 分组，再通过分区页、文档页和详情页逐层展开，不再要求传文件路径或 candidate id。
 
 ```bash
 worktrail preview

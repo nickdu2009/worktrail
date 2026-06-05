@@ -13,6 +13,7 @@ func IsFormalKnowledgePath(path string) bool {
 	for _, prefix := range []string{
 		"architecture/",
 		"decisions/",
+		"handoffs/",
 		"requirements/",
 		"workflows/",
 		"validation/",

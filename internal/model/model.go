@@ -3,9 +3,14 @@ package model
 import "time"
 
 const (
-	SchemaKnowledge = "worktrail.knowledge.v1"
-	SchemaCandidate = "worktrail.candidate.v1"
-	SchemaState     = "worktrail.state.v1"
+	SchemaKnowledge   = "worktrail.knowledge.v1"
+	SchemaCandidate   = "worktrail.candidate.v1"
+	SchemaHandoff     = "worktrail.handoff.v1"
+	SchemaState       = "worktrail.state.v1"
+	SchemaKnowledgeV2 = "worktrail.knowledge.v2"
+	SchemaDraftV2     = "worktrail.draft.v2"
+	SchemaEvidenceV2  = "worktrail.evidence.v2"
+	SchemaRuntimeV2   = "worktrail.runtime.v2"
 )
 
 const (
@@ -38,6 +43,7 @@ type Candidate struct {
 	ID                 string    `json:"id"`
 	Scope              string    `json:"scope"`
 	CandidateType      string    `json:"candidate_type"`
+	Topic              string    `json:"topic,omitempty"`
 	TargetPath         string    `json:"target_path"`
 	Title              string    `json:"title"`
 	Summary            string    `json:"summary"`

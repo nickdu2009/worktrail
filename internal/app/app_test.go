@@ -124,6 +124,54 @@ func TestPreviewBuildsProjectKnowledgeHTML(t *testing.T) {
 	}
 }
 
+func TestPreviewIgnoresGeneratedStorageDirectories(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", filepath.Join(home, ".worktrail"))
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "rules", "visible.md"), "# Visible Rule\n\nVisible rule body.")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "staging", "drafts", "noise.md"), "# Staging Noise\n\nShould not render.")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "runtime", "checkpoints", "noise.md"), "# Runtime Noise\n\nShould not render.")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "derived", "exports", "noise.md"), "# Derived Noise\n\nShould not render.")
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"preview", "--no-open"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run preview --no-open: %v stderr=%s", err, errb.String())
+	}
+	indexPath := parseTabValue(t, out.String(), "index")
+	cacheRoot := filepath.Dir(indexPath)
+	var rendered []string
+	if err := filepath.Walk(cacheRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || filepath.Ext(path) != ".html" {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rendered = append(rendered, string(data))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(rendered, "\n")
+	if !strings.Contains(all, "Visible Rule") {
+		t.Fatalf("preview should include visible rule:\n%s", all)
+	}
+	for _, absent := range []string{"Staging Noise", "Runtime Noise", "Derived Noise"} {
+		if strings.Contains(all, absent) {
+			t.Fatalf("preview should ignore generated storage content %q:\n%s", absent, all)
+		}
+	}
+}
+
 func TestPreviewScopeUserAndClearCache(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
@@ -1299,6 +1347,91 @@ func TestDoctorKnowledgeDetectsFormalDeletionWhenGitReportsIt(t *testing.T) {
 	}
 }
 
+func TestDoctorKnowledgeSkipsBootstrapAndHandoffEscapeNoise(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	if err := exec.Command("git", "-C", project, "init").Run(); err != nil {
+		t.Skipf("git init failed: %v", err)
+	}
+	runApp(t, &out, &errb, "handoff", "bootstrap handoff")
+	runApp(t, &out, &errb, "index", "rebuild")
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"doctor", "knowledge", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("doctor knowledge should ignore bootstrap escape noise: %v stdout=%s", err, out.String())
+	}
+	var report knowledgeDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"project.md",
+		"index.md",
+		"rules/coding-rules.md",
+		"rules/security-rules.md",
+		"rules/testing-rules.md",
+		"prompts/generate-config-draft.md",
+		"prompts/project-review.md",
+	} {
+		if hasKnowledgeFindingFor(report, "ESCAPE001", path) || hasKnowledgeFindingFor(report, "ESCAPE003", path) {
+			t.Fatalf("bootstrap doc should not raise escape warning for %s: %+v", path, report.Findings)
+		}
+	}
+	for _, finding := range report.Findings {
+		if strings.HasPrefix(finding.Path, "handoffs/") && (finding.Code == "ESCAPE001" || finding.Code == "ESCAPE003") {
+			t.Fatalf("handoff should not raise escape noise: %+v", finding)
+		}
+	}
+}
+
+func TestDoctorKnowledgeSkipsTopicWarningForDecisionRuleAndLogDocs(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	writeTextFile(t, filepath.Join(project, ".worktrail", "decisions", "choice.md"), "# Choice\n\n## Decision\n\nAdopt the current path.\n")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "log.md"), "# Log\n\nOperational notes.\n")
+	runApp(t, &out, &errb, "index", "rebuild")
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"doctor", "knowledge", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("doctor knowledge should not fail for topic-noise test: %v stdout=%s", err, out.String())
+	}
+	var report knowledgeDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"decisions/choice.md",
+		"log.md",
+		"rules/coding-rules.md",
+		"rules/security-rules.md",
+		"rules/testing-rules.md",
+	} {
+		if hasKnowledgeFindingFor(report, "TOPIC001", path) {
+			t.Fatalf("doctor knowledge should not require topic for %s: %+v", path, report.Findings)
+		}
+	}
+}
+
 func TestDoctorKnowledgeIncludesHintsAndIndexFindings(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
@@ -1343,6 +1476,73 @@ func TestDoctorKnowledgeIncludesHintsAndIndexFindings(t *testing.T) {
 	}
 	if !hasKnowledgeFindingFor(report, "LIFE001", "rules/invalid-lifecycle.md") {
 		t.Fatalf("doctor report missing LIFE001 for invalid lifecycle: %+v", report.Findings)
+	}
+}
+
+func TestDoctorKnowledgeIgnoresGeneratedStorageDirectories(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	invalid := "---worktrail\n{\n  \"title\": \"Ignored Noise\",\n  \"stage\": \"planning\",\n  \"lifecycle\": \"historic\"\n}\n---\n\nShould be ignored.\n"
+	writeTextFile(t, filepath.Join(project, ".worktrail", "staging", "drafts", "noise.md"), invalid)
+	writeTextFile(t, filepath.Join(project, ".worktrail", "runtime", "checkpoints", "noise.md"), invalid)
+	writeTextFile(t, filepath.Join(project, ".worktrail", "derived", "exports", "noise.md"), invalid)
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"doctor", "knowledge", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("doctor knowledge should ignore generated storage dirs: %v stdout=%s", err, out.String())
+	}
+	var report knowledgeDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"staging/drafts/noise.md", "runtime/checkpoints/noise.md", "derived/exports/noise.md"} {
+		if hasKnowledgeFindingFor(report, "STAGE001", path) || hasKnowledgeFindingFor(report, "LIFE001", path) {
+			t.Fatalf("doctor knowledge should ignore %s: %+v", path, report.Findings)
+		}
+	}
+}
+
+func TestDraftCreateValidatesSemanticContract(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	out.Reset()
+	errb.Reset()
+	err := Run(context.Background(), []string{"draft", "create", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/noise.md", "--title", "Noise", "--summary", "summary", "body"}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "semantic candidate type") {
+		t.Fatalf("draft create should reject evidence types: err=%v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	err = Run(context.Background(), []string{"draft", "create", "--type", "rule", "--target", "decisions/noise.md", "--title", "Noise", "--summary", "summary", "body"}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "does not match target path") {
+		t.Fatalf("draft create should reject mismatched target paths: err=%v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"draft", "create", "--id", "draft-rule", "--type", "rule", "--target", "rules/draft-rule.md", "--title", "Draft Rule", "--summary", "summary", "Draft body."}, nil, &out, &errb); err != nil {
+		t.Fatalf("draft create valid path failed: %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(project, ".worktrail", "candidates", "project", "draft-rule.md")); err != nil {
+		t.Fatalf("draft create should write candidate file: %v", err)
 	}
 }
 

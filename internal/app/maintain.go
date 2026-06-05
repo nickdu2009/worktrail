@@ -93,7 +93,7 @@ func runMaintainKnowledge(env paths.Env, ioctx IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	review, err := buildReviewPlan(env, scope, records, time.Now().UTC())
+	review, err := buildReviewPlan(env, scope, records, time.Now().UTC(), "")
 	if err != nil {
 		return err
 	}

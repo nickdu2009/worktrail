@@ -135,7 +135,7 @@ func runReviewPlan(env wtpaths.Env, ioctx IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	plan, err := buildReviewPlan(env, scope, records, time.Now().UTC())
+	plan, err := buildReviewPlan(env, scope, records, time.Now().UTC(), flagValue(flags, "topic", ""))
 	if err != nil {
 		return err
 	}
@@ -400,7 +400,7 @@ func applyReviewPlan(env wtpaths.Env, scope string, plan reviewPlan) reviewApply
 	for _, rec := range records {
 		byID[rec.Meta.ID] = rec
 	}
-	analysis := newReviewPlanAnalysis(records)
+	analysis := newReviewPlanAnalysis(records, "")
 	for _, planned := range plan.Items {
 		item := reviewApplyPlanItem{
 			CandidateID:   planned.CandidateID,
@@ -514,8 +514,9 @@ func reviewPlanSnapshotMismatches(planned, current reviewPlanSnapshot) []string 
 	return mismatches
 }
 
-func buildReviewPlan(env wtpaths.Env, scope string, records []candidate.Record, now time.Time) (reviewPlan, error) {
-	analysis := newReviewPlanAnalysis(records)
+func buildReviewPlan(env wtpaths.Env, scope string, records []candidate.Record, now time.Time, topic string) (reviewPlan, error) {
+	topic = strings.TrimSpace(topic)
+	analysis := newReviewPlanAnalysis(records, topic)
 	plan := reviewPlan{
 		Schema:      reviewPlanSchema,
 		GeneratedAt: formatPlanTime(now),
@@ -523,7 +524,11 @@ func buildReviewPlan(env wtpaths.Env, scope string, records []candidate.Record, 
 		Items:       []reviewPlanItem{},
 	}
 	for _, rec := range records {
-		if rec.Meta.Status != candidate.StatusPending || model.CandidateSurface(rec.Meta.CandidateType) != model.CandidateSurfaceSemantic {
+		objectMeta := rec.ObjectMeta()
+		if topic != "" && objectMeta.Topic != topic {
+			continue
+		}
+		if objectMeta.LifecycleStatus != model.LifecyclePendingReview || !objectMeta.IsDraft() || objectMeta.DraftKind != model.DraftKindSemantic {
 			continue
 		}
 		item, err := buildReviewPlanItem(env, scope, records, rec, analysis)
@@ -589,7 +594,7 @@ type reviewPlanAnalysis struct {
 	DuplicateCount    map[string]int
 }
 
-func newReviewPlanAnalysis(records []candidate.Record) reviewPlanAnalysis {
+func newReviewPlanAnalysis(records []candidate.Record, topic string) reviewPlanAnalysis {
 	analysis := reviewPlanAnalysis{
 		ByID:              map[string]candidate.Record{},
 		SameTargetCounts:  map[string]int{},
@@ -599,7 +604,11 @@ func newReviewPlanAnalysis(records []candidate.Record) reviewPlanAnalysis {
 	groups := map[string][]candidate.Record{}
 	for _, rec := range records {
 		analysis.ByID[rec.Meta.ID] = rec
-		if rec.Meta.Status != candidate.StatusPending || model.CandidateSurface(rec.Meta.CandidateType) != model.CandidateSurfaceSemantic {
+		objectMeta := rec.ObjectMeta()
+		if topic != "" && objectMeta.Topic != topic {
+			continue
+		}
+		if objectMeta.LifecycleStatus != model.LifecyclePendingReview || !objectMeta.IsDraft() || objectMeta.DraftKind != model.DraftKindSemantic {
 			continue
 		}
 		analysis.SameTargetCounts[rec.Meta.TargetPath]++
@@ -642,7 +651,7 @@ func reviewPlanSourceStatuses(byID map[string]candidate.Record, ids []string) []
 		}
 		statuses = append(statuses, reviewPlanSourceStatus{
 			CandidateID:     id,
-			CandidateType:   source.Meta.CandidateType,
+			CandidateType:   reviewObjectLabel(source.ObjectMeta(), source.Meta.CandidateType),
 			Status:          source.Meta.Status,
 			RedactionStatus: source.Meta.RedactionStatus,
 			Exists:          true,
@@ -692,14 +701,17 @@ func baseReviewPlanReasonCodes(rec candidate.Record, item reviewPlanItem, analys
 		} else {
 			codes = append(codes, "source_not_pending")
 		}
-		if source.CandidateType == model.CandidateTypeTranscriptNotes {
+		switch source.CandidateType {
+		case "evidence:transcript":
 			codes = append(codes, "source_type_transcript_notes")
-		} else if source.CandidateType == model.CandidateTypeMigrationSource {
+		case "evidence:migration_source":
 			codes = append(codes, "source_type_migration_source")
-		} else if source.IsSplitSource {
-			codes = append(codes, "source_type_split_source")
-		} else {
-			codes = append(codes, "source_type_unexpected")
+		default:
+			if source.IsSplitSource {
+				codes = append(codes, "source_type_split_source")
+			} else {
+				codes = append(codes, "source_type_unexpected")
+			}
 		}
 		codes = append(codes, redactionReasonCode("source", source.RedactionStatus))
 	}
@@ -733,8 +745,10 @@ func recommendReviewAction(rec candidate.Record, item reviewPlanItem, analysis r
 }
 
 func canRecommendPromote(rec candidate.Record, item reviewPlanItem, analysis reviewPlanAnalysis) bool {
-	return rec.Meta.Status == candidate.StatusPending &&
-		model.IsSemanticCandidateType(rec.Meta.CandidateType) &&
+	objectMeta := rec.ObjectMeta()
+	return objectMeta.LifecycleStatus == model.LifecyclePendingReview &&
+		objectMeta.IsDraft() &&
+		objectMeta.DraftKind == model.DraftKindSemantic &&
 		rec.Meta.Operation == candidate.OperationReplace &&
 		!item.TargetExists &&
 		analysis.SameTargetCounts[rec.Meta.TargetPath] <= 1 &&
@@ -744,8 +758,10 @@ func canRecommendPromote(rec candidate.Record, item reviewPlanItem, analysis rev
 }
 
 func canRecommendMerge(rec candidate.Record, item reviewPlanItem, analysis reviewPlanAnalysis) bool {
-	return rec.Meta.Status == candidate.StatusPending &&
-		model.IsSemanticCandidateType(rec.Meta.CandidateType) &&
+	objectMeta := rec.ObjectMeta()
+	return objectMeta.LifecycleStatus == model.LifecyclePendingReview &&
+		objectMeta.IsDraft() &&
+		objectMeta.DraftKind == model.DraftKindSemantic &&
 		rec.Meta.Operation == candidate.OperationMerge &&
 		item.TargetExists &&
 		analysis.SameTargetCounts[rec.Meta.TargetPath] <= 1 &&
@@ -762,7 +778,7 @@ func allReviewPlanSourcesUsable(statuses []reviewPlanSourceStatus) bool {
 		if !status.Exists || status.Status != candidate.StatusPending {
 			return false
 		}
-		if status.CandidateType != model.CandidateTypeTranscriptNotes && status.CandidateType != model.CandidateTypeMigrationSource && !status.IsSplitSource {
+		if status.CandidateType != "evidence:transcript" && status.CandidateType != "evidence:migration_source" && !status.IsSplitSource {
 			return false
 		}
 	}
@@ -1056,7 +1072,7 @@ func reviewPlanSourceSummary(item reviewPlanItem) string {
 }
 
 func printReviewPlanHelp(out io.Writer) {
-	fmt.Fprintln(out, "usage: worktrail review plan [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "usage: worktrail review plan [--scope project|user] [--topic <topic>] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Builds a read-only agent review contract for pending semantic candidates.")
 	fmt.Fprintln(out, "Scope defaults to project; pass --scope user for user-level candidates.")

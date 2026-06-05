@@ -82,7 +82,7 @@ func runDoctorMigration(_ context.Context, env paths.Env, ioctx IO, args []strin
 func printMigrationDoctorHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail doctor migration [--root path] [--strict] [--fix-gitignore] [--format text|json]")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Checks legacy KDD cleanup, Worktrail runtime git hygiene, migration candidates, secrets, local paths, and agent governance.")
+	fmt.Fprintln(out, "Checks legacy KDD cleanup, old/new Worktrail runtime git hygiene, storage migration readiness, secrets, local paths, and agent governance.")
 }
 
 func buildMigrationDoctorReport(env paths.Env, opts migrationDoctorOptions) migrationDoctorReport {
@@ -101,7 +101,7 @@ func buildMigrationDoctorReport(env paths.Env, opts migrationDoctorOptions) migr
 		if !opts.CleanupMode {
 			report.add("SRC001", "error", root, "legacy KDD root still exists; migration is not complete until it is removed")
 		}
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		report.add("SRC001", "error", root, err.Error())
 	}
 	report.checkLegacyReferences(env, root)
@@ -170,7 +170,7 @@ func (r *migrationDoctorReport) checkRunbooks(env paths.Env) {
 }
 
 func (r *migrationDoctorReport) checkGitRuntimeStatus(env paths.Env) {
-	args := []string{"-C", env.ProjectRoot, "status", "--porcelain=v1", "--", ".worktrail/candidates", ".worktrail/index", ".worktrail/logs", ".worktrail/raw", ".worktrail/state"}
+	args := []string{"-C", env.ProjectRoot, "status", "--porcelain=v1", "--", ".worktrail/candidates", ".worktrail/index", ".worktrail/logs", ".worktrail/raw", ".worktrail/state", ".worktrail/staging", ".worktrail/runtime", ".worktrail/derived"}
 	out, err := exec.Command("git", args...).Output()
 	if err != nil {
 		return
@@ -264,9 +264,13 @@ func (r *migrationDoctorReport) checkGovernance(env paths.Env) {
 }
 
 func (r *migrationDoctorReport) checkIndex(env paths.Env) {
-	manifest := filepath.Join(env.ProjectWT, "index", "manifest.json")
-	if _, err := os.Stat(manifest); errors.Is(err, os.ErrNotExist) {
-		r.add("IDX001", "warning", manifest, "project index manifest missing; run worktrail index rebuild --scope project")
+	for _, manifest := range []string{
+		filepath.Join(env.ProjectWT, "index", "manifest.json"),
+		filepath.Join(env.ProjectWT, "derived", "index", "manifest.json"),
+	} {
+		if _, err := os.Stat(manifest); errors.Is(err, os.ErrNotExist) {
+			r.add("IDX001", "warning", manifest, "index manifest missing; run worktrail index rebuild --scope project")
+		}
 	}
 }
 
@@ -280,7 +284,12 @@ func shouldSkipDoctorDir(env paths.Env, legacyRoot, path, name string, skipLegac
 	if sameOrInside(path, filepath.Join(env.ProjectWT, "index")) ||
 		sameOrInside(path, filepath.Join(env.ProjectWT, "logs")) ||
 		sameOrInside(path, filepath.Join(env.ProjectWT, "raw")) ||
-		sameOrInside(path, filepath.Join(env.ProjectWT, "state")) {
+		sameOrInside(path, filepath.Join(env.ProjectWT, "state")) ||
+		sameOrInside(path, filepath.Join(env.ProjectWT, "exports")) ||
+		sameOrInside(path, filepath.Join(env.ProjectWT, ".cache")) ||
+		sameOrInside(path, filepath.Join(env.ProjectWT, "derived")) ||
+		sameOrInside(path, filepath.Join(env.ProjectWT, "runtime")) ||
+		sameOrInside(path, filepath.Join(env.ProjectWT, "staging")) {
 		return true
 	}
 	return false

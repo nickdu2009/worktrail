@@ -21,6 +21,7 @@ import (
 
 type Options struct {
 	Task             string
+	Topic            string
 	Stage            string
 	IncludeLifecycle []string
 	Limit            int
@@ -72,6 +73,7 @@ type IndexHealth struct {
 type Pack struct {
 	Schema                   string        `json:"schema"`
 	Task                     string        `json:"task,omitempty"`
+	Topic                    string        `json:"topic,omitempty"`
 	CreatedAt                time.Time     `json:"created_at"`
 	HiddenEvidenceCandidates int           `json:"hidden_evidence_candidates"`
 	IndexHealth              []IndexHealth `json:"index_health,omitempty"`
@@ -122,6 +124,7 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 	pack := Pack{
 		Schema:                   "worktrail.context_pack.v1",
 		Task:                     opts.Task,
+		Topic:                    strings.TrimSpace(opts.Topic),
 		CreatedAt:                now,
 		HiddenEvidenceCandidates: countPendingEvidence(entries),
 		IndexHealth:              append([]IndexHealth{}, indexHealths...),
@@ -132,6 +135,9 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 	for _, spec := range sectionSpecs {
 		var items []Item
 		for _, entry := range entries {
+			if pack.Topic != "" && entry.Topic != pack.Topic {
+				continue
+			}
 			if !knowledge.IncludesLifecycle(includeLifecycle, entry.Lifecycle) {
 				continue
 			}
@@ -161,6 +167,11 @@ func RenderMarkdown(pack Pack) string {
 	if pack.Task != "" {
 		b.WriteString("## Task\n\n")
 		b.WriteString(strings.TrimSpace(pack.Task))
+		b.WriteString("\n\n")
+	}
+	if pack.Topic != "" {
+		b.WriteString("## Topic\n\n")
+		b.WriteString(strings.TrimSpace(pack.Topic))
 		b.WriteString("\n\n")
 	}
 	for _, section := range pack.Sections {
@@ -335,7 +346,7 @@ func sectionSpecsForStage(stage string, includeEvidence bool) []sectionSpec {
 		"validation":   {"Validation", func(e index.Entry) bool { return e.Type == "validation" }},
 		"glossary":     {"Glossary", func(e index.Entry) bool { return e.Type == "glossary" }},
 		"workflows":    {"Workflows", func(e index.Entry) bool { return e.Type == "workflow" }},
-		"state":        {"Active State", func(e index.Entry) bool { return e.Type == "state" && (e.Active || e.Status == "active") }},
+		"state":        {"Active State", func(e index.Entry) bool { return e.Type == "state" && e.Active }},
 		"decisions":    {"Decisions", func(e index.Entry) bool { return e.Type == "decision" }},
 		"handoffs":     {"Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }},
 		"rules":        {"Rules", func(e index.Entry) bool { return e.Type == "rule" }},

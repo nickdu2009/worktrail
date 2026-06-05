@@ -435,6 +435,39 @@ func TestInstallCursorUserDoctorChecksRuleAndAllSkills(t *testing.T) {
 	}
 }
 
+func TestInstallCursorUserAlsoInstallsNativeSkillsWhenCompatibleRootsExist(t *testing.T) {
+	env := testEnv(t)
+	for _, skill := range allWorktrailSkills {
+		writeLegacyManagedSkill(t, filepath.Join(env.Home, ".codex", "skills", skill, "SKILL.md"), "codex "+skill)
+	}
+
+	report, err := Install(env, ToolCursor, Options{User: true})
+	if err != nil {
+		t.Fatalf("Install cursor with compatible skills: %v", err)
+	}
+	assertInstalledSkills(t, filepath.Join(env.Home, ".cursor", "skills"))
+	for _, action := range report.Actions {
+		if action.Action == "skill-visible-via-compatible-root" {
+			t.Fatalf("cursor user install should still write native skills, got %+v", action)
+		}
+	}
+
+	doctor, err := Doctor(env, ToolCursor, Options{User: true})
+	if err != nil {
+		t.Fatalf("Doctor cursor with compatible skills: %v", err)
+	}
+	for _, check := range doctor.Checks {
+		if strings.HasPrefix(check.Name, "user skill ") {
+			if !strings.HasPrefix(check.Path, filepath.Join(env.Home, ".cursor", "skills")+string(os.PathSeparator)) {
+				t.Fatalf("expected doctor to prefer native cursor skill path, got %+v", check)
+			}
+			if !strings.Contains(check.Note, "duplicate Cursor-visible Worktrail skills") {
+				t.Fatalf("expected duplicate warning for compatible skill roots, got %+v", check)
+			}
+		}
+	}
+}
+
 func TestProjectInstallCleansLegacyManagedRootRuleAndSkills(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

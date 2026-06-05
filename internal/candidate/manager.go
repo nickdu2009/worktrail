@@ -52,6 +52,7 @@ type CreateRequest struct {
 	ID                 string
 	Scope              string
 	CandidateType      string
+	Topic              string
 	TargetPath         string
 	Title              string
 	Summary            string
@@ -68,6 +69,10 @@ type Record struct {
 	Meta model.Candidate
 	Body string
 	Path string
+}
+
+func (r Record) ObjectMeta() model.ObjectMetaV2 {
+	return model.NormalizeCandidateMeta(r.Meta)
 }
 
 type ApplyResult struct {
@@ -119,6 +124,7 @@ func (m Manager) Create(req CreateRequest) (Record, error) {
 		ID:                 id,
 		Scope:              scope,
 		CandidateType:      candidateType,
+		Topic:              strings.TrimSpace(req.Topic),
 		TargetPath:         targetPathForMeta(root, target),
 		Title:              title,
 		Summary:            strings.TrimSpace(req.Summary),
@@ -237,11 +243,14 @@ func (m Manager) Restore(scope, id string) (ApplyResult, error) {
 	if rec.Meta.Status != StatusPromoted || rec.Meta.Operation != OperationReplace {
 		return ApplyResult{}, ErrRestoreUnsupported
 	}
-	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
-		return ApplyResult{}, ErrTranscriptNotesApply
-	}
-	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
-		return ApplyResult{}, ErrMigrationSourceApply
+	if rec.ObjectMeta().IsEvidence() {
+		if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+			return ApplyResult{}, ErrTranscriptNotesApply
+		}
+		if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+			return ApplyResult{}, ErrMigrationSourceApply
+		}
+		return ApplyResult{}, ErrEvidenceUnsupported
 	}
 	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
 	if err != nil {
@@ -298,11 +307,14 @@ func (m Manager) Retire(scope, id, reason string) (Record, error) {
 	if rec.Meta.Status != StatusPromoted && rec.Meta.Status != StatusMerged {
 		return Record{}, ErrRetireUnsupported
 	}
-	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
-		return Record{}, ErrTranscriptNotesApply
-	}
-	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
-		return Record{}, ErrMigrationSourceApply
+	if rec.ObjectMeta().IsEvidence() {
+		if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+			return Record{}, ErrTranscriptNotesApply
+		}
+		if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+			return Record{}, ErrMigrationSourceApply
+		}
+		return Record{}, ErrEvidenceUnsupported
 	}
 	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
 	if err != nil {
@@ -436,11 +448,15 @@ func (m Manager) apply(scope, id, op string) (ApplyResult, error) {
 	if terminalStatus(rec.Meta.Status) {
 		return ApplyResult{}, fmt.Errorf("candidate %q is already %s", rec.Meta.ID, rec.Meta.Status)
 	}
-	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
-		return ApplyResult{}, ErrTranscriptNotesApply
-	}
-	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
-		return ApplyResult{}, ErrMigrationSourceApply
+	objectMeta := rec.ObjectMeta()
+	if objectMeta.IsEvidence() {
+		if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
+			return ApplyResult{}, ErrTranscriptNotesApply
+		}
+		if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+			return ApplyResult{}, ErrMigrationSourceApply
+		}
+		return ApplyResult{}, ErrEvidenceUnsupported
 	}
 	root, err := m.Env.ScopeRoot(rec.Meta.Scope)
 	if err != nil {
@@ -634,10 +650,7 @@ func terminalStatus(status string) bool {
 }
 
 func isLifecycleEvidence(rec Record) bool {
-	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
-		return true
-	}
-	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+	if rec.ObjectMeta().IsEvidence() {
 		return true
 	}
 	if rec.Meta.CandidateType != "lesson" {

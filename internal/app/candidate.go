@@ -43,6 +43,7 @@ func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) er
 			Scope:         scope,
 			ID:            flagValue(flags, "id", ""),
 			CandidateType: flagValue(flags, "type", "knowledge"),
+			Topic:         flagValue(flags, "topic", ""),
 			TargetPath:    flagValue(flags, "target", ""),
 			Title:         flagValue(flags, "title", ""),
 			Summary:       flagValue(flags, "summary", ""),
@@ -61,6 +62,7 @@ func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) er
 		}
 		records = filterCandidateRecords(records, candidateFilters{
 			Type:     flagValue(flags, "type", ""),
+			Topic:    flagValue(flags, "topic", ""),
 			Status:   flagValue(flags, "status", ""),
 			Semantic: flagValue(flags, "semantic", "") == "true",
 			Evidence: flagValue(flags, "evidence", "") == "true",
@@ -92,6 +94,7 @@ func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) er
 
 type candidateFilters struct {
 	Type     string
+	Topic    string
 	Status   string
 	Semantic bool
 	Evidence bool
@@ -99,13 +102,18 @@ type candidateFilters struct {
 
 func filterCandidateRecords(records []candidate.Record, filters candidateFilters) []candidate.Record {
 	filters.Type = strings.TrimSpace(filters.Type)
+	filters.Topic = strings.TrimSpace(filters.Topic)
 	filters.Status = strings.TrimSpace(filters.Status)
-	if filters.Type == "" && filters.Status == "" && !filters.Semantic && !filters.Evidence {
+	if filters.Type == "" && filters.Topic == "" && filters.Status == "" && !filters.Semantic && !filters.Evidence {
 		return records
 	}
 	filtered := records[:0]
 	for _, rec := range records {
+		objectMeta := rec.ObjectMeta()
 		if filters.Type != "" && rec.Meta.CandidateType != filters.Type {
+			continue
+		}
+		if filters.Topic != "" && objectMeta.Topic != filters.Topic {
 			continue
 		}
 		if filters.Status != "" && rec.Meta.Status != filters.Status {
@@ -142,18 +150,23 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(ioctx.Out, "# Worktrail Candidate Review")
+	fmt.Fprintln(ioctx.Out, "# Worktrail Draft Review")
 	fmt.Fprintln(ioctx.Out)
 	showEvidence := flagValue(flags, "evidence", "") == "true"
 	showAll := flagValue(flags, "all", "") == "true"
 	showSemantic := flagValue(flags, "semantic", "") == "true"
+	topicFilter := strings.TrimSpace(flagValue(flags, "topic", ""))
 	hiddenEvidence := 0
 	hiddenNonSemantic := 0
 	for _, rec := range records {
-		if rec.Meta.Status != candidate.StatusPending {
+		objectMeta := rec.ObjectMeta()
+		if topicFilter != "" && objectMeta.Topic != topicFilter {
 			continue
 		}
-		surface := model.CandidateSurface(rec.Meta.CandidateType)
+		if objectMeta.LifecycleStatus != model.LifecyclePendingReview && objectMeta.LifecycleStatus != model.LifecyclePendingDistill {
+			continue
+		}
+		surface := model.ObjectSurface(objectMeta)
 		if surface == model.CandidateSurfaceEvidence {
 			if !showEvidence && !showAll {
 				hiddenEvidence++
@@ -169,7 +182,7 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 		if showSemantic && surface != model.CandidateSurfaceSemantic {
 			continue
 		}
-		fmt.Fprintf(ioctx.Out, "- `%s` %s -> `%s` [%s, redaction=%s]\n", rec.Meta.ID, rec.Meta.Title, rec.Meta.TargetPath, rec.Meta.CandidateType, rec.Meta.RedactionStatus)
+		fmt.Fprintf(ioctx.Out, "- `%s` %s -> `%s` [%s, redaction=%s]\n", rec.Meta.ID, rec.Meta.Title, rec.Meta.TargetPath, reviewObjectLabel(objectMeta, rec.Meta.CandidateType), rec.Meta.RedactionStatus)
 		if rec.Meta.Summary != "" {
 			fmt.Fprintf(ioctx.Out, "  %s\n", rec.Meta.Summary)
 		}
@@ -185,15 +198,15 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 		if len(warnings) > 0 {
 			fmt.Fprintf(ioctx.Out, "  warnings: %s\n", strings.Join(warnings, ", "))
 		}
-		if model.IsSemanticCandidateType(rec.Meta.CandidateType) {
+		if objectMeta.IsDraft() && objectMeta.DraftKind == model.DraftKindSemantic {
 			fmt.Fprintf(ioctx.Out, "  next: worktrail candidates diff %s\n", rec.Meta.ID)
 		}
 	}
 	if hiddenEvidence > 0 {
-		fmt.Fprintf(ioctx.Out, "\nHidden evidence candidates: %d. Use `worktrail review --evidence` to inspect them. Distill transcript notes with `worktrail distill --pending --limit 5`, or include migration and split-source distillation inputs with `worktrail distill --pending --split-sources --limit 5`.\n", hiddenEvidence)
+		fmt.Fprintf(ioctx.Out, "\nHidden evidence candidates: %d (evidence items). Use `worktrail review --evidence` to inspect them. Distill transcript notes with `worktrail distill --pending --limit 5`, or include migration and split-source distillation inputs with `worktrail distill --pending --split-sources --limit 5`.\n", hiddenEvidence)
 	}
 	if hiddenNonSemantic > 0 {
-		fmt.Fprintf(ioctx.Out, "\nHidden non-semantic pending candidates: %d. Use `worktrail review --all` to inspect them.\n", hiddenNonSemantic)
+		fmt.Fprintf(ioctx.Out, "\nHidden non-semantic pending candidates: %d (operational drafts). Use `worktrail review --all` to inspect them.\n", hiddenNonSemantic)
 	}
 	missingAppliedTargets, err := missingAppliedCandidateTargets(env, records)
 	if err != nil {
@@ -213,7 +226,8 @@ func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 
 func reviewSourceSummary(records []candidate.Record, rec candidate.Record) (string, []string) {
 	if len(rec.Meta.SourceCandidateIDs) == 0 {
-		if model.IsSemanticCandidateType(rec.Meta.CandidateType) {
+		objectMeta := rec.ObjectMeta()
+		if objectMeta.IsDraft() && objectMeta.DraftKind == model.DraftKindSemantic {
 			return "", []string{"source_candidate_ids_empty"}
 		}
 		return "", nil
@@ -251,13 +265,37 @@ func reviewSourceSummary(records []candidate.Record, rec candidate.Record) (stri
 }
 
 func isReviewEvidenceSource(rec candidate.Record) bool {
-	if rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes {
-		return true
-	}
-	if rec.Meta.CandidateType == model.CandidateTypeMigrationSource {
+	if rec.ObjectMeta().IsEvidence() {
 		return true
 	}
 	return isReviewSplitSourceLesson(rec)
+}
+
+func reviewObjectLabel(meta model.ObjectMetaV2, legacyType string) string {
+	switch {
+	case meta.IsEvidence():
+		if meta.EvidenceType != "" {
+			return "evidence:" + meta.EvidenceType
+		}
+		return "evidence"
+	case meta.IsDraft():
+		if meta.DraftKind != "" {
+			return "draft:" + meta.DraftKind
+		}
+		return "draft"
+	case meta.IsRuntimeRecord():
+		if meta.RuntimeType != "" {
+			return "runtime:" + meta.RuntimeType
+		}
+		return "runtime"
+	case meta.IsKnowledgeDoc():
+		if meta.KnowledgeType != "" {
+			return "knowledge:" + meta.KnowledgeType
+		}
+		return "knowledge"
+	default:
+		return legacyType
+	}
 }
 
 func isReviewSplitSourceLesson(rec candidate.Record) bool {
@@ -521,16 +559,16 @@ func printMergeHelp(out io.Writer) {
 }
 
 func printReviewHelp(out io.Writer) {
-	fmt.Fprintln(out, "usage: worktrail review [--semantic|--evidence|--all] [--scope project|user]")
+	fmt.Fprintln(out, "usage: worktrail review [--semantic|--evidence|--all] [--topic <topic>] [--scope project|user]")
 	fmt.Fprintln(out, "       worktrail review plan [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out, "       worktrail review apply-plan <plan.json> --confirm [--format text|json]")
 	fmt.Fprintln(out, "       worktrail review apply-candidates --promote <id...> [--scope project|user]")
 	fmt.Fprintln(out, "       worktrail review apply-candidates --merge <id...> [--scope project|user]")
 	fmt.Fprintln(out, "       worktrail review apply-candidates --discard <id...> [--scope project|user]")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "By default, review shows pending semantic candidates and hides evidence candidates plus non-semantic operational candidates.")
-	fmt.Fprintln(out, "Scope defaults to project; pass --scope user for user-level candidates.")
+	fmt.Fprintln(out, "By default, review shows pending semantic drafts and hides evidence items plus operational drafts.")
+	fmt.Fprintln(out, "Scope defaults to project; pass --scope user for user-level drafts/candidates.")
 	fmt.Fprintln(out, "Use review plan for the read-only agent contract grouped by recommended action.")
-	fmt.Fprintln(out, "Use --evidence to inspect evidence candidates such as transcript_notes and migration_source, or --all to show every pending candidate.")
+	fmt.Fprintln(out, "Use --evidence to inspect evidence items such as transcript_notes and migration_source, or --all to show every pending draft/candidate.")
 	fmt.Fprintln(out, "When an applied target is missing, review suggests restore for accidental deletion or retire for intentional deletion.")
 }

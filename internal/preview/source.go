@@ -127,7 +127,8 @@ func resolvePendingCandidates(env paths.Env, scope string) ([]Source, error) {
 	}
 	pending := make([]Source, 0, len(records))
 	for _, rec := range records {
-		if rec.Meta.Status != candidate.StatusPending {
+		objectMeta := rec.ObjectMeta()
+		if objectMeta.LifecycleStatus != model.LifecyclePendingReview && objectMeta.LifecycleStatus != model.LifecyclePendingDistill {
 			continue
 		}
 		title := strings.TrimSpace(rec.Meta.Title)
@@ -145,9 +146,9 @@ func resolvePendingCandidates(env paths.Env, scope string) ([]Source, error) {
 			Tags:    append([]string(nil), rec.Meta.Tags...),
 			Metadata: map[string]string{
 				"candidate_id":      rec.Meta.ID,
-				"candidate_surface": model.CandidateSurface(rec.Meta.CandidateType),
+				"candidate_surface": model.ObjectSurface(objectMeta),
 				"status":            rec.Meta.Status,
-				"candidate_type":    rec.Meta.CandidateType,
+				"candidate_type":    reviewSourceType(objectMeta, rec.Meta.CandidateType),
 				"operation":         rec.Meta.Operation,
 				"target_path":       rec.Meta.TargetPath,
 				"redaction_status":  rec.Meta.RedactionStatus,
@@ -187,9 +188,36 @@ func readDocumentSource(scope, root, path string) (Source, error) {
 	}, nil
 }
 
+func reviewSourceType(meta model.ObjectMetaV2, legacyType string) string {
+	switch {
+	case meta.IsEvidence():
+		if meta.EvidenceType != "" {
+			return "evidence:" + meta.EvidenceType
+		}
+		return "evidence"
+	case meta.IsDraft():
+		if meta.DraftKind != "" {
+			return "draft:" + meta.DraftKind
+		}
+		return "draft"
+	case meta.IsRuntimeRecord():
+		if meta.RuntimeType != "" {
+			return "runtime:" + meta.RuntimeType
+		}
+		return "runtime"
+	case meta.IsKnowledgeDoc():
+		if meta.KnowledgeType != "" {
+			return "knowledge:" + meta.KnowledgeType
+		}
+		return "knowledge"
+	default:
+		return legacyType
+	}
+}
+
 func shouldSkipPreviewDir(name string) bool {
 	switch name {
-	case "index", "logs", "raw", "exports", "candidates", "state", "imports", ".cache":
+	case "index", "logs", "raw", "exports", "candidates", "state", "imports", ".cache", "staging", "runtime", "derived":
 		return true
 	default:
 		return false

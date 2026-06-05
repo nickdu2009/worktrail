@@ -19,6 +19,16 @@ type Config struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+var projectBootstrapKnowledgeDefaults = map[string]string{
+	"project.md":                       "# Project\n\n",
+	"rules/coding-rules.md":            "# Coding Rules\n\n",
+	"rules/testing-rules.md":           "# Testing Rules\n\n",
+	"rules/security-rules.md":          "# Security Rules\n\n",
+	"prompts/project-review.md":        "# Project Review\n\n",
+	"prompts/generate-config-draft.md": "# Generate Config Draft\n\n",
+	"index.md":                         "# Worktrail Project Index\n\n`project.md` is the canonical manual overview for this repository.\n\n",
+}
+
 func InitUser(env paths.Env) error {
 	dirs := []string{
 		"profile", "workflows", "prompts", "lessons",
@@ -46,8 +56,7 @@ func InitUser(env paths.Env) error {
 		"prompts/agent-handoff.md":             "# Agent Handoff\n\n",
 		"lessons/ai-coding-gotchas.md":         "# AI Coding Gotchas\n\n",
 		"lessons/context-management.md":        "# Context Management\n\n",
-		"index.md":                             "# Worktrail User Index\n\n",
-		"log.md":                               "# Worktrail User Log\n\n",
+		"index.md":                             "# Worktrail User Index\n\nProfile, workflows, prompts, and lessons under this root are the canonical user knowledge surface.\n\n",
 	}
 	if err := writeDefaults(env.UserRoot, defaults); err != nil {
 		return err
@@ -69,18 +78,7 @@ func InitProject(env paths.Env) error {
 	if err := writeConfig(env.ProjectWT, "project"); err != nil {
 		return err
 	}
-	defaults := map[string]string{
-		"project.md":                       "# Project\n\n",
-		"current-state.md":                 "# Current State\n\n",
-		"rules/coding-rules.md":            "# Coding Rules\n\n",
-		"rules/testing-rules.md":           "# Testing Rules\n\n",
-		"rules/security-rules.md":          "# Security Rules\n\n",
-		"prompts/project-review.md":        "# Project Review\n\n",
-		"prompts/generate-config-draft.md": "# Generate Config Draft\n\n",
-		"index.md":                         "# Worktrail Project Index\n\n",
-		"log.md":                           "# Worktrail Project Log\n\n",
-	}
-	if err := writeDefaults(env.ProjectWT, defaults); err != nil {
+	if err := writeDefaults(env.ProjectWT, projectBootstrapKnowledgeDefaults); err != nil {
 		return err
 	}
 	if err := EnsureProjectGitignore(env); err != nil {
@@ -90,6 +88,12 @@ func InitProject(env paths.Env) error {
 		return err
 	}
 	return wlog.Append(env.ProjectWT, "init", "", "cli:init-project", nil)
+}
+
+func IsProjectBootstrapKnowledgePath(path string) bool {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	_, ok := projectBootstrapKnowledgeDefaults[path]
+	return ok
 }
 
 const ProjectGitignoreBody = `# Worktrail local integration installs. These are generated per developer.
@@ -104,6 +108,11 @@ const ProjectGitignoreBody = `# Worktrail local integration installs. These are 
 .worktrail/raw/
 .worktrail/index/
 .worktrail/logs/
+.worktrail/staging/
+.worktrail/runtime/
+.worktrail/derived/index/
+.worktrail/derived/cache/
+.worktrail/derived/exports/
 .worktrail/.cache/
 .worktrail/exports/`
 
@@ -120,6 +129,11 @@ const legacyProjectGitignoreBody = `# Worktrail local integration installs. Thes
 .worktrail/raw/
 .worktrail/index/
 .worktrail/logs/
+.worktrail/staging/
+.worktrail/runtime/
+.worktrail/derived/index/
+.worktrail/derived/cache/
+.worktrail/derived/exports/
 .worktrail/.cache/
 .worktrail/exports/`
 

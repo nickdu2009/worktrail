@@ -88,7 +88,7 @@ worktrail handoff "summary of current state, validation, risks, and next step"
 worktrail resume "continue the same task"
 ```
 
-`worktrail handoff` 会直接写入 `.worktrail/handoffs/`；hooks 只会在需要时起草 pending handoff candidate。
+`worktrail handoff` 会直接写入 `.worktrail/handoffs/`；`stop` / `session-end` hooks 默认把退出现场保存在 runtime records（`state/`、checkpoint 和审计日志）里，不再起草 pending handoff candidate。
 
 ### 6. 评审并应用候选知识
 <div class="title-en">Review and Apply Candidate Knowledge</div>

@@ -22,7 +22,7 @@ Worktrail 的自动化目标很克制：
 1. agent 集成安装后的运行时文件，例如 hooks、settings 配置和用户级 skills
 2. 对话内 skills，例如 `/worktrail-context`、`/worktrail-review`、`/worktrail-distill`、`/worktrail-maintain`、`/worktrail-handoff`
 3. `context` 暴露的 maintenance hints 和只读计划命令
-4. hooks 在特定事件点生成 state、checkpoint、candidate 或 handoff 的能力
+4. hooks 在特定事件点生成 state、checkpoint、runtime records 或其他操作记录的能力
 
 Worktrail 的自动化不是“后台一直运行的系统”，而是围绕当前 Agent 会话按事件点显式触发。
 
@@ -57,7 +57,7 @@ hooks 的职责是把会话事件转换成 Worktrail 可用的运行材料。
 
 - 在会话开始或恢复时帮助载入上下文
 - 在 compact、stop 或 session end 之类的事件点更新 active state 或写入 checkpoint
-- 生成工作记录、checkpoint、handoff candidate 或其他操作记录
+- 生成工作记录、checkpoint、takeover/runtime 记录或其他操作记录
 - 把某些事件转化为后续 review/maintenance 可见的输入
 
 它们不适合做的事情包括：
@@ -89,7 +89,7 @@ skills 自动化的是流程编排，不是绕过边界。
 
 Worktrail 只保留 CLI、hooks 和 skills 这三类自动化入口。
 
-- hooks 负责在明确事件点自动写工作记录、checkpoint、handoff draft candidate 和日志
+- hooks 负责在明确事件点自动写工作记录、checkpoint、runtime records 和日志
 - skills 负责在对话里编排 `context`、`review`、`distill`、`handoff`、`resume` 等流程
 - 高风险写动作仍然通过显式 CLI 执行，并保留人工确认边界
 

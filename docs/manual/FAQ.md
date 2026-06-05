@@ -96,6 +96,8 @@ worktrail resume "continue review follow-up"
 worktrail doctor knowledge
 ```
 
+它重点检查需要 review 管理的正式知识漂移，也会报告绕过 candidate/review 流的直接 formal edits。与此同时，`worktrail init` 生成的 starter docs、`worktrail handoff` 生成的 durable handoff 记录，以及没有 thread/topic 语义压力的全局规则、决策或日志，不会再被当成低信号噪音 warning。
+
 ## 我可以自动清理所有 pending evidence 吗？
 <div class="title-en">Can I Automatically Clean All Pending Evidence?</div>
 

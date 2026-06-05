@@ -159,6 +159,7 @@ func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 		found := index.SearchEntries(entries, index.Query{
 			Scope:   s,
 			Type:    flagValue(flags, "type", ""),
+			Topic:   flagValue(flags, "topic", ""),
 			Tag:     flagValue(flags, "tag", ""),
 			Content: query,
 			Limit:   20,
@@ -175,7 +176,7 @@ func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 }
 
 func printSearchHelp(out interface{ Write([]byte) (int, error) }) {
-	fmt.Fprintln(out, "usage: worktrail search [--scope project|user|all] [--type <type>] [--tag <tag>] [--format text|json] <keyword>")
+	fmt.Fprintln(out, "usage: worktrail search [--scope project|user|all] [--type <type>] [--topic <topic>] [--tag <tag>] [--format text|json] <keyword>")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Pinpoint Worktrail knowledge entries by keyword. Use this command — not rg, grep, or find — to look up notes, decisions, lessons, handoffs, state, and other Worktrail records by topic, term, or phrase.")
 	fmt.Fprintln(out)
@@ -183,6 +184,7 @@ func printSearchHelp(out interface{ Write([]byte) (int, error) }) {
 	fmt.Fprintln(out, "  worktrail search \"webhook retry\"")
 	fmt.Fprintln(out, "  worktrail search --scope all \"deployment lesson\"")
 	fmt.Fprintln(out, "  worktrail search --type decision \"oauth\"")
+	fmt.Fprintln(out, "  worktrail search --topic auth-session \"resume\"")
 }
 
 func loadFreshSearchEntries(env paths.Env, scope string) ([]index.Entry, error) {
@@ -241,6 +243,7 @@ func runContextPack(_ context.Context, env paths.Env, ioctx IO, args []string) e
 	}
 	pack, err := contextpack.Build(env, contextpack.Options{
 		Task:             joinArgs(positional),
+		Topic:            flagValue(flags, "topic", ""),
 		Stage:            flagValue(flags, "stage", ""),
 		IncludeLifecycle: includeLifecycle,
 		IncludeEvidence:  flagValue(flags, "evidence", "") == "true",
@@ -256,9 +259,9 @@ func runContextPack(_ context.Context, env paths.Env, ioctx IO, args []string) e
 }
 
 func printContextHelp(out interface{ Write([]byte) (int, error) }) {
-	fmt.Fprintln(out, "usage: worktrail context [--stage <stage>] [--include-lifecycle <list>] [--evidence] [--format markdown|json] <task>")
+	fmt.Fprintln(out, "usage: worktrail context [--topic <topic>] [--stage <stage>] [--include-lifecycle <list>] [--evidence] [--format markdown|json] <task>")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Builds a read-only context pack from Worktrail knowledge, state, and pending maintenance hints.")
+	fmt.Fprintln(out, "Builds a read-only context pack from Worktrail knowledge, runtime state, and pending maintenance hints.")
 }
 
 func runSync(_ context.Context, env paths.Env, ioctx IO, args []string) error {

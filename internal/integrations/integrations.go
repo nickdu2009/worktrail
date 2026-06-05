@@ -268,10 +268,6 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 		report.Actions = append(report.Actions, Action{Path: ruleFile, Action: "managed-block-installed"})
 	}
 	for _, skill := range skills {
-		if cfg.tool == ToolCursor && cursorSkillVisible(cfg, skill, skillRoot) {
-			report.Actions = append(report.Actions, Action{Path: cursorVisibleSkillPath(cfg, skill, skillRoot), Action: "skill-visible-via-compatible-root"})
-			continue
-		}
 		body, err := wtmpl.Read("skills/" + skill + "/SKILL.md")
 		if err != nil {
 			return err

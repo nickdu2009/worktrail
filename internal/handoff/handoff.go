@@ -11,12 +11,13 @@ import (
 	"time"
 
 	wlog "github.com/nickdu2009/worktrail/internal/log"
+	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
 	"github.com/nickdu2009/worktrail/internal/util"
 )
 
-const Schema = "worktrail.handoff.v1"
+const Schema = model.SchemaHandoff
 
 type Metadata struct {
 	Schema            string    `json:"schema"`

@@ -22,7 +22,7 @@ func hookEnv(t *testing.T) paths.Env {
 	}
 }
 
-func TestCodexStopCreatesStateCandidateAndLogsWithoutPromotion(t *testing.T) {
+func TestCodexStopCreatesStateAndRuntimeTakeoverNoteWithoutPromotion(t *testing.T) {
 	env := hookEnv(t)
 	fixture, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fixtures", "hooks", "codex_stop.json"))
 	if err != nil {
@@ -32,8 +32,8 @@ func TestCodexStopCreatesStateCandidateAndLogsWithoutPromotion(t *testing.T) {
 	if err := Run(context.Background(), env, "codex", "stop", bytes.NewReader(fixture), &out); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !strings.Contains(out.String(), `"candidate"`) {
-		t.Fatalf("expected candidate in output: %s", out.String())
+	if !strings.Contains(out.String(), `"runtime"`) {
+		t.Fatalf("expected runtime record in output: %s", out.String())
 	}
 	for _, path := range []string{
 		filepath.Join(env.ProjectWT, "state", "active", "latest.md"),
@@ -43,29 +43,26 @@ func TestCodexStopCreatesStateCandidateAndLogsWithoutPromotion(t *testing.T) {
 			t.Fatalf("expected %s: %v", path, err)
 		}
 	}
-	candidates, err := filepath.Glob(filepath.Join(env.ProjectWT, "candidates", "project", "cand_*.md"))
+	checkpoints, err := filepath.Glob(filepath.Join(env.ProjectWT, "state", "checkpoints", "*.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 1 {
-		t.Fatalf("expected one candidate, got %d", len(candidates))
+	if len(checkpoints) != 1 {
+		t.Fatalf("expected one runtime record, got %d", len(checkpoints))
 	}
-	data, err := os.ReadFile(candidates[0])
+	data, err := os.ReadFile(checkpoints[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"status": "pending"`) {
-		t.Fatalf("candidate was not left pending:\n%s", data)
-	}
-	if !strings.Contains(string(data), `"target_path": "handoffs/`) || strings.Contains(string(data), `".worktrail/handoffs/`) {
-		t.Fatalf("hook candidate should target formal handoffs path:\n%s", data)
+	if !strings.Contains(string(data), `"type": "takeover_note"`) {
+		t.Fatalf("runtime takeover note metadata unexpected:\n%s", data)
 	}
 	events, err := os.ReadFile(filepath.Join(env.ProjectWT, "logs", "events.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(events), "candidate.promote") {
-		t.Fatalf("hook must not promote:\n%s", events)
+	if strings.Contains(string(events), "candidate.promote") || strings.Contains(string(events), "candidate.create") {
+		t.Fatalf("hook must not create or promote candidates:\n%s", events)
 	}
 }
 
@@ -103,8 +100,8 @@ func TestEventOnlyStopDoesNotOverwriteLatestState(t *testing.T) {
 	if !strings.Contains(string(events), "hook.run") {
 		t.Fatalf("event-only hook should still log hook.run:\n%s", events)
 	}
-	if strings.Contains(out.String(), `"candidate"`) {
-		t.Fatalf("event-only hook should not create a candidate: %s", out.String())
+	if strings.Contains(out.String(), `"runtime"`) {
+		t.Fatalf("event-only hook should not create a runtime record: %s", out.String())
 	}
 	candidates, err := filepath.Glob(filepath.Join(env.ProjectWT, "candidates", "project", "cand_*.md"))
 	if err != nil {
@@ -126,7 +123,7 @@ func TestStopWithCommandsButNoFollowupDoesNotCreateCandidate(t *testing.T) {
 		t.Fatalf("expected latest state: %v", err)
 	}
 	if strings.Contains(out.String(), `"candidate"`) {
-		t.Fatalf("commands-only stop should not create a candidate: %s", out.String())
+		t.Fatalf("commands-only stop should not create a runtime record: %s", out.String())
 	}
 	candidates, err := filepath.Glob(filepath.Join(env.ProjectWT, "candidates", "project", "cand_*.md"))
 	if err != nil {
@@ -234,7 +231,7 @@ func TestCursorStopSanitizesDurablePayloadAndRecordsObservedTranscript(t *testin
 		t.Fatalf("expected observed transcript warning in output: %s", out.String())
 	}
 	if strings.Contains(out.String(), `"candidate"`) {
-		t.Fatalf("cursor stop with transcript-only signal should not create a candidate: %s", out.String())
+		t.Fatalf("cursor stop with transcript-only signal should not create a runtime record: %s", out.String())
 	}
 	observed, err := filepath.Glob(filepath.Join(env.ProjectWT, "raw", "cursor", "observed-*.metadata.json"))
 	if err != nil {

@@ -56,6 +56,7 @@ func runNote(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 		Scope:         flagValue(flags, "scope", "project"),
 		ID:            flagValue(flags, "id", ""),
 		CandidateType: typ,
+		Topic:         flagValue(flags, "topic", ""),
 		TargetPath:    target,
 		Title:         title,
 		Summary:       summary,
@@ -104,6 +105,7 @@ func printNoteHelp(out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "options:")
 	fmt.Fprintln(out, "  --scope project|user       default project")
+	fmt.Fprintln(out, "  --topic <topic>            optional topic/thread identifier")
 	fmt.Fprintln(out, "  --confidence 0.7           confidence > 0 and <= 1")
 	fmt.Fprintln(out, "  --from-file draft.md       read candidate body from file")
 	fmt.Fprintln(out, "  --operation replace|merge  default replace")

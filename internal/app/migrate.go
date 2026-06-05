@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	kddmigration "github.com/nickdu2009/worktrail/internal/migration/kdd"
+	storagemigration "github.com/nickdu2009/worktrail/internal/migration/storage"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
 )
@@ -25,6 +26,10 @@ func runMigrate(_ context.Context, env paths.Env, ioctx IO, args []string) error
 	switch args[0] {
 	case "kdd":
 		return runMigrateKDD(env, ioctx, args[1:])
+	case "storage-plan":
+		return runMigrateStoragePlan(env, ioctx, args[1:])
+	case "storage-apply":
+		return runMigrateStorageApply(env, ioctx, args[1:])
 	default:
 		return fmt.Errorf("unsupported migrate target %q", args[0])
 	}
@@ -157,6 +162,8 @@ func cleanupLegacyKDD(env paths.Env, rootFlag, archivePath string, confirmed boo
 
 func printMigrateHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail migrate kdd [--root path] [--write-candidates] [--format text|json]")
+	fmt.Fprintln(out, "       worktrail migrate storage-plan [--format text|json]")
+	fmt.Fprintln(out, "       worktrail migrate storage-apply --confirm [--format text|json]")
 }
 
 func printMigrateKDDHelp(out io.Writer) {
@@ -164,4 +171,40 @@ func printMigrateKDDHelp(out io.Writer) {
 	fmt.Fprintln(out, "       worktrail migrate kdd --cleanup-legacy --confirm [--root path] [--archive-path path] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Default mode is a dry-run. Candidate writes stay pending and never promote, merge, or discard knowledge.")
+}
+
+func runMigrateStoragePlan(env paths.Env, ioctx IO, args []string) error {
+	flags, _ := splitFlags(args)
+	plan, err := storagemigration.PlanRoot(env.ProjectWT)
+	if err != nil {
+		return err
+	}
+	if flagValue(flags, "format", "text") == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(plan)
+	}
+	fmt.Fprintf(ioctx.Out, "schema: %s\nroot: %s\nitems: %d\nwarnings: %d\n", plan.Schema, plan.Root, len(plan.Items), len(plan.Warnings))
+	for _, item := range plan.Items {
+		if item.TargetPath != "" {
+			fmt.Fprintf(ioctx.Out, "%s\t%s\t%s\n", item.Action, item.SourcePath, item.TargetPath)
+			continue
+		}
+		fmt.Fprintf(ioctx.Out, "%s\t%s\t%s\n", item.Action, item.SourcePath, item.Reason)
+	}
+	return nil
+}
+
+func runMigrateStorageApply(env paths.Env, ioctx IO, args []string) error {
+	flags, _ := splitFlags(args)
+	report, err := storagemigration.ApplyRoot(env.ProjectWT, flags["confirm"] == "true")
+	if err != nil {
+		if flagValue(flags, "format", "text") == "json" {
+			_ = json.NewEncoder(ioctx.Out).Encode(report)
+		}
+		return err
+	}
+	if flagValue(flags, "format", "text") == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(report)
+	}
+	fmt.Fprintf(ioctx.Out, "schema: %s\nroot: %s\nmanifest: %s\ncreated: %d\nskipped: %d\nwarnings: %d\n", report.Schema, report.Root, report.Manifest, report.Created, report.Skipped, len(report.Warnings))
+	return nil
 }

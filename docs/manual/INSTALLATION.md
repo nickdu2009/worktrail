@@ -81,7 +81,7 @@ worktrail install claude --user
 
 默认未指定 scope 时，`worktrail install <tool>` 等价于用户级安装。
 
-用户级安装会写入跟随个人环境的规则和 skills。Cursor 用户级安装会安装 Cursor 可见的 Worktrail rule 和 skills；如果已有兼容的 `$HOME/.agents/skills`、`$HOME/.codex/skills` 或 `$HOME/.claude/skills`，Cursor 可以复用这些可见 skills。
+用户级安装会写入跟随个人环境的规则和 skills。Cursor 用户级安装会把 Worktrail rule 和 skills 写入 Cursor 自己的用户目录；如果已有兼容的 `$HOME/.agents/skills`、`$HOME/.codex/skills` 或 `$HOME/.claude/skills`，`doctor cursor --user` 会把这些重复可见副本提示为 warning，但不会阻止安装。
 
 ### 项目级集成
 <div class="title-en">Project Scope Integration</div>
@@ -134,6 +134,8 @@ worktrail doctor claude --user --project
 ```bash
 worktrail doctor knowledge
 ```
+
+这条命令主要检查正式知识的治理漂移，例如分类混放、`source_of_truth` 冲突、starter 文档仍引用 superseded 文档、索引过期，以及绕过 review 流的直接 formal knowledge 编辑。它不会把 `worktrail init` 生成的 starter docs 或 `worktrail handoff` 生成的 durable handoff 记录当成需要额外 candidate trail 的噪音。
 
 ## 卸载集成
 <div class="title-en">Uninstall Integrations</div>

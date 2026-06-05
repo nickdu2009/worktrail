@@ -369,6 +369,74 @@ func TestBuildMaintenanceSurfacesImportableCodexSessions(t *testing.T) {
 	}
 }
 
+func TestBuildTopicFiltersStateAndHandoffs(t *testing.T) {
+	tmp := t.TempDir()
+	env := paths.Env{
+		UserRoot:  filepath.Join(tmp, "user"),
+		ProjectWT: filepath.Join(tmp, "project", ".worktrail"),
+	}
+	writePackDoc(t, filepath.Join(env.ProjectWT, "rules", "delivery.md"), map[string]any{
+		"id":    "delivery-rule",
+		"scope": "project",
+		"type":  "rule",
+		"title": "Delivery Rule",
+		"topic": "delivery",
+	}, "Delivery guidance.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "rules", "billing.md"), map[string]any{
+		"id":    "billing-rule",
+		"scope": "project",
+		"type":  "rule",
+		"title": "Billing Rule",
+		"topic": "billing",
+	}, "Billing guidance.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "state", "active", "delivery.md"), map[string]any{
+		"id":     "delivery-state",
+		"scope":  "project",
+		"type":   "state",
+		"title":  "Delivery State",
+		"status": "active",
+		"topic":  "delivery",
+	}, "Work on delivery thread.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "state", "active", "billing.md"), map[string]any{
+		"id":     "billing-state",
+		"scope":  "project",
+		"type":   "state",
+		"title":  "Billing State",
+		"status": "active",
+		"topic":  "billing",
+	}, "Work on billing thread.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "delivery.md"), map[string]any{
+		"id":    "delivery-handoff",
+		"scope": "project",
+		"type":  "handoff",
+		"title": "Delivery Handoff",
+		"topic": "delivery",
+	}, "Resume delivery flow.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "billing.md"), map[string]any{
+		"id":    "billing-handoff",
+		"scope": "project",
+		"type":  "handoff",
+		"title": "Billing Handoff",
+		"topic": "billing",
+	}, "Resume billing flow.")
+
+	pack, err := Build(env, Options{Task: "delivery task", Topic: "delivery"})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	rendered := RenderMarkdown(pack)
+	for _, want := range []string{"Delivery Rule", "Delivery State", "Delivery Handoff"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("topic-scoped context missing %q:\n%s", want, rendered)
+		}
+	}
+	for _, absent := range []string{"Billing Rule", "Billing State", "Billing Handoff"} {
+		if strings.Contains(rendered, absent) {
+			t.Fatalf("topic-scoped context leaked %q:\n%s", absent, rendered)
+		}
+	}
+}
+
 func TestBuildMaintenanceSkipsCodexSessionsAlreadyRepresentedByCandidate(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")

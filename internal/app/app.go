@@ -74,6 +74,12 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 		return runContextPack(ctx, env, ioctx, args[1:])
 	case "note":
 		return runNote(ctx, env, ioctx, args[1:])
+	case "draft":
+		return runDraft(ctx, env, ioctx, args[1:])
+	case "checkpoint":
+		return runCheckpoint(ctx, env, ioctx, args[1:])
+	case "takeover":
+		return runTakeover(ctx, env, ioctx, args[1:])
 	case "preview":
 		return runPreview(ctx, env, ioctx, args[1:])
 	case "sync":
@@ -116,6 +122,8 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  worktrail search <keyword>")
 	fmt.Fprintln(out, "  worktrail state start <title>")
 	fmt.Fprintln(out, "  worktrail state update <note>")
+	fmt.Fprintln(out, "  worktrail checkpoint <reason>")
+	fmt.Fprintln(out, "  worktrail takeover <note>")
 	fmt.Fprintln(out, "  worktrail handoff <summary>")
 	fmt.Fprintln(out, "  worktrail resume [<task>]")
 	fmt.Fprintln(out, "  worktrail doctor knowledge")
@@ -133,6 +141,7 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  worktrail candidates create --help")
 	fmt.Fprintln(out, "  worktrail review [--semantic|--evidence|--all]")
 	fmt.Fprintln(out, "  worktrail evidence plan [--status active|archived|all]")
+	fmt.Fprintln(out, "  worktrail draft create --type rule --target rules/example.md --title <title> --summary <summary> <body>")
 	fmt.Fprintln(out, "  worktrail note add --type rule --target rules/example.md --title <title> --summary <summary> --evidence-label <label> <body>")
 	fmt.Fprintln(out, "  worktrail maintain knowledge [--format json]")
 	fmt.Fprintln(out, "  worktrail promote <candidate-id>")

@@ -17,6 +17,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/candidate"
 	"github.com/nickdu2009/worktrail/internal/index"
 	"github.com/nickdu2009/worktrail/internal/knowledge"
+	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
 )
@@ -184,6 +185,7 @@ func scanKnowledgeDocs(root, scope string) ([]knowledgeDoc, error) {
 			meta = doc.Meta
 			body = doc.Body
 		}
+		norm, normErr := model.NormalizeObjectMeta(rel, meta)
 		docs = append(docs, knowledgeDoc{
 			Scope:         scope,
 			Root:          root,
@@ -200,6 +202,34 @@ func scanKnowledgeDocs(root, scope string) ([]knowledgeDoc, error) {
 			Supersedes:    knowledgeStringListMeta(meta, "supersedes"),
 			SupersededBy:  knowledgeStringListMeta(meta, "superseded_by"),
 		})
+		if normErr == nil {
+			last := &docs[len(docs)-1]
+			if norm.IsKnowledgeDoc() && norm.KnowledgeType != "" {
+				last.Type = norm.KnowledgeType
+			}
+			if last.Title == rel && strings.TrimSpace(norm.Title) != "" {
+				last.Title = norm.Title
+			}
+			if strings.TrimSpace(last.Stage) == "" {
+				last.Stage = strings.TrimSpace(norm.Stage)
+			}
+			if strings.TrimSpace(last.Lifecycle) == "" {
+				last.Lifecycle = normalizeDoctorLifecycle(norm)
+			}
+			if strings.TrimSpace(last.Status) == "" {
+				last.Status = normalizeDoctorStatus(norm)
+			}
+			if strings.TrimSpace(last.Topic) == "" {
+				last.Topic = strings.TrimSpace(norm.Topic)
+			}
+			last.SourceOfTruth = last.SourceOfTruth || norm.SourceOfTruth
+			if len(last.Supersedes) == 0 {
+				last.Supersedes = append([]string(nil), norm.Supersedes...)
+			}
+			if len(last.SupersededBy) == 0 {
+				last.SupersededBy = append([]string(nil), norm.SupersededBy...)
+			}
+		}
 		return nil
 	})
 	return docs, err
@@ -210,7 +240,7 @@ func shouldSkipKnowledgeDoctorDir(path, root, name string) bool {
 		return false
 	}
 	switch name {
-	case "candidates", "state", "raw", "index", "logs", "exports":
+	case "candidates", "state", "raw", "index", "logs", "exports", "staging", "runtime", "derived":
 		return true
 	default:
 		return false
@@ -218,7 +248,7 @@ func shouldSkipKnowledgeDoctorDir(path, root, name string) bool {
 }
 
 func (r *knowledgeDoctorReport) checkDocs(docs []knowledgeDoc) {
-	sotByTopic := map[string][]knowledgeDoc{}
+	sotByTopicTypeStage := map[string][]knowledgeDoc{}
 	supersededBy := map[string][]string{}
 	docsByScopePath := map[string]bool{}
 	for _, doc := range docs {
@@ -237,9 +267,12 @@ func (r *knowledgeDoctorReport) checkDocs(docs []knowledgeDoc) {
 		if doc.SourceOfTruth && doc.Topic == "" {
 			r.add("SOT002", "warning", doc.Scope, doc.Path, "source_of_truth should declare a topic")
 		}
-		if doc.SourceOfTruth && doc.Topic != "" {
-			key := doc.Scope + "\x00" + doc.Topic
-			sotByTopic[key] = append(sotByTopic[key], doc)
+		if shouldRequireTopic(doc) && doc.Topic == "" {
+			r.add("TOPIC001", "warning", doc.Scope, doc.Path, "current durable knowledge should declare a topic for thread-aware context and governance")
+		}
+		if doc.SourceOfTruth && doc.Topic != "" && !knowledge.IsNonCurrentLifecycle(doc.Lifecycle) {
+			key := doc.Scope + "\x00" + doc.Topic + "\x00" + doc.Type + "\x00" + activeStageForDoctor(doc)
+			sotByTopicTypeStage[key] = append(sotByTopicTypeStage[key], doc)
 		}
 		for _, old := range doc.Supersedes {
 			old = filepath.ToSlash(strings.TrimSpace(old))
@@ -261,13 +294,17 @@ func (r *knowledgeDoctorReport) checkDocs(docs []knowledgeDoc) {
 		}
 		r.checkDocShape(doc)
 	}
-	for key, docs := range sotByTopic {
+	for key, docs := range sotByTopicTypeStage {
 		if len(docs) <= 1 {
 			continue
 		}
 		parts := strings.SplitN(key, "\x00", 2)
+		detail := ""
+		if len(parts) == 2 {
+			detail = parts[1]
+		}
 		for _, doc := range docs {
-			r.add("SOT001", "error", doc.Scope, doc.Path, "multiple source_of_truth documents for topic "+parts[1])
+			r.add("SOT001", "error", doc.Scope, doc.Path, "multiple source_of_truth documents for topic/type/stage "+detail)
 		}
 	}
 	for _, doc := range docs {
@@ -284,6 +321,9 @@ func (r *knowledgeDoctorReport) checkWriteEscapes(env paths.Env, docs []knowledg
 		if !knowledge.IsFormalKnowledgePath(doc.Path) {
 			continue
 		}
+		if !shouldRequireAppliedCandidateTrail(doc) {
+			continue
+		}
 		if !candidateTrails[doc.Scope+"\x00"+doc.Path] {
 			r.add("ESCAPE003", "warning", doc.Scope, doc.Path, "formal knowledge has no applied candidate trail; recover with `worktrail note add` or create a pending candidate before promote/merge")
 		}
@@ -298,6 +338,9 @@ func (r *knowledgeDoctorReport) checkWriteEscapes(env paths.Env, docs []knowledg
 		}
 		switch item.Status {
 		case "untracked":
+			if shouldSuppressUntrackedFormalWarning(env.ProjectWT, path) {
+				continue
+			}
 			r.add("ESCAPE001", "warning", "project", path, "untracked formal knowledge file may bypass review; recover with `worktrail note add` or remove it if unintended")
 		case "modified":
 			r.add("ESCAPE002", "warning", "project", path, "modified formal knowledge file may bypass review; create a pending candidate or promote/merge through Worktrail")
@@ -497,6 +540,104 @@ func validKnowledgeStage(stage string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeDoctorLifecycle(meta model.ObjectMetaV2) string {
+	switch meta.LifecycleStatus {
+	case "", model.LifecycleCurrent, model.LifecyclePendingReview, model.LifecyclePendingDistill:
+		return ""
+	default:
+		return meta.LifecycleStatus
+	}
+}
+
+func normalizeDoctorStatus(meta model.ObjectMetaV2) string {
+	switch meta.LifecycleStatus {
+	case model.LifecyclePendingReview, model.LifecyclePendingDistill:
+		return "pending"
+	default:
+		return meta.LifecycleStatus
+	}
+}
+
+func activeStageForDoctor(doc knowledgeDoc) string {
+	stage := strings.TrimSpace(doc.Stage)
+	if stage != "" {
+		return stage
+	}
+	return "current"
+}
+
+func shouldRequireTopic(doc knowledgeDoc) bool {
+	if knowledge.IsNonCurrentLifecycle(doc.Lifecycle) {
+		return false
+	}
+	switch doc.Type {
+	case "project", "index", "profile", "prompt", "handoff", "state", "candidate", "knowledge", "decision", "rule", "log":
+		return false
+	default:
+		return true
+	}
+}
+
+func shouldRequireAppliedCandidateTrail(doc knowledgeDoc) bool {
+	if !knowledge.IsFormalKnowledgePath(doc.Path) {
+		return false
+	}
+	if doc.Type == "handoff" {
+		return false
+	}
+	return !(doc.Scope == "project" && store.IsProjectBootstrapKnowledgePath(doc.Path))
+}
+
+func shouldSuppressUntrackedFormalWarning(projectWT, path string) bool {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	if path == "" {
+		return false
+	}
+	if store.IsProjectBootstrapKnowledgePath(path) || strings.HasPrefix(path, "handoffs/") {
+		return true
+	}
+	abs := filepath.Join(projectWT, filepath.FromSlash(path))
+	info, err := os.Stat(abs)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	entries, err := untrackedFormalMarkdownPaths(projectWT, abs)
+	if err != nil || len(entries) == 0 {
+		return false
+	}
+	for _, rel := range entries {
+		if !(store.IsProjectBootstrapKnowledgePath(rel) || strings.HasPrefix(rel, "handoffs/")) {
+			return false
+		}
+	}
+	return true
+}
+
+func untrackedFormalMarkdownPaths(root, dir string) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.ToLower(filepath.Ext(path)) != ".md" {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if knowledge.IsFormalKnowledgePath(rel) {
+			out = append(out, rel)
+		}
+		return nil
+	})
+	return out, err
 }
 
 func (r *knowledgeDoctorReport) checkIndexHealth(env paths.Env, scopes []string) {
