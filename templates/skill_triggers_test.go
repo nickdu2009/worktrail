@@ -8,16 +8,16 @@ import (
 func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 	expected := map[string][]string{
 		"worktrail-context":     {"worktrail context", "load context", "worktrail resume"},
-		"worktrail-doc-preview": {"worktrail preview", "preview entry path", "--no-open", "Do not use `worktrail preview` for keyword lookup requests"},
-		"worktrail-search":      {"worktrail search", "keyword", "Do not substitute `worktrail context` or `worktrail preview`", "Do not substitute generic shell tools such as `rg`, `grep`, or `find`"},
-		"worktrail-init":        {"worktrail init", "worktrail install cursor|codex|claude|all", "worktrail doctor <tool>", "worktrail` is available in `PATH", "Do not initialize the target application's language"},
-		"worktrail-state":       {"worktrail state", "save progress", "worktrail resume"},
+		"worktrail-doc-preview": {"worktrail preview", "--no-open", "keyword lookup", "worktrail search"},
+		"worktrail-search":      {"worktrail search", "keyword", "`rg`, `grep`, `find`, `worktrail context`, or `worktrail preview`"},
+		"worktrail-init":        {"worktrail init", "worktrail install cursor|codex|claude|all", "worktrail doctor <tool>", "`worktrail` CLI is available in `PATH`"},
+		"worktrail-state":       {"worktrail state", "checkpoint", "worktrail resume"},
 		"worktrail-resume":      {"worktrail resume", "latest state", "durable handoff", "worktrail state inject", "worktrail state list", "worktrail state show"},
 		"worktrail-handoff":     {"worktrail handoff", "new conversation", "end current chat", "Do not only output a copyable text handoff"},
-		"worktrail-import":      {"worktrail import", "--since 14d", "--limit 20", "worktrail sync", "worktrail migrate kdd"},
-		"worktrail-distill":     {"worktrail distill --pending --summary", "worktrail.distill.proposal.v1"},
-		"worktrail-review":      {"worktrail review plan --format json", "worktrail review apply-candidates", "promoted, merged, discarded, restored, or retired", "Do not promote, merge, or discard `transcript_notes`"},
-		"worktrail-maintain":    {"worktrail context \"maintenance\"", "worktrail evidence plan --format json", "worktrail note add", "review apply-candidates"},
+		"worktrail-import":      {"worktrail import codex --since 14d", "worktrail import cursor --limit 20", "worktrail sync", "worktrail migrate kdd"},
+		"worktrail-distill":     {"worktrail distill --pending --summary", "validate/apply workflow", "Do not promote, merge, discard, archive, restore, or retire"},
+		"worktrail-review":      {"worktrail review plan --format json", "worktrail review apply-candidates", "promoted, merged, discarded, restored, or retired", "evidence or operational drafts"},
+		"worktrail-maintain":    {"worktrail context \"maintenance\"", "worktrail evidence plan --format json", "worktrail note add", "state-changing maintenance action"},
 	}
 	seen := map[string]bool{}
 	rendered := RenderSkillTriggerRouting()
@@ -30,6 +30,9 @@ func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 		seen[trigger.Skill] = true
 		if len(trigger.UseWhen) == 0 || len(trigger.RequiredActions) == 0 || len(trigger.Never) == 0 {
 			t.Fatalf("%s must define use_when, required_actions, and never entries: %+v", trigger.Skill, trigger)
+		}
+		if strings.TrimSpace(trigger.RootIntent) == "" || strings.TrimSpace(trigger.RootCommand) == "" || strings.TrimSpace(trigger.RootGuardrail) == "" {
+			t.Fatalf("%s must define root routing fields: %+v", trigger.Skill, trigger)
 		}
 		for _, want := range expected[trigger.Skill] {
 			if !strings.Contains(rendered, want) {
@@ -48,12 +51,14 @@ func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 }
 
 func TestRenderRootTemplateReplacesRoutingPlaceholder(t *testing.T) {
-	body := "before\n" + SkillTriggerRoutingPlaceholder + "\nafter"
+	body := "before\n" + RootSharedPlaceholder + "\nafter"
 	rendered := RenderRootTemplate(body)
-	if strings.Contains(rendered, SkillTriggerRoutingPlaceholder) {
-		t.Fatalf("placeholder was not replaced:\n%s", rendered)
+	for _, placeholder := range []string{RootSharedPlaceholder, SkillTriggerRoutingPlaceholder} {
+		if strings.Contains(rendered, placeholder) {
+			t.Fatalf("placeholder %q was not replaced:\n%s", placeholder, rendered)
+		}
 	}
-	for _, want := range []string{"## Skill Trigger Routing", "Project activation gate", "worktrail-handoff", "worktrail handoff", "new conversation", "end current chat"} {
+	for _, want := range []string{"# Worktrail", "## Skill Trigger Routing", "Project activation gate", "worktrail-handoff", "worktrail handoff", "new conversation", "end current chat"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered root template missing %q:\n%s", want, rendered)
 		}
@@ -71,13 +76,11 @@ func TestPlaceholderIsOnlyUsedByRootRuleTemplates(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Read(%s): %v", path, err)
 		}
-		if !strings.Contains(body, SkillTriggerRoutingPlaceholder) {
-			t.Fatalf("%s missing trigger routing placeholder", path)
+		if !strings.Contains(body, RootSharedPlaceholder) {
+			t.Fatalf("%s missing root shared placeholder", path)
 		}
-		for _, want := range []string{"project has opted in", "`.worktrail/` exists", "does not block explicit user requests"} {
-			if !strings.Contains(body, want) {
-				t.Fatalf("%s missing project activation gate %q:\n%s", path, want, body)
-			}
+		if strings.Contains(body, SkillTriggerRoutingPlaceholder) {
+			t.Fatalf("%s should not embed trigger routing directly anymore:\n%s", path, body)
 		}
 	}
 
@@ -136,4 +139,53 @@ func TestSkillTemplatesExposeTriggerIntent(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestSkillTemplateDescriptionsUseCanonicalTwoSentenceStyle(t *testing.T) {
+	skills := []string{
+		"worktrail-context",
+		"worktrail-doc-preview",
+		"worktrail-search",
+		"worktrail-init",
+		"worktrail-state",
+		"worktrail-resume",
+		"worktrail-handoff",
+		"worktrail-import",
+		"worktrail-distill",
+		"worktrail-review",
+		"worktrail-maintain",
+	}
+	for _, skill := range skills {
+		body, err := Read("skills/" + skill + "/SKILL.md")
+		if err != nil {
+			t.Fatalf("Read skill %s: %v", skill, err)
+		}
+		desc := frontmatterDescription(body)
+		if desc == "" {
+			t.Fatalf("%s missing frontmatter description:\n%s", skill, body)
+		}
+		parts := strings.Split(desc, ". Use when ")
+		if len(parts) != 2 {
+			t.Fatalf("%s description must follow '<capability>. Use when <trigger>.': %q", skill, desc)
+		}
+		if strings.TrimSpace(parts[0]) == "" {
+			t.Fatalf("%s description capability sentence is empty: %q", skill, desc)
+		}
+		if !strings.HasSuffix(desc, ".") {
+			t.Fatalf("%s description must end with a period: %q", skill, desc)
+		}
+		trigger := strings.TrimSpace(strings.TrimSuffix(parts[1], "."))
+		if trigger == "" {
+			t.Fatalf("%s description trigger sentence is empty: %q", skill, desc)
+		}
+	}
+}
+
+func frontmatterDescription(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "description:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+		}
+	}
+	return ""
 }

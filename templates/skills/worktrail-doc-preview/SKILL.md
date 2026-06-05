@@ -1,13 +1,13 @@
 ---
 name: worktrail-doc-preview
-description: Preview the overall Worktrail knowledge library in a browser. Use when the user asks to preview Worktrail docs, render Worktrail knowledge, open a Worktrail candidate, handoff, workflow, profile, rule, lesson, or says 预览 Worktrail 文档.
+description: Preview Worktrail user or project knowledge in the static browser site. Use when the user wants to browse rendered Worktrail docs, candidates, handoffs, workflows, profiles, rules, or lessons.
 ---
 
 # Worktrail Doc Preview
 
 Use this skill when previewing the overall Worktrail knowledge view for a project or user scope through the static multi-page preview site.
 
-## Rules
+## Guardrails
 
 - If `.worktrail/` is absent at the current workspace or repository root and the user did not explicitly ask to initialize, install, inspect, repair, or otherwise manage Worktrail, stop; Worktrail is not enabled for this project.
 - Preview only Worktrail-managed content: the overall user/project Worktrail knowledge view, which already includes pending candidates.
@@ -18,21 +18,12 @@ Use this skill when previewing the overall Worktrail knowledge view for a projec
 
 ## Workflow
 
-1. Identify the scope the user wants to inspect:
+1. Choose scope:
    - Use `project` by default for repository knowledge.
    - Use `user` for user-level workflows, profile, prompts, or lessons.
-2. Choose scope:
-   - Use `--scope project` by default.
-   - Use `--scope user` for user-level workflows, profile, prompts, or lessons.
-3. Run one of:
-   - `worktrail preview --scope <scope>`
-   - `worktrail preview --scope <scope> --no-open` when you only need the preview entry path
-4. In Cursor, verify the browser result:
-   - list tabs before interacting
-   - open the generated local preview entry page if needed
-   - inspect a fresh snapshot when browser automation supports the page
-   - confirm the title is correct and that the relevant section, document page, or pending candidate is reachable from the site
-5. Report the scope, preview entry path, and validation result.
+2. Run `worktrail preview --scope <scope>` or `worktrail preview --scope <scope> --no-open` when you only need the preview entry path.
+3. In Cursor, verify that the generated entry page opens and that the relevant section, document page, or pending candidate is reachable from the site.
+4. Report the scope, preview entry path, and validation result.
 
 ## Output
 

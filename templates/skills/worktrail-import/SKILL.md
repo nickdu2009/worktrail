@@ -1,15 +1,25 @@
 ---
 name: worktrail-import
-description: Import, sync, extract, or migrate pending Worktrail candidates from Codex, Claude, Cursor, transcript files, current-project conversations, observed Cursor transcripts, or legacy KDD docs.
+description: Import Worktrail evidence or pending candidates from transcripts, external agent sessions, or legacy KDD docs. Use when the user wants to import, sync, extract, migrate, or reuse knowledge from Codex, Claude, Cursor, transcript files, current-project conversations, or legacy KDD content.
 ---
 
 # Worktrail Import
 
 Use this skill when the user wants to import, sync, extract, migrate, or reuse knowledge from Codex, Claude, Cursor, transcript files, all current-project conversations, observed Cursor conversations, or legacy KDD docs.
 
-If `.worktrail/` is absent at the current workspace or repository root and the user did not explicitly ask to initialize, install, inspect, repair, or otherwise manage Worktrail, stop; Worktrail is not enabled for this project.
+## Guardrails
 
-For an existing `docs/knowledge-driven-development/` project knowledge base:
+- If `.worktrail/` is absent at the current workspace or repository root and the user did not explicitly ask to initialize, install, inspect, repair, or otherwise manage Worktrail, stop; Worktrail is not enabled for this project.
+- Start with a bounded dry-run and show the counts before any state-changing import.
+- Import, extract, distill, proposal apply, and candidate creation produce pending candidates only.
+- Do not promote, merge, discard, restore, retire, or write formal knowledge from this skill.
+- Transcript notes are evidence and must be distilled into semantic candidates before review or promotion.
+
+## Workflow
+
+Choose the lane that matches the source.
+
+### Legacy KDD knowledge base
 
 1. Run `worktrail migrate kdd` first and show the dry-run matched, blocked, skipped, project item, and local item counts.
 2. If the user asked to proceed, run `worktrail migrate kdd --write-candidates`.
@@ -20,7 +30,7 @@ For an existing `docs/knowledge-driven-development/` project knowledge base:
 7. Run `worktrail doctor migration` after review and only then use explicit cleanup for the legacy root.
 8. Hand off review to `/worktrail-review`.
 
-For all current-project Codex conversations:
+### Current-project Codex conversations
 
 1. Run a bounded dry-run first and show the count. Prefer the exact command from `worktrail context "maintenance"` when present, such as `worktrail import codex --since 14d`, otherwise use `worktrail import codex --limit 20`.
 2. If the user asked to proceed or already asked for all conversations, run the same bounded command with `--all`, for example `worktrail import codex --since 14d --all`.
@@ -31,7 +41,7 @@ For all current-project Codex conversations:
 7. If validation reports useful valid items, run `worktrail distill apply <proposal.json>` to create pending semantic candidates.
 8. Hand off review to `/worktrail-review`.
 
-For observed Cursor conversations:
+### Observed Cursor conversations
 
 1. Run a bounded dry-run first and show the observed, matched, skipped, and blocked counts. Prefer the exact command from `worktrail context "maintenance"` when present, such as `worktrail import cursor --limit 20`.
 2. Explain that Cursor import uses explicit `--file` paths or Worktrail-observed `observed-*.metadata.json` registry entries. It does not scan undocumented private Cursor directories.
@@ -39,7 +49,7 @@ For observed Cursor conversations:
 4. Summarize observed, synced, extracted, skipped, and blocked counts.
 5. Distill transcript evidence before review, then hand off review to `/worktrail-review`.
 
-For one explicit transcript file:
+### One explicit transcript file
 
 1. Identify the source as `codex`, `claude`, `cursor`, or `manual`.
 2. Run `worktrail sync <source> <transcript-file>`.
@@ -48,5 +58,3 @@ For one explicit transcript file:
 5. Hand off review to `/worktrail-review`.
 
 Claude Code currently supports explicit transcript files through `sync claude <file>` and `extract --source claude`; it does not yet have automatic `worktrail import claude` discovery.
-
-Do not promote, merge, discard, restore, retire, or write formal knowledge from this skill. Import, extract, distill, proposal apply, and candidate creation produce pending candidates only. Transcript notes are evidence and must be distilled into semantic candidates before review or promotion.

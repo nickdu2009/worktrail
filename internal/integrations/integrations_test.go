@@ -678,6 +678,7 @@ func assertRenderedTriggerRouting(t *testing.T, path string) {
 		"end current chat",
 		"Do not only output a copyable text handoff",
 		"worktrail evidence plan --format json",
+		"Root governance only summarizes the routing surface",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("rendered trigger routing in %s missing %q:\n%s", path, want, text)
