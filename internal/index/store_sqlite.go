@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -228,7 +229,16 @@ INSERT INTO entries(
 	if err != nil {
 		return err
 	}
+	seenTags := map[string]struct{}{}
 	for _, tag := range entry.Tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		if _, ok := seenTags[tag]; ok {
+			continue
+		}
+		seenTags[tag] = struct{}{}
 		if _, err := tx.Exec(`INSERT INTO entry_tags(entry_id, tag) VALUES(?, ?)`, entry.ID, tag); err != nil {
 			return err
 		}
