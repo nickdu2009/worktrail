@@ -105,16 +105,20 @@ func runDistill(_ context.Context, env paths.Env, ioctx IO, args []string) error
 func runDistillProposal(env paths.Env, ioctx IO, cmd string, args []string) error {
 	flags, positional := splitFlags(args)
 	format := flagValue(flags, "format", flagValue(flags, "json", "text"))
+	command := "worktrail distill " + cmd
+	fail := func(err error) error {
+		return failCLICommand(ioctx, format, command, err)
+	}
 	path := firstArg(positional, "")
 	if path == "" {
-		return fmt.Errorf("usage: worktrail distill %s <proposal.json> [--scope project|user] [--format text|json]", cmd)
+		return fail(fmt.Errorf("usage: worktrail distill %s <proposal.json> [--scope project|user] [--format text|json]", cmd))
 	}
 	proposal, err := wtdistill.LoadProposal(path)
 	if err != nil {
-		if format != "json" && format != "true" {
+		if !isJSONFormat(format) {
 			fmt.Fprintf(ioctx.Out, "Distill %s: failed\n\nError: %s\n", cmd, distillFatalProposalError(err))
 		}
-		return err
+		return fail(err)
 	}
 	scope := flagValue(flags, "scope", "project")
 	manager := candidate.Manager{Env: env, Actor: "cli:distill-" + cmd}
@@ -125,7 +129,7 @@ func runDistillProposal(env paths.Env, ioctx IO, cmd string, args []string) erro
 		report, err = wtdistill.Validate(env, manager, scope, proposal)
 	}
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	return printDistillProposalReport(ioctx, cmd, proposal, report, format)
 }
@@ -348,6 +352,9 @@ func renderDistillReportItem(out io.Writer, proposal wtdistill.Proposal, item wt
 	if len(item.WarningCodes) > 0 {
 		fmt.Fprintf(out, "  warnings: %s\n", strings.Join(item.WarningCodes, ", "))
 	}
+	if len(item.ErrorCodes) > 0 {
+		fmt.Fprintf(out, "  error_codes: %s\n", strings.Join(item.ErrorCodes, ", "))
+	}
 	if len(item.Errors) > 0 {
 		fmt.Fprintf(out, "  errors: %s\n", strings.Join(item.Errors, "; "))
 	}
@@ -368,6 +375,7 @@ func printDistillHelp(out io.Writer) {
 	fmt.Fprintln(out, "       worktrail distill apply <proposal.json> [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Distill prints an agent-facing pack from evidence or validates/applies proposal JSON into pending semantic candidates. It never promotes, merges, discards, restores, or retires knowledge.")
+	fmt.Fprintln(out, "Proposal load/schema preflight failures in --format json return worktrail.cli.error.v1 on stdout; check ok, not exit code.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "bulk options:")
 	fmt.Fprintln(out, "  --pending            select pending transcript_notes")

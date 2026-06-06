@@ -31,11 +31,15 @@ func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) er
 	scope := flagValue(flags, "scope", "project")
 	switch cmd {
 	case "create":
+		format := flagValue(flags, "format", "text")
+		fail := func(err error) error {
+			return failCLICommand(ioctx, format, "worktrail candidates create", err)
+		}
 		body := joinArgs(positional)
 		if body == "" && ioctx.In != nil {
 			b, err := io.ReadAll(ioctx.In)
 			if err != nil {
-				return err
+				return fail(err)
 			}
 			body = string(b)
 		}
@@ -52,9 +56,9 @@ func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) er
 			Body:          body,
 		})
 		if err != nil {
-			return err
+			return fail(err)
 		}
-		return printCandidate(ioctx, rec, flagValue(flags, "format", "text"))
+		return printCandidate(ioctx, rec, format)
 	case "list":
 		records, err := manager.List(scope)
 		if err != nil {
@@ -361,11 +365,15 @@ func runCandidateAction(_ context.Context, env paths.Env, ioctx IO, action strin
 	id := firstArg(positional, flagValue(flags, "id", ""))
 	manager := candidate.Manager{Env: env, Actor: "cli:" + action}
 	format := flagValue(flags, "format", "text")
+	command := "worktrail " + action
+	fail := func(err error) error {
+		return failCLICommand(ioctx, format, command, err)
+	}
 	switch action {
 	case "promote":
 		result, err := manager.Promote(scope, id)
 		if err != nil {
-			return err
+			return fail(err)
 		}
 		if err := printApplyResult(ioctx, result, format); err != nil {
 			return err
@@ -380,7 +388,7 @@ func runCandidateAction(_ context.Context, env paths.Env, ioctx IO, action strin
 	case "discard":
 		rec, err := manager.Discard(scope, id)
 		if err != nil {
-			return err
+			return fail(err)
 		}
 		if err := printCandidate(ioctx, rec, format); err != nil {
 			return err
@@ -395,9 +403,9 @@ func runCandidateAction(_ context.Context, env paths.Env, ioctx IO, action strin
 	case "restore":
 		result, err := manager.Restore(scope, id)
 		if err != nil {
-			return err
+			return fail(err)
 		}
-		return printApplyResult(ioctx, result, flagValue(flags, "format", "text"))
+		return printApplyResult(ioctx, result, format)
 	case "retire":
 		reason := flagValue(flags, "reason", "")
 		if reason == "" && len(positional) > 1 {
@@ -405,9 +413,9 @@ func runCandidateAction(_ context.Context, env paths.Env, ioctx IO, action strin
 		}
 		rec, err := manager.Retire(scope, id, reason)
 		if err != nil {
-			return err
+			return fail(err)
 		}
-		return printCandidate(ioctx, rec, flagValue(flags, "format", "text"))
+		return printCandidate(ioctx, rec, format)
 	default:
 		return fmt.Errorf("unknown candidate action %q", action)
 	}
@@ -422,17 +430,20 @@ func runMerge(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 	scope := flagValue(flags, "scope", "project")
 	id := firstArg(positional, flagValue(flags, "id", ""))
 	format := flagValue(flags, "format", "text")
+	fail := func(err error) error {
+		return failCLICommand(ioctx, format, "worktrail merge", err)
+	}
 	manager := candidate.Manager{Env: env, Actor: "cli:merge"}
 	rec, err := manager.Show(scope, id)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	if len(positional) > 1 && positional[1] != rec.Meta.TargetPath {
-		return fmt.Errorf("merge target %q does not match candidate target %q", positional[1], rec.Meta.TargetPath)
+		return fail(fmt.Errorf("merge target %q does not match candidate target %q", positional[1], rec.Meta.TargetPath))
 	}
 	result, err := manager.Merge(scope, id)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	if err := printApplyResult(ioctx, result, format); err != nil {
 		return err
@@ -515,7 +526,7 @@ func printCandidatesHelp(out io.Writer, subcommand string) {
 		fmt.Fprintln(out, "  --summary <text>       short review summary")
 		fmt.Fprintln(out, "  --operation <op>       replace or merge (default replace)")
 		fmt.Fprintln(out, "  --tags a,b             comma-separated tags")
-		fmt.Fprintln(out, "  --format text|json     output format")
+		fmt.Fprintln(out, "  --format text|json     JSON failures return worktrail.cli.error.v1 on stdout; check ok, not exit code")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "body can be passed as positional text or via stdin.")
 		fmt.Fprintln(out)
@@ -540,13 +551,25 @@ func printCandidateActionHelp(out io.Writer, action string) {
 		fmt.Fprintln(out, "usage: worktrail promote <candidate-id> [--scope project|user] [--format text|json]")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Promotes a pending replace candidate into formal knowledge and rebuilds the same-scope index.")
+		fmt.Fprintln(out, "JSON failures return worktrail.cli.error.v1 on stdout; check ok, not exit code.")
 		fmt.Fprintln(out, "transcript_notes and migration_source evidence must be distilled before promote.")
 	case "discard":
 		fmt.Fprintln(out, "usage: worktrail discard <candidate-id> [--scope project|user] [--format text|json]")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Marks a non-terminal candidate discarded and rebuilds the same-scope index.")
+		fmt.Fprintln(out, "JSON failures return worktrail.cli.error.v1 on stdout; check ok, not exit code.")
+	case "restore":
+		fmt.Fprintln(out, "usage: worktrail restore <candidate-id> [--scope project|user] [--format text|json]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Restores a promoted replace candidate when its formal target is missing.")
+		fmt.Fprintln(out, "JSON failures return worktrail.cli.error.v1 on stdout; check ok, not exit code.")
+	case "retire":
+		fmt.Fprintln(out, "usage: worktrail retire <candidate-id> --reason <text> [--scope project|user] [--format text|json]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Retires a promoted or merged candidate when its formal target was intentionally removed.")
+		fmt.Fprintln(out, "JSON failures return worktrail.cli.error.v1 on stdout; check ok, not exit code.")
 	default:
-		fmt.Fprintf(out, "usage: worktrail %s <candidate-id> [--scope project|user]\n", action)
+		fmt.Fprintf(out, "usage: worktrail %s <candidate-id> [--scope project|user] [--format text|json]\n", action)
 	}
 }
 
@@ -554,6 +577,7 @@ func printMergeHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail merge <candidate-id> [target-path] [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Merges a pending candidate into its formal knowledge target and rebuilds the same-scope index.")
+	fmt.Fprintln(out, "JSON failures return worktrail.cli.error.v1 on stdout; check ok, not exit code.")
 	fmt.Fprintln(out, "When target-path is provided, it must match the candidate target_path.")
 	fmt.Fprintln(out, "transcript_notes and migration_source evidence must be distilled before merge.")
 }

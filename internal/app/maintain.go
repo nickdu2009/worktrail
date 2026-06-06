@@ -14,6 +14,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/candidate"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
+	"github.com/nickdu2009/worktrail/internal/textsafety"
 )
 
 const maintainProposalSchema = "worktrail.knowledge.maintenance.proposal.v1"
@@ -62,6 +63,7 @@ type maintainActionItem struct {
 	Status      string   `json:"status"`
 	CandidateID string   `json:"candidate_id,omitempty"`
 	TargetPath  string   `json:"target_path,omitempty"`
+	ErrorCodes  []string `json:"error_codes,omitempty"`
 	Errors      []string `json:"errors,omitempty"`
 	Warnings    []string `json:"warnings,omitempty"`
 }
@@ -200,6 +202,12 @@ func validateMaintainAction(env paths.Env, scope string, index int, action maint
 		if !model.IsSemanticCandidateType(action.CandidateType) || !model.SemanticTargetPathMatches(action.CandidateType, action.TargetPath) {
 			item.Errors = append(item.Errors, "candidate_type does not match target_path")
 		}
+		item.ErrorCodes = append(item.ErrorCodes, validateMaintainTextSafetyCodes("title", action.Title)...)
+		item.Errors = append(item.Errors, validateMaintainTextSafety("title", action.Title)...)
+		item.ErrorCodes = append(item.ErrorCodes, validateMaintainTextSafetyCodes("summary", action.Summary)...)
+		item.Errors = append(item.Errors, validateMaintainTextSafety("summary", action.Summary)...)
+		item.ErrorCodes = append(item.ErrorCodes, validateMaintainTextSafetyCodes("body", action.Body)...)
+		item.Errors = append(item.Errors, validateMaintainTextSafety("body", action.Body)...)
 	case "promote_candidate", "merge_candidate":
 		rec, err := manager.Show(scope, action.CandidateID)
 		if err != nil {
@@ -218,8 +226,11 @@ func validateMaintainAction(env paths.Env, scope string, index int, action maint
 		item.TargetPath = rec.Meta.TargetPath
 	case "retire_missing_target":
 		if strings.TrimSpace(action.Reason) == "" {
+			item.ErrorCodes = append(item.ErrorCodes, textsafety.FieldCode("reason", "required"))
 			item.Errors = append(item.Errors, "retire_missing_target requires reason")
 		}
+		item.ErrorCodes = append(item.ErrorCodes, validateMaintainTextSafetyCodes("reason", action.Reason)...)
+		item.Errors = append(item.Errors, validateMaintainTextSafety("reason", action.Reason)...)
 		rec, err := manager.Show(scope, action.CandidateID)
 		if err != nil {
 			item.Errors = append(item.Errors, err.Error())
@@ -235,6 +246,12 @@ func validateMaintainAction(env paths.Env, scope string, index int, action maint
 		}
 		item.TargetPath = rec.Meta.TargetPath
 	case "archive_evidence":
+		if strings.TrimSpace(action.Reason) == "" {
+			item.ErrorCodes = append(item.ErrorCodes, textsafety.FieldCode("reason", "required"))
+			item.Errors = append(item.Errors, "archive_evidence requires reason")
+		}
+		item.ErrorCodes = append(item.ErrorCodes, validateMaintainTextSafetyCodes("reason", action.Reason)...)
+		item.Errors = append(item.Errors, validateMaintainTextSafety("reason", action.Reason)...)
 		records, err := manager.List(scope)
 		if err != nil {
 			item.Errors = append(item.Errors, err.Error())
@@ -293,6 +310,7 @@ func applyMaintainProposal(env paths.Env, proposal maintainProposal, report *mai
 			report.Valid = false
 			report.Items[i].Status = "error"
 			report.Items[i].Errors = append(report.Items[i].Errors, err.Error())
+			report.Items[i].ErrorCodes = append(report.Items[i].ErrorCodes, reviewApplyErrorCodes(err)...)
 			continue
 		}
 		report.Items[i].Status = "applied"
@@ -304,10 +322,27 @@ func filepathJoinSlash(root, rel string) string {
 	return filepath.Join(root, filepath.FromSlash(model.NormalizeTargetPath(rel)))
 }
 
+func validateMaintainTextSafety(field, text string) []string {
+	return textsafety.Messages(textsafety.SemanticFieldIssues(field, text, textsafety.Options{
+		CheckBlocked:    true,
+		CheckTranscript: field == "summary" || field == "body",
+	}))
+}
+
+func validateMaintainTextSafetyCodes(field, text string) []string {
+	return textsafety.Codes(textsafety.SemanticFieldIssues(field, text, textsafety.Options{
+		CheckBlocked:    true,
+		CheckTranscript: field == "summary" || field == "body",
+	}))
+}
+
 func renderMaintainProposalReport(out io.Writer, report maintainProposalReport) {
 	fmt.Fprintf(out, "schema: %s\nscope: %s\nvalid: %t\napplied: %d\n", report.Schema, report.Scope, report.Valid, report.Applied)
 	for _, item := range report.Items {
 		fmt.Fprintf(out, "%d\t%s\t%s\t%s\t%s\n", item.Index, item.Status, item.Action, item.CandidateID, strings.Join(item.Errors, "; "))
+		if len(item.ErrorCodes) > 0 {
+			fmt.Fprintf(out, "  error_codes: %s\n", strings.Join(item.ErrorCodes, ", "))
+		}
 	}
 }
 

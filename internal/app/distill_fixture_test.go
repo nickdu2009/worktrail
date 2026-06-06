@@ -72,8 +72,12 @@ func runDistillFixture(t *testing.T, name string) {
 	out.Reset()
 	err := Run(context.Background(), []string{"distill", command, filepath.Join(fixtureRoot, "proposal.json"), "--format", "json"}, nil, &out, &errb)
 	if expected.ExpectErrorContains != "" {
-		if err == nil || !strings.Contains(err.Error(), expected.ExpectErrorContains) {
-			t.Fatalf("expected error containing %q, got err=%v stdout=%s", expected.ExpectErrorContains, err, out.String())
+		if err != nil {
+			t.Fatalf("expected JSON envelope failure, got err=%v stdout=%s", err, out.String())
+		}
+		assertCLIErrorEnvelope(t, out.String())
+		if !strings.Contains(out.String(), expected.ExpectErrorContains) {
+			t.Fatalf("expected envelope containing %q, got stdout=%s", expected.ExpectErrorContains, out.String())
 		}
 		return
 	}

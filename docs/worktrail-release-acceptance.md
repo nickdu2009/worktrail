@@ -49,6 +49,10 @@ The release candidate baseline includes these user-facing contracts:
 - `worktrail.review.apply_plan.report.v1`
 - `worktrail.evidence.plan.v1`
 - `worktrail.doctor.migration.v1`
+- `worktrail.cli.error.v1` for direct write-path CLI preflight failures in
+  `--format json` (`note add`, `draft create`, candidate lifecycle writes,
+  evidence archive/discard, distill proposal load/schema failures, review
+  apply-plan/apply-candidates preflight failures)
 
 The release candidate baseline includes the KDD migration path:
 

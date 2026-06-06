@@ -416,6 +416,10 @@ Requirements:
 
 - Refuse to run without `--confirm`.
 - Validate schema and scope.
+- Preflight failures in `--format json` (missing `--confirm`, scope mismatch,
+  unreadable plan file, unsupported schema) return `worktrail.cli.error.v1` on
+  stdout with `ok: false`; `Run()` returns success and agents must inspect the
+  envelope.
 - Validate candidate snapshots to detect stale plans.
 - Treat a plan as stale when status, operation, target path, target existence,
   source ids, candidate redaction status, metadata hash, or body hash no longer

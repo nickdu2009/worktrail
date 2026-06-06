@@ -15,6 +15,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/redact"
+	"github.com/nickdu2009/worktrail/internal/textsafety"
 	"github.com/nickdu2009/worktrail/internal/util"
 )
 
@@ -63,6 +64,7 @@ type ItemReport struct {
 	TargetPath    string   `json:"target_path"`
 	Status        string   `json:"status"`
 	WarningCodes  []string `json:"warning_codes"`
+	ErrorCodes    []string `json:"error_codes,omitempty"`
 	Errors        []string `json:"errors"`
 }
 
@@ -151,9 +153,11 @@ func process(env paths.Env, manager candidate.Manager, scope string, proposal Pr
 			if errors.Is(err, candidate.ErrBlocked) {
 				itemReport.Status = "blocked"
 				report.Blocked++
+				itemReport.ErrorCodes = append(itemReport.ErrorCodes, textsafety.FieldCode("body", "blocked_sensitive_material"))
 			} else {
 				itemReport.Status = "error"
 				report.Valid = false
+				itemReport.ErrorCodes = append(itemReport.ErrorCodes, cliDistillApplyErrorCodes(err)...)
 			}
 			itemReport.Errors = append(itemReport.Errors, err.Error())
 			report.Items = append(report.Items, itemReport)
@@ -215,6 +219,15 @@ func validateItem(env paths.Env, scope string, item ProposalCandidate, topSource
 	if item.Confidence != nil && (*item.Confidence <= 0 || *item.Confidence > 1) {
 		itemReport.Errors = append(itemReport.Errors, "confidence must be greater than 0 and less than or equal to 1")
 	}
+	titleIssues := textsafety.SemanticFieldIssues("title", item.Title, textsafety.Options{CheckBlocked: true})
+	itemReport.ErrorCodes = append(itemReport.ErrorCodes, textsafety.Codes(titleIssues)...)
+	itemReport.Errors = append(itemReport.Errors, textsafety.Messages(titleIssues)...)
+	summaryIssues := textsafety.SemanticFieldIssues("summary", item.Summary, textsafety.Options{CheckBlocked: true, CheckTranscript: true})
+	itemReport.ErrorCodes = append(itemReport.ErrorCodes, textsafety.Codes(summaryIssues)...)
+	itemReport.Errors = append(itemReport.Errors, textsafety.Messages(summaryIssues)...)
+	bodyIssues := textsafety.SemanticFieldIssues("body", item.Body, textsafety.Options{CheckBlocked: true, CheckTranscript: true})
+	itemReport.ErrorCodes = append(itemReport.ErrorCodes, textsafety.Codes(bodyIssues)...)
+	itemReport.Errors = append(itemReport.Errors, textsafety.Messages(bodyIssues)...)
 	sourceIDs := effectiveSourceIDs(item.SourceCandidateIDs, topSourceIDs)
 	if len(sourceIDs) == 0 {
 		itemReport.Errors = append(itemReport.Errors, "source_candidate_ids is required")
@@ -238,6 +251,7 @@ func validateItem(env paths.Env, scope string, item ProposalCandidate, topSource
 		if scan := redact.Scan(item.Body); scan.Status == redact.StatusBlocked {
 			itemReport.Status = "blocked"
 			itemReport.Errors = append(itemReport.Errors, blockedMessage(scan))
+			itemReport.ErrorCodes = append(itemReport.ErrorCodes, textsafety.FieldCode("body", "blocked_sensitive_material"))
 			return itemReport
 		}
 		if warnings, err := WarningCodes(env, scope, records, candidate.Record{
@@ -253,10 +267,21 @@ func validateItem(env paths.Env, scope string, item ProposalCandidate, topSource
 			itemReport.WarningCodes = append(itemReport.WarningCodes, warnings...)
 		}
 	}
-	if itemReport.Status != "blocked" && len(itemReport.Errors) > 0 {
+	if distillItemHasBlockedMaterial(itemReport.ErrorCodes) {
+		itemReport.Status = "blocked"
+	} else if itemReport.Status != "blocked" && len(itemReport.Errors) > 0 {
 		itemReport.Status = "error"
 	}
 	return itemReport
+}
+
+func distillItemHasBlockedMaterial(codes []string) bool {
+	for _, code := range codes {
+		if strings.HasSuffix(code, "_blocked_sensitive_material") {
+			return true
+		}
+	}
+	return false
 }
 
 func IsDistillSource(rec candidate.Record, includeSplitSources bool) bool {
@@ -410,4 +435,18 @@ func blockedMessage(result redact.Result) string {
 		labels = append(labels, finding.Label)
 	}
 	return "candidate content contains blocked sensitive material: " + strings.Join(labels, ", ")
+}
+
+func cliDistillApplyErrorCodes(err error) []string {
+	if err == nil {
+		return nil
+	}
+	var validationErr *textsafety.ValidationError
+	if errors.As(err, &validationErr) {
+		return validationErr.Codes()
+	}
+	if errors.Is(err, candidate.ErrBlocked) {
+		return []string{textsafety.FieldCode("body", "blocked_sensitive_material")}
+	}
+	return nil
 }

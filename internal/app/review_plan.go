@@ -39,11 +39,12 @@ type reviewPlanSummary struct {
 }
 
 type reviewApplyPlanReport struct {
-	Schema     string                 `json:"schema"`
-	PlanSchema string                 `json:"plan_schema"`
-	Scope      string                 `json:"scope"`
-	Summary    reviewApplyPlanSummary `json:"summary"`
-	Items      []reviewApplyPlanItem  `json:"items"`
+	Schema       string                 `json:"schema"`
+	PlanSchema   string                 `json:"plan_schema"`
+	Scope        string                 `json:"scope"`
+	Summary      reviewApplyPlanSummary `json:"summary"`
+	Items        []reviewApplyPlanItem  `json:"items"`
+	IndexRebuild *indexRebuildResult    `json:"index_rebuild,omitempty"`
 }
 
 type reviewApplyPlanSummary struct {
@@ -67,6 +68,7 @@ type reviewApplyPlanItem struct {
 	Status        string   `json:"status,omitempty"`
 	TargetPath    string   `json:"target_path,omitempty"`
 	ReasonCodes   []string `json:"reason_codes,omitempty"`
+	ErrorCodes    []string `json:"error_codes,omitempty"`
 	Error         string   `json:"error,omitempty"`
 }
 
@@ -151,23 +153,24 @@ func runReviewApplyPlan(env wtpaths.Env, ioctx IO, args []string) error {
 		return nil
 	}
 	flags, positional := splitFlags(args)
+	format := flagValue(flags, "format", "text")
 	if flagValue(flags, "confirm", "") != "true" {
-		return fmt.Errorf("worktrail review apply-plan requires --confirm")
+		return failCLICommand(ioctx, format, "worktrail review apply-plan", fmt.Errorf("worktrail review apply-plan requires --confirm"))
 	}
 	planPath := firstArg(positional, flagValue(flags, "plan", ""))
 	if strings.TrimSpace(planPath) == "" {
-		return fmt.Errorf("worktrail review apply-plan requires a plan file")
+		return failCLICommand(ioctx, format, "worktrail review apply-plan", fmt.Errorf("worktrail review apply-plan requires a plan file"))
 	}
 	data, err := os.ReadFile(planPath)
 	if err != nil {
-		return err
+		return failCLICommand(ioctx, format, "worktrail review apply-plan", err)
 	}
 	var plan reviewPlan
 	if err := json.Unmarshal(data, &plan); err != nil {
-		return err
+		return failCLICommand(ioctx, format, "worktrail review apply-plan", err)
 	}
 	if plan.Schema != reviewPlanSchema {
-		return fmt.Errorf("unsupported review plan schema %q", plan.Schema)
+		return failCLICommand(ioctx, format, "worktrail review apply-plan", fmt.Errorf("unsupported review plan schema %q", plan.Schema))
 	}
 	planScope := strings.TrimSpace(plan.Scope)
 	if planScope == "" {
@@ -177,15 +180,15 @@ func runReviewApplyPlan(env wtpaths.Env, ioctx IO, args []string) error {
 	if requestedScope, ok := flags["scope"]; ok {
 		requestedScope = strings.TrimSpace(requestedScope)
 		if requestedScope == "" || requestedScope == "true" {
-			return fmt.Errorf("worktrail review apply-plan --scope must be project or user")
+			return failCLICommand(ioctx, format, "worktrail review apply-plan", fmt.Errorf("worktrail review apply-plan --scope must be project or user"))
 		}
 		if requestedScope != planScope {
-			return fmt.Errorf("review apply-plan scope mismatch: plan scope is %q but --scope %q was requested; omit --scope or rerun with `--scope %s`", planScope, requestedScope, planScope)
+			return failCLICommand(ioctx, format, "worktrail review apply-plan", fmt.Errorf("review apply-plan scope mismatch: plan scope is %q but --scope %q was requested; omit --scope or rerun with `--scope %s`", planScope, requestedScope, planScope))
 		}
 		scope = requestedScope
 	}
 	report := applyReviewPlan(env, scope, plan)
-	if flagValue(flags, "format", "text") == "json" {
+	if isJSONFormat(format) {
 		return json.NewEncoder(ioctx.Out).Encode(report)
 	}
 	return renderReviewApplyPlanText(ioctx.Out, report)
@@ -198,7 +201,11 @@ func runReviewApplyCandidates(env wtpaths.Env, ioctx IO, args []string) error {
 	}
 	opts, err := parseReviewApplyCandidatesArgs(args)
 	if err != nil {
-		return err
+		format := "text"
+		if inferJSONMode(args) {
+			format = "json"
+		}
+		return failCLICommand(ioctx, format, "worktrail review apply-candidates", err)
 	}
 	report := applyReviewCandidates(env, opts.Scope, opts.Action, opts.IDs)
 	if opts.Format == "json" {
@@ -343,6 +350,7 @@ func applyReviewCandidate(manager candidate.Manager, scope, action, id string) r
 	rec, err := manager.Show(scope, id)
 	if err != nil {
 		item.Result = "failed"
+		item.ErrorCodes = reviewApplyErrorCodes(err)
 		item.Error = err.Error()
 		return item
 	}
@@ -355,6 +363,7 @@ func applyReviewCandidate(manager candidate.Manager, scope, action, id string) r
 	status, err := applyReviewPlanAction(manager, scope, id, action)
 	if err != nil {
 		item.Result = "failed"
+		item.ErrorCodes = reviewApplyErrorCodes(err)
 		item.Error = err.Error()
 		return item
 	}
@@ -424,6 +433,7 @@ func applyReviewPlan(env wtpaths.Env, scope string, plan reviewPlan) reviewApply
 			if err != nil {
 				item.Result = "failed"
 				item.ReasonCodes = []string{"target_check_failed"}
+				item.ErrorCodes = reviewApplyErrorCodes(err)
 				item.Error = err.Error()
 				report.Summary.Failed++
 				break
@@ -434,6 +444,7 @@ func applyReviewPlan(env wtpaths.Env, scope string, plan reviewPlan) reviewApply
 			if err != nil {
 				item.Result = "failed"
 				item.ReasonCodes = []string{"current_plan_item_failed"}
+				item.ErrorCodes = reviewApplyErrorCodes(err)
 				item.Error = err.Error()
 				report.Summary.Failed++
 				break
@@ -451,6 +462,7 @@ func applyReviewPlan(env wtpaths.Env, scope string, plan reviewPlan) reviewApply
 			if err != nil {
 				item.Result = "failed"
 				item.ReasonCodes = []string{"apply_failed"}
+				item.ErrorCodes = reviewApplyErrorCodes(err)
 				item.Error = err.Error()
 				report.Summary.Failed++
 				break
@@ -466,6 +478,10 @@ func applyReviewPlan(env wtpaths.Env, scope string, plan reviewPlan) reviewApply
 		report.Items = append(report.Items, item)
 	}
 	report.Summary.Total = len(report.Items)
+	if report.Summary.Applied > 0 {
+		indexRebuild := rebuildIndexForScope(env, scope)
+		report.IndexRebuild = &indexRebuild
+	}
 	return report
 }
 
@@ -483,6 +499,10 @@ func applyReviewPlanAction(manager candidate.Manager, scope, id, action string) 
 	default:
 		return "", fmt.Errorf("unsupported review plan action %q", action)
 	}
+}
+
+func reviewApplyErrorCodes(err error) []string {
+	return cliErrorCodes(err)
 }
 
 func reviewPlanSnapshotMismatches(planned, current reviewPlanSnapshot) []string {
@@ -990,9 +1010,21 @@ func renderReviewApplyPlanText(out io.Writer, report reviewApplyPlanReport) erro
 			if len(item.ReasonCodes) > 0 {
 				fmt.Fprintf(out, "  reason_codes: %s\n", strings.Join(item.ReasonCodes, ", "))
 			}
+			if len(item.ErrorCodes) > 0 {
+				fmt.Fprintf(out, "  error_codes: %s\n", strings.Join(item.ErrorCodes, ", "))
+			}
 			if item.Error != "" {
 				fmt.Fprintf(out, "  error: %s\n", item.Error)
 			}
+		}
+	}
+	if report.IndexRebuild != nil {
+		fmt.Fprintln(out)
+		if report.IndexRebuild.Error != "" {
+			fmt.Fprintf(out, "index rebuild failed: %s\n", report.IndexRebuild.Error)
+			fmt.Fprintf(out, "next: %s\n", report.IndexRebuild.NextStep)
+		} else {
+			fmt.Fprintf(out, "index rebuilt\t%s\t%d\t%s\n", report.IndexRebuild.Scope, report.IndexRebuild.Entries, report.IndexRebuild.IndexPath)
 		}
 	}
 	return nil
@@ -1034,6 +1066,9 @@ func renderReviewApplyCandidatesText(out io.Writer, report reviewApplyCandidates
 			fmt.Fprintln(out)
 			if len(item.ReasonCodes) > 0 {
 				fmt.Fprintf(out, "  reason_codes: %s\n", strings.Join(item.ReasonCodes, ", "))
+			}
+			if len(item.ErrorCodes) > 0 {
+				fmt.Fprintf(out, "  error_codes: %s\n", strings.Join(item.ErrorCodes, ", "))
 			}
 			if item.Error != "" {
 				fmt.Fprintf(out, "  error: %s\n", item.Error)
@@ -1083,6 +1118,7 @@ func printReviewApplyPlanHelp(out io.Writer) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Applies promote, merge, and discard actions from a fresh worktrail.review.plan.v1 file.")
 	fmt.Fprintln(out, "When --scope is omitted, the plan scope is used; an explicit mismatched --scope is rejected.")
+	fmt.Fprintln(out, "JSON preflight failures return worktrail.cli.error.v1 on stdout; check ok, not exit code.")
 	fmt.Fprintln(out, "Candidates with stale snapshots or needs_human_review are skipped without evidence cleanup.")
 }
 
@@ -1092,5 +1128,6 @@ func printReviewApplyCandidatesHelp(out io.Writer) {
 	fmt.Fprintln(out, "       worktrail review apply-candidates --discard <id...> [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Applies exactly one action to one or more candidate ids and rebuilds the same-scope index when at least one item is applied.")
+	fmt.Fprintln(out, "JSON argument parse failures return worktrail.cli.error.v1 on stdout; check ok, not exit code.")
 	fmt.Fprintln(out, "transcript_notes, migration_source, and KDD split-source lesson candidates are blocked in this review automation path.")
 }

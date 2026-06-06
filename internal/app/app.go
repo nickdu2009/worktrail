@@ -29,6 +29,9 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 	}
 	env, err := paths.Discover()
 	if err != nil {
+		if inferJSONMode(args) {
+			return failCLICommand(ioctx, "json", joinCommand(args), err)
+		}
 		return err
 	}
 	switch args[0] {
@@ -107,7 +110,11 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 	case "adr":
 		return runADR(ctx, env, ioctx, args[1:])
 	default:
-		return fmt.Errorf("unknown command %q", args[0])
+		err := fmt.Errorf("unknown command %q", args[0])
+		if inferJSONMode(args) {
+			return failCLICommand(ioctx, "json", joinCommand(args), err)
+		}
+		return err
 	}
 	return nil
 }

@@ -189,14 +189,22 @@ func TestEvidenceArchiveAndDiscardRequireConfirmationAndPlanRecommendation(t *te
 	runApp(t, &out, &errb, "promote", "applied-rule")
 
 	out.Reset()
-	err = Run(context.Background(), []string{"evidence", "archive", "note-archive"}, nil, &out, &errb)
-	if err == nil || !strings.Contains(err.Error(), "requires --confirm") {
-		t.Fatalf("archive without confirm error = %v stdout=%s", err, out.String())
+	errb.Reset()
+	err = Run(context.Background(), []string{"evidence", "archive", "note-archive", "--format", "json"}, nil, &out, &errb)
+	if err != nil {
+		t.Fatalf("archive without confirm json failure = %v stdout=%s stderr=%s", err, out.String(), errb.String())
 	}
+	assertCLIErrorEnvelope(t, out.String(), "cli_confirmation_required")
+
 	out.Reset()
-	err = Run(context.Background(), []string{"evidence", "archive", "note-keep", "--confirm"}, nil, &out, &errb)
-	if err == nil || !strings.Contains(err.Error(), "recommended for keep, not archive") {
-		t.Fatalf("archive keep evidence error = %v stdout=%s", err, out.String())
+	errb.Reset()
+	err = Run(context.Background(), []string{"evidence", "archive", "note-keep", "--confirm", "--format", "json"}, nil, &out, &errb)
+	if err != nil {
+		t.Fatalf("archive keep evidence json failure = %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+	assertCLIErrorEnvelope(t, out.String(), "cli_command_failed")
+	if !strings.Contains(out.String(), "recommended for keep, not archive") {
+		t.Fatalf("archive keep evidence envelope = %s", out.String())
 	}
 
 	text := runApp(t, &out, &errb, "evidence", "archive", "note-archive", "--confirm", "--reason", "applied knowledge keeps traceability")
@@ -217,6 +225,61 @@ func TestEvidenceArchiveAndDiscardRequireConfirmationAndPlanRecommendation(t *te
 	if _, err := os.Stat(filepath.Join(project, ".worktrail", "candidates", "project", "empty-note.md")); err != nil {
 		t.Fatalf("discard removed candidate file: %v", err)
 	}
+}
+
+func TestEvidenceActionsRequireNonEmptySafeReason(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "note-archive", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/note-archive.md", "--title", "Archive Evidence", "Archive evidence body.")
+	runApp(t, &out, &errb, "candidates", "create", "--id", "empty-note", "--type", model.CandidateTypeTranscriptNotes, "--target", "imports/transcripts/empty-note.md", "--title", "Empty Evidence")
+
+	env, err := paths.Discover()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := candidate.Manager{Env: env, Actor: "test"}
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:              "project",
+		ID:                 "applied-rule",
+		CandidateType:      "rule",
+		TargetPath:         "rules/applied-rule.md",
+		Title:              "Applied Rule",
+		SourceCandidateIDs: []string{"note-archive"},
+		Operation:          candidate.OperationReplace,
+		Body:               "# Applied Rule\n\nReferences archive-ready evidence.",
+	})
+	runApp(t, &out, &errb, "promote", "applied-rule")
+
+	out.Reset()
+	errb.Reset()
+	err = Run(context.Background(), []string{"evidence", "archive", "note-archive", "--confirm"}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "evidence lifecycle reason is required") {
+		t.Fatalf("archive without reason error = %v stdout=%s", err, out.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	err = Run(context.Background(), []string{"evidence", "archive", "note-archive", "--confirm", "--reason", "/Users/tester/private.txt cleanup", "--format", "json"}, nil, &out, &errb)
+	if err != nil {
+		t.Fatalf("archive unsafe reason json failure = %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+	assertCLIErrorEnvelope(t, out.String(), "reason_local_absolute_path")
+
+	out.Reset()
+	errb.Reset()
+	err = Run(context.Background(), []string{"evidence", "discard", "empty-note", "--confirm", "--reason", "Reach me at nick@example.com", "--format", "json"}, nil, &out, &errb)
+	if err != nil {
+		t.Fatalf("discard unsafe reason json failure = %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+	assertCLIErrorEnvelope(t, out.String(), "reason_redactable_secret_or_pii")
 }
 
 func runEvidencePlanJSON(t *testing.T, out, errb *bytes.Buffer, status string) evidencePlan {

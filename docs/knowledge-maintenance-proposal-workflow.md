@@ -150,5 +150,8 @@ This workflow is accepted when:
   knowledge
 - validation catches unsafe paths, missing sources, and unsupported destructive
   actions
+- validate and apply report items expose machine-readable `error_codes` for
+  semantic text safety failures; apply copies manager failures into the same
+  field on failed items
 - apply writes audit events for every mutation
 - user confirmation remains the boundary for all formal knowledge changes

@@ -11,6 +11,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/redact"
+	"github.com/nickdu2009/worktrail/internal/textsafety"
 )
 
 func testManager(t *testing.T) Manager {
@@ -78,6 +79,70 @@ func TestCreateListShowAndDiff(t *testing.T) {
 	}
 	if !strings.Contains(diff, "-old line") || !strings.Contains(diff, "+new line") {
 		t.Fatalf("diff did not include expected lines:\n%s", diff)
+	}
+}
+
+func TestCreateRedactionStatusOverrideIsRestricted(t *testing.T) {
+	m := testManager(t)
+
+	rec, err := m.Create(CreateRequest{
+		ID:              "migration-source",
+		Scope:           "project",
+		CandidateType:   model.CandidateTypeMigrationSource,
+		TargetPath:      "imports/kdd/project/source.md",
+		Title:           "Migration Source",
+		Body:            "Token [REDACTED:api-key] should stay redacted.\n",
+		RedactionStatus: string(redact.StatusRedacted),
+	})
+	if err != nil {
+		t.Fatalf("Create migration source with preserved redaction status: %v", err)
+	}
+	if rec.Meta.RedactionStatus != string(redact.StatusRedacted) {
+		t.Fatalf("migration redaction status = %q", rec.Meta.RedactionStatus)
+	}
+
+	if _, err := m.Create(CreateRequest{
+		ID:              "bad-override",
+		Scope:           "project",
+		CandidateType:   "rule",
+		TargetPath:      "rules/bad-override.md",
+		Title:           "Bad Override",
+		Body:            "safe body\n",
+		RedactionStatus: string(redact.StatusBlocked),
+	}); err == nil || !strings.Contains(err.Error(), "redaction status override") {
+		t.Fatalf("Create accepted invalid redaction status override: %v", err)
+	}
+}
+
+func TestCreateRejectsUnsafeSemanticCandidateText(t *testing.T) {
+	m := testManager(t)
+	_, err := m.Create(CreateRequest{
+		ID:            "unsafe-rule",
+		Scope:         "project",
+		CandidateType: "rule",
+		TargetPath:    "rules/unsafe-rule.md",
+		Title:         "Unsafe Rule",
+		Summary:       "Reach me at nick@example.com",
+		Body:          "# Unsafe Rule\n\n- user: show me the transcript\n- assistant: here it is",
+	})
+	if err == nil || !strings.Contains(err.Error(), "summary contains redactable secret or PII pattern") || !strings.Contains(err.Error(), "body contains raw transcript-style conversation") {
+		t.Fatalf("Create unsafe semantic error = %v", err)
+	}
+	var validationErr *textsafety.ValidationError
+	if !errors.As(err, &validationErr) {
+		t.Fatalf("Create unsafe error type = %T, want *textsafety.ValidationError", err)
+	}
+	codes := validationErr.Codes()
+	hasCode := func(want string) bool {
+		for _, got := range codes {
+			if got == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasCode("summary_redactable_secret_or_pii") || !hasCode("body_raw_transcript_style_conversation") {
+		t.Fatalf("Create unsafe error codes = %#v", codes)
 	}
 }
 
@@ -185,6 +250,36 @@ func TestPromoteBacksUpWritesAtomicallyUpdatesStatusAndLogs(t *testing.T) {
 	}
 	if !strings.Contains(string(logBody), "candidate.promote") {
 		t.Fatalf("event log missing promote event:\n%s", logBody)
+	}
+}
+
+func TestPromoteRejectsUnsafeSemanticBodyBeforeFormalWrite(t *testing.T) {
+	m := testManager(t)
+	_, err := m.Create(CreateRequest{
+		ID:            "unsafe-promote",
+		Scope:         "project",
+		CandidateType: "rule",
+		TargetPath:    "rules/unsafe-promote.md",
+		Title:         "Unsafe Promote",
+		Body:          "# Unsafe Promote\n\nSafe body.\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := m.Show("project", "unsafe-promote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Body = "# Unsafe Promote\n\n- user: paste the transcript\n- assistant: pasted"
+	if err := writeRecord(rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Promote("project", "unsafe-promote"); err == nil || !strings.Contains(err.Error(), "body contains raw transcript-style conversation") {
+		t.Fatalf("Promote unsafe semantic error = %v", err)
+	}
+	target := filepath.Join(m.Env.ProjectWT, "rules", "unsafe-promote.md")
+	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unsafe promote should not write formal target, err=%v", err)
 	}
 }
 
@@ -419,6 +514,77 @@ func TestRetireRejectsPendingExistingTargetAndMissingReason(t *testing.T) {
 	}
 	if _, err := m.Retire("project", "existing-retire", " "); !errors.Is(err, ErrRetireReasonRequired) {
 		t.Fatalf("missing reason retire error = %v", err)
+	} else {
+		var validationErr *textsafety.ValidationError
+		if !errors.As(err, &validationErr) {
+			t.Fatalf("missing reason retire error type = %T, want *textsafety.ValidationError", err)
+		}
+		if codes := validationErr.Codes(); len(codes) != 1 || codes[0] != "reason_required" {
+			t.Fatalf("missing reason retire codes = %#v", codes)
+		}
+	}
+}
+
+func TestEvidenceLifecycleRequiresSafeReason(t *testing.T) {
+	m := testManager(t)
+	_, err := m.Create(CreateRequest{
+		ID:            "archive-note",
+		Scope:         "project",
+		CandidateType: model.CandidateTypeTranscriptNotes,
+		TargetPath:    "imports/transcripts/archive-note.md",
+		Title:         "Archive Note",
+		Body:          "Archive evidence body.\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := m.ArchiveEvidence("project", "archive-note", " "); !errors.Is(err, ErrEvidenceReasonRequired) {
+		t.Fatalf("archive missing reason error = %v", err)
+	} else {
+		var validationErr *textsafety.ValidationError
+		if !errors.As(err, &validationErr) {
+			t.Fatalf("archive missing reason type = %T, want *textsafety.ValidationError", err)
+		}
+		if codes := validationErr.Codes(); len(codes) != 1 || codes[0] != "reason_required" {
+			t.Fatalf("archive missing reason codes = %#v", codes)
+		}
+	}
+
+	if _, err := m.ArchiveEvidence("project", "archive-note", "/Users/tester/private.txt cleanup"); err == nil || !strings.Contains(err.Error(), "reason contains local absolute path") {
+		t.Fatalf("archive unsafe reason error = %v", err)
+	} else {
+		var validationErr *textsafety.ValidationError
+		if !errors.As(err, &validationErr) {
+			t.Fatalf("archive unsafe reason type = %T, want *textsafety.ValidationError", err)
+		}
+		codes := validationErr.Codes()
+		if len(codes) != 1 || codes[0] != "reason_local_absolute_path" {
+			t.Fatalf("archive unsafe reason codes = %#v", codes)
+		}
+	}
+
+	rec, err := m.ArchiveEvidence("project", "archive-note", "knowledge captured in semantic candidate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Meta.Status != StatusArchived {
+		t.Fatalf("archive status = %q", rec.Meta.Status)
+	}
+
+	_, err = m.Create(CreateRequest{
+		ID:            "discard-note",
+		Scope:         "project",
+		CandidateType: model.CandidateTypeTranscriptNotes,
+		TargetPath:    "imports/transcripts/discard-note.md",
+		Title:         "Discard Note",
+		Body:          "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DiscardEvidence("project", "discard-note", "Reach me at nick@example.com"); err == nil || !strings.Contains(err.Error(), "reason contains redactable secret or PII pattern") {
+		t.Fatalf("discard unsafe reason error = %v", err)
 	}
 }
 

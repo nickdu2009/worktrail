@@ -741,6 +741,18 @@ func TestNoteAddRejectsUnsafeOrIncompleteInput(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "does not match target path") {
 		t.Fatalf("target mismatch error = %v stdout=%s", err, out.String())
 	}
+	err = Run(context.Background(), []string{
+		"note", "add",
+		"--type", "workflow",
+		"--target", "workflows/transcript.md",
+		"--title", "Transcript Leak",
+		"--summary", "Reach me at nick@example.com",
+		"--evidence-label", "test",
+		"# Transcript Leak\n\n- user: please fix the bug\n- assistant: here is the patch",
+	}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "summary contains redactable secret or PII pattern") || !strings.Contains(err.Error(), "body contains raw transcript-style conversation") {
+		t.Fatalf("unsafe note add error = %v stdout=%s", err, out.String())
+	}
 }
 
 func TestHandoffWriteFailureReportsWorktrailWriteDirs(t *testing.T) {
@@ -913,7 +925,10 @@ func TestMaintainRejectsUnsafeProposalActions(t *testing.T) {
   "schema": "worktrail.knowledge.maintenance.proposal.v1",
   "actions": [
     {"action": "update_index", "target_path": "index.md", "reason": "direct index mutation"},
-    {"action": "create_candidate", "candidate_type": "decision", "target_path": "rules/wrong.md", "title": "Wrong", "summary": "Wrong", "body": "# Wrong"}
+    {"action": "create_candidate", "candidate_type": "decision", "target_path": "rules/wrong.md", "title": "Wrong", "summary": "Wrong", "body": "# Wrong"},
+    {"action": "create_candidate", "candidate_type": "rule", "target_path": "rules/leak.md", "title": "Leak", "summary": "Contact me at nick@example.com", "body": "# Leak\n\nPath: /Users/tester/private.txt"},
+    {"action": "create_candidate", "candidate_type": "workflow", "target_path": "workflows/raw-transcript.md", "title": "Transcript Leak", "summary": "Transcript excerpt", "body": "# Transcript Leak\n\n- user: please fix the bug\n- assistant: here is the patch"},
+    {"action": "archive_evidence", "candidate_id": "missing-evidence"}
   ]
 }`)
 	out.Reset()
@@ -921,7 +936,17 @@ func TestMaintainRejectsUnsafeProposalActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("maintain validate error = %v stdout=%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), `"valid":false`) || !strings.Contains(out.String(), "unsupported action type") || !strings.Contains(out.String(), "candidate_type does not match target_path") {
+	if !strings.Contains(out.String(), `"valid":false`) ||
+		!strings.Contains(out.String(), "unsupported action type") ||
+		!strings.Contains(out.String(), "candidate_type does not match target_path") ||
+		!strings.Contains(out.String(), "summary contains redactable secret or PII pattern") ||
+		!strings.Contains(out.String(), "body contains local absolute path") ||
+		!strings.Contains(out.String(), "summary_redactable_secret_or_pii") ||
+		!strings.Contains(out.String(), "body_local_absolute_path") ||
+		!strings.Contains(out.String(), "body contains raw transcript-style conversation") ||
+		!strings.Contains(out.String(), "body_raw_transcript_style_conversation") ||
+		!strings.Contains(out.String(), "reason_required") ||
+		!strings.Contains(out.String(), "archive_evidence requires reason") {
 		t.Fatalf("maintain validation output missing errors:\n%s", out.String())
 	}
 }
@@ -1544,6 +1569,30 @@ func TestDraftCreateValidatesSemanticContract(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(project, ".worktrail", "candidates", "project", "draft-rule.md")); err != nil {
 		t.Fatalf("draft create should write candidate file: %v", err)
 	}
+
+	out.Reset()
+	errb.Reset()
+	err = Run(context.Background(), []string{"draft", "create", "--type", "workflow", "--target", "workflows/draft-transcript.md", "--title", "Draft Transcript", "--summary", "summary", "# Draft\n\n- user: hi\n- assistant: hello"}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "body contains raw transcript-style conversation") {
+		t.Fatalf("draft create should reject transcript-style body: err=%v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
+}
+
+func TestCandidatesCreateRejectsUnsafeSemanticText(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	err := Run(context.Background(), []string{"candidates", "create", "--id", "unsafe-rule", "--type", "rule", "--target", "rules/unsafe-rule.md", "--title", "Unsafe Rule", "--summary", "Reach me at nick@example.com", "# Unsafe Rule\n\n- user: paste the transcript\n- assistant: pasted"}, nil, &out, &errb)
+	if err == nil || !strings.Contains(err.Error(), "summary contains redactable secret or PII pattern") || !strings.Contains(err.Error(), "body contains raw transcript-style conversation") {
+		t.Fatalf("candidates create should reject unsafe semantic text: err=%v stdout=%s stderr=%s", err, out.String(), errb.String())
+	}
 }
 
 func TestDoctorDeleteClassifiesBlockersAndWarnings(t *testing.T) {
@@ -1941,6 +1990,14 @@ func TestDistillProposalValidateAndApplyPartial(t *testing.T) {
       "body": "# Wrong Type\n"
     },
     {
+      "candidate_type": "workflow",
+      "title": "Transcript Leak",
+      "summary": "Conversation excerpt.",
+      "target_path": "workflows/transcript-leak.md",
+      "operation": "replace",
+      "body": "# Transcript Leak\n\n- user: please fix the bug\n- assistant: here is the patch"
+    },
+    {
       "candidate_type": "rule",
       "title": "Missing Source",
       "target_path": "rules/missing-source.md",
@@ -1954,8 +2011,12 @@ func TestDistillProposalValidateAndApplyPartial(t *testing.T) {
 	badSchema := filepath.Join(project, "bad-schema.json")
 	writeTextFile(t, badSchema, `{"schema":"wrong","source_candidate_ids":["note-1"],"candidates":[]}`)
 	out.Reset()
-	if err := Run(context.Background(), []string{"distill", "validate", badSchema, "--format", "json"}, nil, &out, &errb); err == nil || !strings.Contains(err.Error(), "proposal schema must be") {
-		t.Fatalf("bad schema error = %v stdout=%s stderr=%s", err, out.String(), errb.String())
+	if err := Run(context.Background(), []string{"distill", "validate", badSchema, "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("bad schema json failure = %v stderr=%s", err, errb.String())
+	}
+	assertCLIErrorEnvelope(t, out.String(), "cli_usage_error")
+	if !strings.Contains(out.String(), "proposal schema must be") {
+		t.Fatalf("bad schema envelope missing message:\n%s", out.String())
 	}
 
 	out.Reset()
@@ -1966,14 +2027,20 @@ func TestDistillProposalValidateAndApplyPartial(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &validation); err != nil {
 		t.Fatal(err)
 	}
-	if validation.Valid || validation.Blocked != 1 || len(validation.Items) != 6 || validation.Items[0].Status != "valid" || validation.Items[1].Status != "error" || validation.Items[2].Status != "blocked" || validation.Items[3].Status != "error" || validation.Items[4].Status != "error" || validation.Items[5].Status != "error" {
+	if validation.Valid || validation.Blocked != 1 || len(validation.Items) != 7 || validation.Items[0].Status != "valid" || validation.Items[1].Status != "error" || validation.Items[2].Status != "blocked" || validation.Items[3].Status != "error" || validation.Items[4].Status != "error" || validation.Items[5].Status != "error" || validation.Items[6].Status != "error" {
 		t.Fatalf("validation report unexpected: %+v", validation)
 	}
 	if !containsString(validation.Items[4].Errors, "candidate_type does not match target_path") {
 		t.Fatalf("type-target mismatch errors unexpected: %+v", validation.Items[4])
 	}
-	if !containsString(validation.Items[5].Errors, "source candidate not found: missing-source") {
-		t.Fatalf("missing source errors unexpected: %+v", validation.Items[5])
+	if !containsString(validation.Items[5].Errors, "body contains raw transcript-style conversation") {
+		t.Fatalf("transcript-style errors unexpected: %+v", validation.Items[5])
+	}
+	if !containsString(validation.Items[5].ErrorCodes, "body_raw_transcript_style_conversation") {
+		t.Fatalf("transcript-style error codes unexpected: %+v", validation.Items[5])
+	}
+	if !containsString(validation.Items[6].Errors, "source candidate not found: missing-source") {
+		t.Fatalf("missing source errors unexpected: %+v", validation.Items[6])
 	}
 	for _, want := range []string{"target_exists", "replace_target_exists", "same_target_pending:2"} {
 		if !containsString(validation.Items[0].WarningCodes, want) {
@@ -1989,7 +2056,7 @@ func TestDistillProposalValidateAndApplyPartial(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &applied); err != nil {
 		t.Fatal(err)
 	}
-	if applied.Valid || applied.Created != 1 || applied.Blocked != 1 || len(applied.Items) != 6 || applied.Items[0].Status != "created" {
+	if applied.Valid || applied.Created != 1 || applied.Blocked != 1 || len(applied.Items) != 7 || applied.Items[0].Status != "created" {
 		t.Fatalf("apply report unexpected: %+v", applied)
 	}
 	createdID := applied.Items[0].CandidateID

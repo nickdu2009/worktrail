@@ -262,10 +262,17 @@ func TestReviewApplyPlanAppliesFreshActionsAndSkipsHumanReview(t *testing.T) {
 	if report.Schema != reviewApplyPlanReportSchema || report.Summary.Applied != 3 || report.Summary.Skipped != 1 || report.Summary.Stale != 0 || report.Summary.Failed != 0 {
 		t.Fatalf("apply-plan report unexpected: %+v", report)
 	}
+	if report.IndexRebuild == nil || report.IndexRebuild.Error != "" || report.IndexRebuild.Scope != "project" {
+		t.Fatalf("apply-plan index rebuild unexpected: %+v", report.IndexRebuild)
+	}
 	assertCandidateStatus(t, manager, "apply-promote", candidate.StatusPromoted)
 	assertCandidateStatus(t, manager, "apply-merge", candidate.StatusMerged)
 	assertCandidateStatus(t, manager, "apply-discard", candidate.StatusDiscarded)
 	assertCandidateStatus(t, manager, "apply-human", candidate.StatusPending)
+	text := runApp(t, &out, &errb, "context", "Apply Promote")
+	if !strings.Contains(text, "rules/apply-promote.md") {
+		t.Fatalf("context did not see promoted doc after apply-plan rebuild:\n%s", text)
+	}
 	merged, err := os.ReadFile(filepath.Join(project, ".worktrail", "workflows", "merge-target.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -325,6 +332,63 @@ func TestReviewApplyPlanRejectsStaleSnapshot(t *testing.T) {
 	}
 }
 
+func TestReviewApplyPlanReportsSemanticValidationErrorCodes(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	env, err := paths.Discover()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := candidate.Manager{Env: env, Actor: "test"}
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "note-1",
+		CandidateType: model.CandidateTypeTranscriptNotes,
+		TargetPath:    "imports/transcripts/note-1.md",
+		Title:         "Transcript Notes",
+		Body:          "Evidence body.",
+	})
+	rec := createCandidate(t, manager, candidate.CreateRequest{
+		Scope:              "project",
+		ID:                 "unsafe-plan",
+		CandidateType:      "workflow",
+		TargetPath:         "workflows/unsafe-plan.md",
+		Title:              "Unsafe Plan",
+		Operation:          candidate.OperationReplace,
+		SourceCandidateIDs: []string{"note-1"},
+		Body:               "# Unsafe Plan\n\nSafe body.\n",
+	})
+	replaceCandidateBody(t, rec.Path, rec.Body, "# Unsafe Plan\n\n- user: please paste the transcript\n- assistant: here is the transcript")
+
+	planPath := writeReviewPlanFile(t, runReviewPlanJSON(t, &out, &errb))
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"review", "apply-plan", planPath, "--confirm", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review apply-plan unsafe body: %v stderr=%s", err, errb.String())
+	}
+	var report reviewApplyPlanReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.Applied != 0 || report.Summary.Failed != 1 || len(report.Items) != 1 {
+		t.Fatalf("unsafe apply-plan report unexpected: %+v", report)
+	}
+	item := report.Items[0]
+	if item.Result != "failed" || !containsString(item.ReasonCodes, "apply_failed") || !containsString(item.ErrorCodes, "body_raw_transcript_style_conversation") || !strings.Contains(item.Error, "body contains raw transcript-style conversation") {
+		t.Fatalf("unsafe apply-plan item unexpected: %+v", item)
+	}
+	assertCandidateStatus(t, manager, "unsafe-plan", candidate.StatusPending)
+}
+
 func TestReviewApplyPlanRejectsExplicitScopeMismatchAndUsesPlanScopeByDefault(t *testing.T) {
 	t.Run("project plan rejects user scope", func(t *testing.T) {
 		home := filepath.Join(t.TempDir(), "home")
@@ -364,8 +428,12 @@ func TestReviewApplyPlanRejectsExplicitScopeMismatchAndUsesPlanScopeByDefault(t 
 
 		out.Reset()
 		err = Run(context.Background(), []string{"review", "apply-plan", planPath, "--confirm", "--scope", "user", "--format", "json"}, nil, &out, &errb)
-		if err == nil || !strings.Contains(err.Error(), "scope mismatch") {
-			t.Fatalf("scope mismatch error = %v stdout=%s", err, out.String())
+		if err != nil {
+			t.Fatalf("scope mismatch json failure = %v stdout=%s", err, out.String())
+		}
+		assertCLIErrorEnvelope(t, out.String(), "cli_scope_mismatch")
+		if !strings.Contains(out.String(), "scope mismatch") {
+			t.Fatalf("scope mismatch envelope missing message:\n%s", out.String())
 		}
 		assertCandidateStatusScoped(t, manager, "project", "project-promote", candidate.StatusPending)
 	})
@@ -418,8 +486,12 @@ func TestReviewApplyPlanRejectsExplicitScopeMismatchAndUsesPlanScopeByDefault(t 
 
 		out.Reset()
 		err = Run(context.Background(), []string{"review", "apply-plan", planPath, "--confirm", "--scope", "project", "--format", "json"}, nil, &out, &errb)
-		if err == nil || !strings.Contains(err.Error(), "scope mismatch") {
-			t.Fatalf("scope mismatch error = %v stdout=%s", err, out.String())
+		if err != nil {
+			t.Fatalf("scope mismatch json failure = %v stdout=%s", err, out.String())
+		}
+		assertCLIErrorEnvelope(t, out.String(), "cli_scope_mismatch")
+		if !strings.Contains(out.String(), "scope mismatch") {
+			t.Fatalf("scope mismatch envelope missing message:\n%s", out.String())
 		}
 		assertCandidateStatusScoped(t, manager, "user", "user-promote", candidate.StatusPending)
 
@@ -672,6 +744,62 @@ func TestReviewApplyCandidatesReportsFailuresAndBlocksEvidence(t *testing.T) {
 	}
 }
 
+func TestReviewApplyCandidatesReportsBlockedSensitiveMaterialErrorCode(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	env, err := paths.Discover()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := candidate.Manager{Env: env, Actor: "test"}
+	createCandidate(t, manager, candidate.CreateRequest{
+		Scope:         "project",
+		ID:            "note-1",
+		CandidateType: model.CandidateTypeTranscriptNotes,
+		TargetPath:    "imports/transcripts/note-1.md",
+		Title:         "Transcript Notes",
+		Body:          "Evidence body.",
+	})
+	rec := createCandidate(t, manager, candidate.CreateRequest{
+		Scope:              "project",
+		ID:                 "unsafe-blocked",
+		CandidateType:      "rule",
+		TargetPath:         "rules/unsafe-blocked.md",
+		Title:              "Unsafe Blocked",
+		Operation:          candidate.OperationReplace,
+		SourceCandidateIDs: []string{"note-1"},
+		Body:               "# Unsafe Blocked\n\nSafe body.\n",
+	})
+	replaceCandidateBody(t, rec.Path, rec.Body, "# Unsafe Blocked\n\n-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----")
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"review", "apply-candidates", "--promote", "unsafe-blocked", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run review apply-candidates blocked body: %v stderr=%s", err, errb.String())
+	}
+	var report reviewApplyCandidatesReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.Applied != 0 || report.Summary.Failed != 1 || len(report.Items) != 1 {
+		t.Fatalf("unsafe apply-candidates report unexpected: %+v", report)
+	}
+	item := report.Items[0]
+	if item.Result != "failed" || !containsString(item.ErrorCodes, "body_blocked_sensitive_material") || !strings.Contains(item.Error, "blocked sensitive material") {
+		t.Fatalf("unsafe apply-candidates item unexpected: %+v", item)
+	}
+	assertCandidateStatus(t, manager, "unsafe-blocked", candidate.StatusPending)
+}
+
 func TestReviewPlanSnapshotMismatchesCoverStaleFields(t *testing.T) {
 	base := reviewPlanSnapshot{
 		CandidateStatus:          candidate.StatusPending,
@@ -715,6 +843,21 @@ func createCandidate(t *testing.T, manager candidate.Manager, req candidate.Crea
 		t.Fatalf("Create %s: %v", req.ID, err)
 	}
 	return rec
+}
+
+func replaceCandidateBody(t *testing.T, path, oldBody, newBody string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(data), oldBody, newBody, 1)
+	if updated == string(data) {
+		t.Fatalf("candidate body replacement failed for %s", path)
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func runReviewPlanJSON(t *testing.T, out, errb *bytes.Buffer) reviewPlan {

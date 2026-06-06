@@ -26,9 +26,13 @@ func runNote(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 		return fmt.Errorf("unknown note subcommand %q", args[0])
 	}
 	flags, positional := splitFlags(args[1:])
+	format := flagValue(flags, "format", "text")
+	fail := func(err error) error {
+		return failCLICommand(ioctx, format, "worktrail note add", err)
+	}
 	body, err := noteBody(ioctx.In, flags, positional)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	typ := strings.TrimSpace(flagValue(flags, "type", ""))
 	target := strings.TrimSpace(flagValue(flags, "target", ""))
@@ -36,19 +40,22 @@ func runNote(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 	summary := strings.TrimSpace(flagValue(flags, "summary", ""))
 	evidenceLabel := strings.TrimSpace(flagValue(flags, "evidence-label", ""))
 	if typ == "" || target == "" || title == "" || summary == "" || evidenceLabel == "" || strings.TrimSpace(body) == "" {
-		return errors.New("note add requires --type, --target, --title, --summary, --evidence-label, and body")
+		return fail(errors.New("note add requires --type, --target, --title, --summary, --evidence-label, and body"))
 	}
 	if !model.IsSemanticCandidateType(typ) {
-		return fmt.Errorf("note add requires a semantic candidate type, got %q", typ)
+		return fail(fmt.Errorf("note add requires a semantic candidate type, got %q", typ))
 	}
 	if !model.SemanticTargetPathMatches(typ, target) {
-		return fmt.Errorf("candidate type %q does not match target path %q", typ, target)
+		return fail(fmt.Errorf("candidate type %q does not match target path %q", typ, target))
+	}
+	if err := validateSemanticDraftText(title, summary, body); err != nil {
+		return fail(err)
 	}
 	confidence := 0.7
 	if raw := strings.TrimSpace(flagValue(flags, "confidence", "")); raw != "" {
 		parsed, err := strconv.ParseFloat(raw, 64)
 		if err != nil || parsed <= 0 || parsed > 1 {
-			return fmt.Errorf("--confidence must be > 0 and <= 1")
+			return fail(fmt.Errorf("--confidence must be > 0 and <= 1"))
 		}
 		confidence = parsed
 	}
@@ -67,9 +74,9 @@ func runNote(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 		Body:          body,
 	})
 	if err != nil {
-		return err
+		return fail(err)
 	}
-	if flagValue(flags, "format", "text") == "json" {
+	if isJSONFormat(format) {
 		return printCandidate(ioctx, rec, "json")
 	}
 	if err := printCandidate(ioctx, rec, "text"); err != nil {
@@ -109,5 +116,5 @@ func printNoteHelp(out io.Writer) {
 	fmt.Fprintln(out, "  --confidence 0.7           confidence > 0 and <= 1")
 	fmt.Fprintln(out, "  --from-file draft.md       read candidate body from file")
 	fmt.Fprintln(out, "  --operation replace|merge  default replace")
-	fmt.Fprintln(out, "  --format text|json")
+	fmt.Fprintln(out, "  --format text|json         JSON failures return worktrail.cli.error.v1 on stdout; check ok, not exit code")
 }

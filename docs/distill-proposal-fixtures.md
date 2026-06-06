@@ -215,7 +215,13 @@ Apply behavior fixtures:
 - Duplicate candidate id is skipped.
 - Duplicate id with different body emits
   `duplicate_id_existing_body_may_differ`.
-- Blocked secret item is counted as blocked and does not create a candidate.
+- Blocked secret item is counted as blocked, emits
+  `body_blocked_sensitive_material`, and does not create a candidate.
+- Transcript-style bodies emit `body_raw_transcript_style_conversation`.
+- Local absolute paths emit `{field}_local_absolute_path`.
+- Redactable secret/PII patterns emit `{field}_redactable_secret_or_pii`.
+- Distill proposal load/schema preflight failures in `--format json` return
+  `worktrail.cli.error.v1` on stdout with `ok: false`.
 - Mixed proposal creates valid items while reporting item errors for invalid
   items.
 

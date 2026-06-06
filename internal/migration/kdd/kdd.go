@@ -9,13 +9,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/redact"
+	"github.com/nickdu2009/worktrail/internal/textsafety"
 	"github.com/nickdu2009/worktrail/internal/util"
 )
 
@@ -89,11 +89,15 @@ func Run(env paths.Env, opts Options) (Report, error) {
 	report.Items = append(report.Items, skipped...)
 	manager := candidate.Manager{Env: env, Actor: actor(opts.NowActor)}
 	for _, item := range items {
+		originalBody := item.Body
+		originalScan := redact.Scan(originalBody)
+		sanitizedSource := textsafety.RedactLocalAbsolutePaths(originalScan.Text)
+		item.Warnings = appendLocalPathWarning(item.Warnings, originalBody)
+		item.Body = sanitizedSource
 		body := CandidateBody(item)
 		scan := redact.Scan(body)
-		item.RedactionStatus = string(scan.Status)
-		item.Warnings = appendLocalPathWarning(item.Warnings, item.Body)
-		if scan.Status == redact.StatusBlocked {
+		item.RedactionStatus = string(originalScan.Status)
+		if scan.Status == redact.StatusBlocked || originalScan.Status == redact.StatusBlocked {
 			report.Blocked++
 			report.Items = append(report.Items, item)
 			continue
@@ -109,15 +113,16 @@ func Run(env paths.Env, opts Options) (Report, error) {
 			continue
 		}
 		rec, err := manager.Create(candidate.CreateRequest{
-			Scope:         item.Scope,
-			ID:            item.CandidateID,
-			CandidateType: item.CandidateType,
-			TargetPath:    item.TargetPath,
-			Title:         item.Title,
-			Summary:       item.Summary,
-			Operation:     item.Operation,
-			Tags:          tagsFor(item),
-			Body:          body,
+			Scope:           item.Scope,
+			ID:              item.CandidateID,
+			CandidateType:   item.CandidateType,
+			TargetPath:      item.TargetPath,
+			Title:           item.Title,
+			Summary:         item.Summary,
+			Operation:       item.Operation,
+			Tags:            tagsFor(item),
+			Body:            body,
+			RedactionStatus: item.RedactionStatus,
 		})
 		if err != nil {
 			if errors.Is(err, candidate.ErrBlocked) {
@@ -311,10 +316,8 @@ func LegacyRoot(env paths.Env, root string) string {
 }
 
 func HasLocalAbsolutePath(text string) bool {
-	return localPathRE.MatchString(text)
+	return textsafety.ContainsLocalAbsolutePath(text)
 }
-
-var localPathRE = regexp.MustCompile(`(?:/Users/[^\s` + "`" + `]+|/home/[^\s` + "`" + `]+|[A-Za-z]:\\Users\\[^\s` + "`" + `]+)`)
 
 func mapLocalPath(rel string) Item {
 	slug := util.Slug(strings.TrimSuffix(strings.TrimPrefix(rel, "local/"), ".md"))

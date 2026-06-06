@@ -16,6 +16,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/redact"
 	"github.com/nickdu2009/worktrail/internal/store"
+	"github.com/nickdu2009/worktrail/internal/textsafety"
 	"github.com/nickdu2009/worktrail/internal/util"
 )
 
@@ -32,14 +33,15 @@ const (
 )
 
 var (
-	ErrBlocked              = errors.New("candidate content contains blocked sensitive material")
-	ErrNotFound             = errors.New("candidate not found")
-	ErrTranscriptNotesApply = errors.New("transcript notes are evidence and must be distilled before promote or merge")
-	ErrMigrationSourceApply = errors.New("migration sources are evidence and must be distilled before promote or merge")
-	ErrRestoreUnsupported   = errors.New("restore only supports promoted replace candidates with missing targets")
-	ErrRetireUnsupported    = errors.New("retire only supports promoted or merged candidates with missing targets")
-	ErrRetireReasonRequired = errors.New("retire reason is required")
-	ErrEvidenceUnsupported  = errors.New("evidence lifecycle only supports transcript_notes, migration_source, and KDD split-source lessons")
+	ErrBlocked                = errors.New("candidate content contains blocked sensitive material")
+	ErrNotFound               = errors.New("candidate not found")
+	ErrTranscriptNotesApply   = errors.New("transcript notes are evidence and must be distilled before promote or merge")
+	ErrMigrationSourceApply   = errors.New("migration sources are evidence and must be distilled before promote or merge")
+	ErrRestoreUnsupported     = errors.New("restore only supports promoted replace candidates with missing targets")
+	ErrRetireUnsupported      = errors.New("retire only supports promoted or merged candidates with missing targets")
+	ErrRetireReasonRequired   = errors.New("retire reason is required")
+	ErrEvidenceReasonRequired = errors.New("evidence lifecycle reason is required")
+	ErrEvidenceUnsupported    = errors.New("evidence lifecycle only supports transcript_notes, migration_source, and KDD split-source lessons")
 )
 
 type Manager struct {
@@ -63,6 +65,10 @@ type CreateRequest struct {
 	Confidence         float64
 	Tags               []string
 	Body               string
+	// RedactionStatus is only for preserving migration metadata when sanitized
+	// content becomes clean after redaction. Regular create paths should leave it
+	// empty and let Create derive the status from Body.
+	RedactionStatus string
 }
 
 type Record struct {
@@ -93,9 +99,20 @@ func (m Manager) Create(req CreateRequest) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	candidateType := req.CandidateType
+	if candidateType == "" {
+		candidateType = "knowledge"
+	}
+	if errs := semanticCreateIssues(candidateType, req.Title, req.Summary, req.Body); len(errs) > 0 {
+		return Record{}, textsafety.NewValidationError(errs)
+	}
 	scan := redact.Scan(req.Body)
 	if scan.Status == redact.StatusBlocked {
 		return Record{}, blockedError(scan)
+	}
+	redactionStatus, err := effectiveCreateRedactionStatus(scan, req.RedactionStatus)
+	if err != nil {
+		return Record{}, err
 	}
 
 	id := req.ID
@@ -109,10 +126,6 @@ func (m Manager) Create(req CreateRequest) (Record, error) {
 	operation := req.Operation
 	if operation == "" {
 		operation = OperationReplace
-	}
-	candidateType := req.CandidateType
-	if candidateType == "" {
-		candidateType = "knowledge"
 	}
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
@@ -134,7 +147,7 @@ func (m Manager) Create(req CreateRequest) (Record, error) {
 		SourceCandidateIDs: append([]string(nil), req.SourceCandidateIDs...),
 		EvidenceLabel:      strings.TrimSpace(req.EvidenceLabel),
 		Confidence:         req.Confidence,
-		RedactionStatus:    string(scan.Status),
+		RedactionStatus:    redactionStatus,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 		Tags:               append([]string(nil), req.Tags...),
@@ -157,6 +170,21 @@ func (m Manager) Create(req CreateRequest) (Record, error) {
 		return Record{}, err
 	}
 	return rec, nil
+}
+
+func effectiveCreateRedactionStatus(scan redact.Result, requested string) (string, error) {
+	actual := string(scan.Status)
+	requested = strings.TrimSpace(requested)
+	if requested == "" || requested == actual {
+		return actual, nil
+	}
+	// Import flows may preserve an original redacted status after sanitizing the
+	// stored body, which can make the final body clean while remaining safer to
+	// classify as previously redacted.
+	if actual == string(redact.StatusClean) && requested == string(redact.StatusRedacted) {
+		return requested, nil
+	}
+	return "", fmt.Errorf("redaction status override %q does not match body status %q", requested, actual)
 }
 
 func (m Manager) List(scope string) ([]Record, error) {
@@ -273,6 +301,9 @@ func (m Manager) Restore(scope, id string) (ApplyResult, error) {
 		})
 		return ApplyResult{}, blockedError(scan)
 	}
+	if errs := semanticFormalWriteIssues(rec.Meta.CandidateType, rec.Body); len(errs) > 0 {
+		return ApplyResult{}, textsafety.NewValidationError(errs)
+	}
 	if err := util.AtomicWrite(target, []byte(ensureTrailingNewline(scan.Text)), 0o644); err != nil {
 		return ApplyResult{}, err
 	}
@@ -296,9 +327,10 @@ func (m Manager) Restore(scope, id string) (ApplyResult, error) {
 }
 
 func (m Manager) Retire(scope, id, reason string) (Record, error) {
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		return Record{}, ErrRetireReasonRequired
+	var err error
+	reason, err = validateLifecycleReason(reason, ErrRetireReasonRequired)
+	if err != nil {
+		return Record{}, err
 	}
 	rec, err := m.Show(scope, id)
 	if err != nil {
@@ -373,6 +405,11 @@ func (m Manager) Discard(scope, id string) (Record, error) {
 }
 
 func (m Manager) ArchiveEvidence(scope, id, reason string) (Record, error) {
+	var err error
+	reason, err = validateLifecycleReason(reason, ErrEvidenceReasonRequired)
+	if err != nil {
+		return Record{}, err
+	}
 	rec, err := m.Show(scope, id)
 	if err != nil {
 		return Record{}, err
@@ -399,7 +436,7 @@ func (m Manager) ArchiveEvidence(scope, id, reason string) (Record, error) {
 	if err := wlog.Append(root, "candidate.evidence_archive", rec.Meta.ID, m.actor(), map[string]any{
 		"target_path":     rec.Meta.TargetPath,
 		"previous_status": previousStatus,
-		"reason":          strings.TrimSpace(reason),
+		"reason":          reason,
 	}); err != nil {
 		return Record{}, err
 	}
@@ -407,6 +444,11 @@ func (m Manager) ArchiveEvidence(scope, id, reason string) (Record, error) {
 }
 
 func (m Manager) DiscardEvidence(scope, id, reason string) (Record, error) {
+	var err error
+	reason, err = validateLifecycleReason(reason, ErrEvidenceReasonRequired)
+	if err != nil {
+		return Record{}, err
+	}
 	rec, err := m.Show(scope, id)
 	if err != nil {
 		return Record{}, err
@@ -433,7 +475,7 @@ func (m Manager) DiscardEvidence(scope, id, reason string) (Record, error) {
 	if err := wlog.Append(root, "candidate.evidence_discard", rec.Meta.ID, m.actor(), map[string]any{
 		"target_path":     rec.Meta.TargetPath,
 		"previous_status": previousStatus,
-		"reason":          strings.TrimSpace(reason),
+		"reason":          reason,
 	}); err != nil {
 		return Record{}, err
 	}
@@ -474,6 +516,9 @@ func (m Manager) apply(scope, id, op string) (ApplyResult, error) {
 			"operation":   op,
 		})
 		return ApplyResult{}, blockedError(scan)
+	}
+	if errs := semanticFormalWriteIssues(rec.Meta.CandidateType, rec.Body); len(errs) > 0 {
+		return ApplyResult{}, textsafety.NewValidationError(errs)
 	}
 
 	var existing []byte
@@ -524,6 +569,38 @@ func (m Manager) apply(scope, id, op string) (ApplyResult, error) {
 		BackupPath: backup,
 		Status:     rec.Meta.Status,
 	}, nil
+}
+
+func semanticCreateIssues(candidateType, title, summary, body string) []textsafety.Issue {
+	if !model.IsSemanticCandidateType(candidateType) {
+		return nil
+	}
+	var errs []textsafety.Issue
+	errs = append(errs, textsafety.SemanticFieldIssues("title", title, textsafety.Options{CheckBlocked: true})...)
+	errs = append(errs, textsafety.SemanticFieldIssues("summary", summary, textsafety.Options{CheckBlocked: true, CheckTranscript: true})...)
+	errs = append(errs, textsafety.SemanticFieldIssues("body", body, textsafety.Options{CheckBlocked: true, CheckTranscript: true})...)
+	return errs
+}
+
+func semanticFormalWriteIssues(candidateType, body string) []textsafety.Issue {
+	if !model.IsSemanticCandidateType(candidateType) {
+		return nil
+	}
+	return textsafety.SemanticFieldIssues("body", body, textsafety.Options{CheckTranscript: true})
+}
+
+func validateLifecycleReason(reason string, requiredErr error) (string, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		if requiredErr == nil {
+			return "", nil
+		}
+		return "", textsafety.WrapValidationError(requiredErr, []textsafety.Issue{textsafety.RequiredFieldIssue("reason")})
+	}
+	if errs := textsafety.SemanticFieldIssues("reason", reason, textsafety.Options{CheckBlocked: true}); len(errs) > 0 {
+		return "", textsafety.NewValidationError(errs)
+	}
+	return reason, nil
 }
 
 func (m Manager) backup(target string, data []byte) (string, error) {

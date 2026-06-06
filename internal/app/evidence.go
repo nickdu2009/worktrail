@@ -85,25 +85,30 @@ func runEvidencePlan(env paths.Env, ioctx IO, args []string) error {
 
 func runEvidenceAction(env paths.Env, ioctx IO, action string, args []string) error {
 	flags, positional := splitFlags(args)
+	format := flagValue(flags, "format", "text")
+	command := "worktrail evidence " + action
+	fail := func(err error) error {
+		return failCLICommand(ioctx, format, command, err)
+	}
 	if flagValue(flags, "confirm", "") != "true" {
-		return fmt.Errorf("worktrail evidence %s requires --confirm", action)
+		return fail(fmt.Errorf("worktrail evidence %s requires --confirm", action))
 	}
 	scope := flagValue(flags, "scope", "project")
 	id := firstArg(positional, flagValue(flags, "id", ""))
 	if strings.TrimSpace(id) == "" {
-		return fmt.Errorf("worktrail evidence %s requires a candidate id", action)
+		return fail(fmt.Errorf("worktrail evidence %s requires a candidate id", action))
 	}
 	manager := candidate.Manager{Env: env, Actor: "cli:evidence-" + action}
 	records, err := manager.List(scope)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	item, ok := evidencePlanItemByID(records, id)
 	if !ok {
-		return fmt.Errorf("candidate %q is not evidence lifecycle eligible", id)
+		return fail(fmt.Errorf("candidate %q is not evidence lifecycle eligible", id))
 	}
 	if item.RecommendedAction != action {
-		return fmt.Errorf("candidate %q is recommended for %s, not %s", id, item.RecommendedAction, action)
+		return fail(fmt.Errorf("candidate %q is recommended for %s, not %s", id, item.RecommendedAction, action))
 	}
 	reason := flagValue(flags, "reason", "")
 	if reason == "" && len(positional) > 1 {
@@ -116,12 +121,12 @@ func runEvidenceAction(env paths.Env, ioctx IO, action string, args []string) er
 	case "discard":
 		rec, err = manager.DiscardEvidence(scope, id, reason)
 	default:
-		return fmt.Errorf("unknown evidence action %q", action)
+		return fail(fmt.Errorf("unknown evidence action %q", action))
 	}
 	if err != nil {
-		return err
+		return fail(err)
 	}
-	return printCandidate(ioctx, rec, flagValue(flags, "format", "text"))
+	return printCandidate(ioctx, rec, format)
 }
 
 func buildEvidencePlan(scope, statusFilter string, records []candidate.Record, now time.Time) evidencePlan {
@@ -336,10 +341,11 @@ func renderEvidencePlanText(out io.Writer, plan evidencePlan, scopeHint string) 
 
 func printEvidenceHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail evidence plan [--scope project|user] [--status active|archived|all] [--format text|json]")
-	fmt.Fprintln(out, "       worktrail evidence archive <candidate-id> --confirm [--scope project|user] [--reason text]")
-	fmt.Fprintln(out, "       worktrail evidence discard <candidate-id> --confirm [--scope project|user] [--reason text]")
+	fmt.Fprintln(out, "       worktrail evidence archive <candidate-id> --confirm --reason <text> [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "       worktrail evidence discard <candidate-id> --confirm --reason <text> [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Builds a read-only lifecycle plan for transcript_notes, migration_source, and KDD split-source evidence candidates.")
 	fmt.Fprintln(out, "Scope defaults to project; pass --scope user for user-level evidence.")
-	fmt.Fprintln(out, "Archive and discard require --confirm and only run when evidence plan recommends the same action.")
+	fmt.Fprintln(out, "Archive and discard require --confirm, a non-empty reason, and only run when evidence plan recommends the same action.")
+	fmt.Fprintln(out, "JSON failures return worktrail.cli.error.v1 on stdout; check ok, not exit code.")
 }
