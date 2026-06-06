@@ -373,6 +373,26 @@ func normalizeLegacyCandidate(meta Candidate) ObjectMetaV2 {
 }
 
 func normalizeLegacyState(meta State, path string) ObjectMetaV2 {
+	rel := filepath.ToSlash(strings.TrimSpace(path))
+	if strings.HasPrefix(rel, "state/active/") && isExplicitSourceTool(meta.SourceTool) {
+		return ObjectMetaV2{
+			BaseMetaV2: BaseMetaV2{
+				Schema:     SchemaState,
+				ID:         strings.TrimSpace(meta.ID),
+				Scope:      strings.TrimSpace(meta.Scope),
+				ObjectKind: "",
+				Title:      strings.TrimSpace(meta.Title),
+				Tags:       cleanList(meta.Tags),
+				CreatedAt:  meta.CreatedAt,
+				UpdatedAt:  meta.UpdatedAt,
+			},
+			LegacySchema:    SchemaState,
+			Durability:      DurabilityDurable,
+			LifecycleStatus: normalizeLifecycleStatus(meta.Status),
+			ResumePriority:  ResumePriorityExplicitSession,
+			SourceTool:      withDefault(strings.TrimSpace(meta.SourceTool), "worktrail"),
+		}
+	}
 	return ObjectMetaV2{
 		BaseMetaV2: BaseMetaV2{
 			Schema:     SchemaRuntimeV2,
@@ -391,7 +411,27 @@ func normalizeLegacyState(meta State, path string) ObjectMetaV2 {
 		TaskID:          "",
 		SessionID:       strings.Join(cleanList(meta.SourceSessions), ","),
 		SourceTool:      strings.TrimSpace(meta.SourceTool),
+		ResumePriority:  resumePriorityFromLegacyState(meta, path),
 	}
+}
+
+func isExplicitSourceTool(sourceTool string) bool {
+	sourceTool = strings.TrimSpace(sourceTool)
+	return sourceTool == "" || sourceTool == "worktrail"
+}
+
+func resumePriorityFromLegacyState(meta State, path string) string {
+	rel := filepath.ToSlash(strings.TrimSpace(path))
+	if strings.HasPrefix(rel, "state/checkpoints/") {
+		return ResumePriorityRuntimeCheckpoint
+	}
+	if strings.HasPrefix(rel, "runtime/") {
+		return resumePriorityFromPath(rel)
+	}
+	if !isExplicitSourceTool(meta.SourceTool) {
+		return ResumePriorityHookRuntimeState
+	}
+	return ""
 }
 
 func normalizeLegacyHandoff(meta legacyHandoffMeta) ObjectMetaV2 {
@@ -438,7 +478,18 @@ func normalizePathOnly(path string, raw map[string]any) (ObjectMetaV2, error) {
 		base.Schema = SchemaKnowledgeV2
 		base.ObjectKind = ObjectKindKnowledgeDoc
 		return ObjectMetaV2{BaseMetaV2: base, KnowledgeType: "handoff", Durability: DurabilityDurable, LifecycleStatus: LifecycleCurrent}, nil
-	case strings.HasPrefix(rel, "state/") || rel == "current-state.md":
+	case strings.HasPrefix(rel, "runtime/"):
+		base.Schema = SchemaRuntimeV2
+		base.ObjectKind = ObjectKindRuntime
+		return ObjectMetaV2{BaseMetaV2: base, RuntimeType: runtimeTypeFromPath(rel), Durability: DurabilityEphemeral, LifecycleStatus: LifecycleActive, ResumePriority: resumePriorityFromPath(rel)}, nil
+	case strings.HasPrefix(rel, "state/active/"):
+		base.Schema = SchemaState
+		return ObjectMetaV2{BaseMetaV2: base, LegacySchema: SchemaState, RuntimeType: RuntimeTypeSessionState, Durability: DurabilityDurable, LifecycleStatus: LifecycleActive, ResumePriority: ResumePriorityExplicitSession, SourceTool: "worktrail"}, nil
+	case strings.HasPrefix(rel, "state/checkpoints/"):
+		base.Schema = SchemaRuntimeV2
+		base.ObjectKind = ObjectKindRuntime
+		return ObjectMetaV2{BaseMetaV2: base, RuntimeType: RuntimeTypeCheckpoint, Durability: DurabilityEphemeral, LifecycleStatus: LifecycleActive, ResumePriority: ResumePriorityRuntimeCheckpoint}, nil
+	case strings.HasPrefix(rel, "state/"):
 		base.Schema = SchemaRuntimeV2
 		base.ObjectKind = ObjectKindRuntime
 		return ObjectMetaV2{BaseMetaV2: base, RuntimeType: runtimeTypeFromPath(rel), Durability: DurabilityEphemeral, LifecycleStatus: LifecycleActive}, nil
@@ -523,14 +574,32 @@ func runtimeTypeFromPath(path string) string {
 	switch {
 	case strings.Contains(rel, "/checkpoints/"):
 		return RuntimeTypeCheckpoint
+	case strings.HasPrefix(rel, "runtime/checkpoints/"):
+		return RuntimeTypeCheckpoint
+	case strings.HasPrefix(rel, "runtime/sessions/"):
+		return RuntimeTypeSessionState
+	case strings.HasPrefix(rel, "runtime/recovery/"):
+		return "recovery_dashboard"
 	case strings.HasPrefix(rel, "state/checkpoints/"):
 		return RuntimeTypeCheckpoint
-	case strings.HasPrefix(rel, "state/"):
+	case strings.HasPrefix(rel, "state/active/"):
 		return RuntimeTypeSessionState
-	case rel == "current-state.md":
+	case strings.HasPrefix(rel, "state/"):
 		return RuntimeTypeSessionState
 	default:
 		return RuntimeTypeSessionState
+	}
+}
+
+func resumePriorityFromPath(path string) string {
+	rel := filepath.ToSlash(strings.TrimSpace(path))
+	switch {
+	case strings.HasPrefix(rel, "runtime/checkpoints/"):
+		return ResumePriorityRuntimeCheckpoint
+	case strings.HasPrefix(rel, "runtime/sessions/"):
+		return ResumePriorityHookRuntimeState
+	default:
+		return ""
 	}
 }
 

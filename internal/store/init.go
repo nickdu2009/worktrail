@@ -68,7 +68,8 @@ func InitProject(env paths.Env) error {
 	dirs := []string{
 		"requirements", "architecture", "decisions", "handoffs", "rules", "prompts",
 		"integrations", "validation", "glossary",
-		"state/active", "state/checkpoints", "state/archived",
+		"state/active", "state/archived",
+		"runtime/sessions", "runtime/checkpoints", "runtime/recovery",
 		"candidates/project", "raw/codex", "raw/claude", "raw/cursor",
 		"exports", "index", "logs",
 	}
@@ -196,17 +197,10 @@ func mergeProjectCodexHooks(path string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	existing["worktrail"] = map[string]any{
-		"mcp": map[string]any{
-			"command": "worktrail",
-			"args":    []string{"mcp", "serve", "--stdio"},
-		},
-		"hooks": map[string]any{
-			"session-start": "worktrail hook codex session-start",
-			"user-prompt":   "worktrail hook codex user-prompt",
-			"post-tool-use": "worktrail hook codex post-tool-use",
-			"stop":          "worktrail hook codex stop",
-		},
+	existing["hooks"] = map[string]any{
+		"SessionStart": "worktrail hook codex SessionStart",
+		"PreCompact":   "worktrail hook codex PreCompact",
+		"Stop":         "worktrail hook codex Stop",
 	}
 	data, err := json.MarshalIndent(existing, "", "  ")
 	if err != nil {

@@ -5,18 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/handoff"
 	"github.com/nickdu2009/worktrail/internal/paths"
+	"github.com/nickdu2009/worktrail/internal/recovery"
 	wtstate "github.com/nickdu2009/worktrail/internal/state"
 	"github.com/nickdu2009/worktrail/internal/util"
 )
 
 type resumeResult struct {
-	State         wtstate.Capsule  `json:"state"`
-	SourceState   *wtstate.Capsule `json:"source_state,omitempty"`
-	SourceHandoff *handoff.Record  `json:"source_handoff,omitempty"`
+	State          wtstate.Capsule     `json:"state"`
+	SourceState    *wtstate.Capsule    `json:"source_state,omitempty"`
+	SourceHandoff  *handoff.Record     `json:"source_handoff,omitempty"`
+	RecoverySource string              `json:"recovery_source_kind,omitempty"`
+	RecoveryQuality string             `json:"recovery_quality,omitempty"`
+	DegradedReason string              `json:"degraded_reason,omitempty"`
+	RuntimePath    string              `json:"runtime_path,omitempty"`
 }
 
 func runResume(_ context.Context, env paths.Env, ioctx IO, args []string) error {
@@ -26,56 +32,62 @@ func runResume(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	}
 	flags, positional := splitFlags(args)
 	scope := flagValue(flags, "scope", "project")
-	sourceState, err := latestStateIfAny(env, scope)
+	sel, err := recovery.Select(env, scope)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return errors.New("resume requires a manual handoff, explicit session state, or runtime recovery artifact")
+		}
 		return err
-	}
-	sourceHandoff, err := latestHandoffIfAny(env, scope)
-	if err != nil {
-		return err
-	}
-	if sourceState == nil && sourceHandoff == nil {
-		return errors.New("resume requires an active state or a handoff record")
 	}
 	title := strings.TrimSpace(joinArgs(positional))
 	if title == "" {
-		switch {
-		case sourceState != nil:
-			title = sourceState.State.Title
-		case sourceHandoff != nil:
-			title = sourceHandoff.Meta.Title
-		default:
-			title = "Resumed Session"
-		}
+		title = sel.Title
 	}
-	body := renderResumeStateBody(title, sourceState, projectedArchivedStatePath(env, scope, resumedStateID(sourceState)), sourceHandoff)
+	body := renderResumeStateBody(title, sel)
 	cap, err := wtstate.Start(env, wtstate.StartOptions{
 		Scope:                scope,
-		TaskID:               resumeTaskID(sourceState, sourceHandoff, title),
+		TaskID:               resumeTaskID(sel.State, sel.Handoff, title),
 		Type:                 "session",
 		Title:                title,
 		SourceTool:           "worktrail",
-		Tags:                 []string{"resume"},
+		Tags:                 []string{"resume", sel.SourceKind},
 		Body:                 body,
-		ResumedFromStateID:   resumedStateID(sourceState),
-		ResumedFromHandoffID: resumedHandoffID(sourceHandoff),
+		ResumedFromStateID:   resumedStateID(sel.State),
+		ResumedFromHandoffID: resumedHandoffID(sel.Handoff),
 		Actor:                "cli:resume",
 	})
 	if err != nil {
 		return err
 	}
-	if sourceState != nil {
+	if sel.State != nil {
 		if _, err := wtstate.Close(env, wtstate.CloseOptions{
 			Scope:   scope,
-			ID:      sourceState.State.ID,
+			ID:      sel.State.State.ID,
 			Summary: "Superseded by worktrail resume.",
 			Actor:   "cli:resume-close-source",
 		}); err != nil {
 			return err
 		}
 	}
+	if _, err := recovery.WriteRecoveryDashboard(env, scope); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	if flagValue(flags, "format", "text") == "json" {
-		return json.NewEncoder(ioctx.Out).Encode(resumeResult{State: cap, SourceState: sourceState, SourceHandoff: sourceHandoff})
+		result := resumeResult{
+			State:           cap,
+			SourceState:     sel.State,
+			SourceHandoff:   sel.Handoff,
+			RecoverySource:  sel.SourceKind,
+			RecoveryQuality: sel.Quality,
+			DegradedReason:  sel.DegradedReason,
+		}
+		if sel.Runtime != nil {
+			result.RuntimePath = sel.Runtime.Path
+		}
+		return json.NewEncoder(ioctx.Out).Encode(result)
+	}
+	if sel.Quality == recovery.QualityDegraded {
+		fmt.Fprintf(ioctx.Out, "degraded\t%s\t%s\n", sel.SourceKind, sel.DegradedReason)
 	}
 	fmt.Fprintf(ioctx.Out, "%s\t%s\n", cap.State.ID, cap.Path)
 	return nil
@@ -84,7 +96,8 @@ func runResume(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 func printResumeHelp(out interface{ Write([]byte) (int, error) }) {
 	fmt.Fprintln(out, "usage: worktrail resume [--scope project|user] [--format text|json] [<task>]")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Creates a fresh active state from the latest active state and/or durable handoff.")
+	fmt.Fprintln(out, "Creates a fresh explicit session state from the prioritized recovery selector.")
+	fmt.Fprintln(out, "Manual handoffs and explicit session state rank above hook runtime artifacts.")
 }
 
 func resumeTaskID(sourceState *wtstate.Capsule, sourceHandoff *handoff.Record, title string) string {
@@ -113,52 +126,68 @@ func resumedHandoffID(sourceHandoff *handoff.Record) string {
 	return sourceHandoff.Meta.ID
 }
 
-func renderResumeStateBody(title string, sourceState *wtstate.Capsule, sourceStatePath string, sourceHandoff *handoff.Record) string {
+func renderResumeStateBody(title string, sel recovery.Selection) string {
 	var b strings.Builder
 	b.WriteString("# State Capsule: ")
 	b.WriteString(title)
-	b.WriteString("\n\n## Original Intent\n\nResume the task from the latest Worktrail records.\n\n")
-	b.WriteString("## Current Goal\n\n")
-	if sourceState != nil {
-		b.WriteString(sourceState.State.Title)
-	} else if sourceHandoff != nil {
-		b.WriteString(sourceHandoff.Meta.Title)
-	} else {
+	b.WriteString("\n\n## Original Intent\n\nResume the task from prioritized Worktrail recovery sources.\n\n")
+	b.WriteString("## Recovery Source\n\n")
+	fmt.Fprintf(&b, "- Kind: `%s`\n", sel.SourceKind)
+	fmt.Fprintf(&b, "- Quality: `%s`\n", sel.Quality)
+	if sel.Quality == recovery.QualityDegraded && strings.TrimSpace(sel.DegradedReason) != "" {
+		b.WriteString("- Degraded reason: ")
+		b.WriteString(sel.DegradedReason)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n## Current Goal\n\n")
+	switch {
+	case sel.Handoff != nil:
+		b.WriteString(sel.Handoff.Meta.Title)
+	case sel.State != nil:
+		b.WriteString(sel.State.State.Title)
+	case sel.Runtime != nil:
+		b.WriteString(sel.Title)
+	default:
 		b.WriteString(title)
 	}
-	b.WriteString("\n\n## Constraints\n\nRead the linked state and handoff documents directly before continuing.\n\n")
+	b.WriteString("\n\n## Constraints\n\nRead the linked records directly before continuing. Hook runtime artifacts are secondary recovery sources.\n\n")
 	b.WriteString("## Relevant Context\n\n")
-	if sourceState != nil {
-		path := sourceStatePath
-		if strings.TrimSpace(path) == "" {
-			path = sourceState.Path
-		}
-		fmt.Fprintf(&b, "- Prior active state: `%s`\n", filepathToSlash(path))
+	if sel.State != nil {
+		fmt.Fprintf(&b, "- Prior explicit session state: `%s`\n", filepathToSlash(sel.State.Path))
 	}
-	if sourceHandoff != nil {
-		fmt.Fprintf(&b, "- Latest handoff: `%s`\n", filepathToSlash(sourceHandoff.Path))
+	if sel.Handoff != nil {
+		fmt.Fprintf(&b, "- Latest manual handoff: `%s`\n", filepathToSlash(sel.Handoff.Path))
+	}
+	if sel.Runtime != nil {
+		fmt.Fprintf(&b, "- Runtime fallback artifact: `%s`\n", filepathToSlash(sel.Runtime.Path))
 	}
 	b.WriteString("\n## Evidence\n\nUse the linked records as the primary recovery source.\n\n")
 	b.WriteString("## Decisions Made\n\n## Assumptions\n\n## Ruled Out\n\n")
 	b.WriteString("## Work Done\n\n")
-	if sourceState != nil {
-		b.WriteString("See the prior state snapshot below.\n")
+	if sel.State != nil {
+		b.WriteString("See the prior explicit state snapshot below.\n")
+	} else if sel.Runtime != nil {
+		b.WriteString("See the runtime fallback snapshot below.\n")
 	}
 	b.WriteString("\n## Current Diff Intent\n\nContinue from the last validated point instead of recomputing context manually.\n\n")
 	b.WriteString("## Validation\n\n")
-	if sourceHandoff != nil && strings.TrimSpace(sourceHandoff.Meta.Summary) != "" {
-		b.WriteString(sourceHandoff.Meta.Summary)
+	if sel.Handoff != nil && strings.TrimSpace(sel.Handoff.Meta.Summary) != "" {
+		b.WriteString(sel.Handoff.Meta.Summary)
 	} else {
-		b.WriteString("Review the latest state and handoff validation notes before making changes.")
+		b.WriteString("Review the latest handoff, explicit state, or runtime fallback notes before making changes.")
 	}
 	b.WriteString("\n\n## Open Questions\n\n## Next Step\n\nRead the linked records, confirm the next safe action, and continue work.\n")
-	if sourceState != nil {
-		b.WriteString("\n\n## Prior State Snapshot\n\n")
-		b.WriteString(strings.TrimSpace(sourceState.Body))
+	if sel.State != nil {
+		b.WriteString("\n\n## Prior Explicit State Snapshot\n\n")
+		b.WriteString(strings.TrimSpace(sel.State.Body))
 	}
-	if sourceHandoff != nil {
+	if sel.Handoff != nil {
 		b.WriteString("\n\n## Latest Handoff\n\n")
-		b.WriteString(strings.TrimSpace(sourceHandoff.Body))
+		b.WriteString(strings.TrimSpace(sel.Handoff.Body))
+	}
+	if sel.Runtime != nil && sel.State == nil {
+		b.WriteString("\n\n## Runtime Fallback Snapshot\n\n")
+		b.WriteString(strings.TrimSpace(sel.Runtime.Body))
 	}
 	return b.String()
 }

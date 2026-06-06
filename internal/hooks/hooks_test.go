@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/nickdu2009/worktrail/internal/paths"
+	wtstate "github.com/nickdu2009/worktrail/internal/state"
 )
 
 func hookEnv(t *testing.T) paths.Env {
@@ -22,40 +23,42 @@ func hookEnv(t *testing.T) paths.Env {
 	}
 }
 
-func TestCodexStopCreatesStateAndRuntimeTakeoverNoteWithoutPromotion(t *testing.T) {
+func TestCodexStopCreatesRuntimeSessionAndTakeoverWithoutPromotion(t *testing.T) {
 	env := hookEnv(t)
 	fixture, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fixtures", "hooks", "codex_stop.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := Run(context.Background(), env, "codex", "stop", bytes.NewReader(fixture), &out); err != nil {
+	if err := Run(context.Background(), env, "codex", "Stop", bytes.NewReader(fixture), &out); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !strings.Contains(out.String(), `"runtime"`) {
 		t.Fatalf("expected runtime record in output: %s", out.String())
 	}
-	for _, path := range []string{
-		filepath.Join(env.ProjectWT, "state", "active", "latest.md"),
-		filepath.Join(env.ProjectWT, "logs", "events.jsonl"),
-	} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("expected %s: %v", path, err)
-		}
+	if _, err := os.Stat(filepath.Join(env.ProjectWT, "state", "active", "latest.md")); !os.IsNotExist(err) {
+		t.Fatalf("hook stop must not write primary active state, err=%v", err)
 	}
-	checkpoints, err := filepath.Glob(filepath.Join(env.ProjectWT, "state", "checkpoints", "*.md"))
+	checkpoints, err := filepath.Glob(filepath.Join(env.ProjectWT, "runtime", "checkpoints", "*.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(checkpoints) != 1 {
-		t.Fatalf("expected one runtime record, got %d", len(checkpoints))
+		t.Fatalf("expected one takeover runtime record, got %d", len(checkpoints))
 	}
 	data, err := os.ReadFile(checkpoints[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"type": "takeover_note"`) {
+	if !strings.Contains(string(data), `"runtime_type": "takeover_note"`) {
 		t.Fatalf("runtime takeover note metadata unexpected:\n%s", data)
+	}
+	sessions, err := filepath.Glob(filepath.Join(env.ProjectWT, "runtime", "sessions", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected one runtime session, got %d", len(sessions))
 	}
 	events, err := os.ReadFile(filepath.Join(env.ProjectWT, "logs", "events.jsonl"))
 	if err != nil {
@@ -69,7 +72,7 @@ func TestCodexStopCreatesStateAndRuntimeTakeoverNoteWithoutPromotion(t *testing.
 func TestMalformedInputStillLogsHookRun(t *testing.T) {
 	env := hookEnv(t)
 	var out bytes.Buffer
-	if err := Run(context.Background(), env, "claude", "post-tool-use", strings.NewReader("{not json"), &out); err != nil {
+	if err := Run(context.Background(), env, "claude", "Stop", strings.NewReader("{not json"), &out); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !strings.Contains(out.String(), "invalid json") {
@@ -81,6 +84,18 @@ func TestMalformedInputStillLogsHookRun(t *testing.T) {
 	}
 	if !strings.Contains(string(events), "hook.run") {
 		t.Fatalf("expected hook.run log:\n%s", events)
+	}
+}
+
+func TestLegacyEventShapesAreRejected(t *testing.T) {
+	env := hookEnv(t)
+	var out bytes.Buffer
+	err := Run(context.Background(), env, "claude", "pre-compact", strings.NewReader(`{"task":"legacy"}`), &out)
+	if err == nil {
+		t.Fatal("expected legacy event shape to be rejected")
+	}
+	if !strings.Contains(err.Error(), "unsupported claude hook event") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -112,18 +127,22 @@ func TestEventOnlyStopDoesNotOverwriteLatestState(t *testing.T) {
 	}
 }
 
-func TestStopWithCommandsButNoFollowupDoesNotCreateCandidate(t *testing.T) {
+func TestStopWithCommandsWritesRuntimeSessionNotPrimaryState(t *testing.T) {
 	env := hookEnv(t)
 	var out bytes.Buffer
 	payload := `{"task":"Investigate candidate inbox noise","commands":["go test ./internal/hooks"]}`
-	if err := Run(context.Background(), env, "codex", "stop", strings.NewReader(payload), &out); err != nil {
+	if err := Run(context.Background(), env, "codex", "Stop", strings.NewReader(payload), &out); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(env.ProjectWT, "state", "active", "latest.md")); err != nil {
-		t.Fatalf("expected latest state: %v", err)
+	if _, err := os.Stat(filepath.Join(env.ProjectWT, "state", "active", "latest.md")); !os.IsNotExist(err) {
+		t.Fatalf("hook stop must not write primary active state, err=%v", err)
 	}
-	if strings.Contains(out.String(), `"candidate"`) {
-		t.Fatalf("commands-only stop should not create a runtime record: %s", out.String())
+	sessions, err := filepath.Glob(filepath.Join(env.ProjectWT, "runtime", "sessions", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected one runtime session, got %d", len(sessions))
 	}
 	candidates, err := filepath.Glob(filepath.Join(env.ProjectWT, "candidates", "project", "cand_*.md"))
 	if err != nil {
@@ -134,17 +153,17 @@ func TestStopWithCommandsButNoFollowupDoesNotCreateCandidate(t *testing.T) {
 	}
 }
 
-func TestClaudePreCompactCreatesCheckpoint(t *testing.T) {
+func TestClaudePreCompactCreatesRuntimeCheckpoint(t *testing.T) {
 	env := hookEnv(t)
 	fixture, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fixtures", "hooks", "claude_session_end.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := Run(context.Background(), env, "claude", "pre-compact", bytes.NewReader(fixture), &out); err != nil {
+	if err := Run(context.Background(), env, "claude", "PreCompact", bytes.NewReader(fixture), &out); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	checkpoints, err := filepath.Glob(filepath.Join(env.ProjectWT, "state", "checkpoints", "*.md"))
+	checkpoints, err := filepath.Glob(filepath.Join(env.ProjectWT, "runtime", "checkpoints", "*.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,10 +182,10 @@ func TestClaudePreCompactCreatesCheckpoint(t *testing.T) {
 func TestPreCompactWithoutContextWritesUnavailableRecoverySummary(t *testing.T) {
 	env := hookEnv(t)
 	var out bytes.Buffer
-	if err := Run(context.Background(), env, "claude", "pre-compact", strings.NewReader(`{"event":"pre-compact"}`), &out); err != nil {
+	if err := Run(context.Background(), env, "claude", "PreCompact", strings.NewReader(`{"event":"pre-compact"}`), &out); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	checkpoints, err := filepath.Glob(filepath.Join(env.ProjectWT, "state", "checkpoints", "*.md"))
+	checkpoints, err := filepath.Glob(filepath.Join(env.ProjectWT, "runtime", "checkpoints", "*.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +204,7 @@ func TestPreCompactWithoutContextWritesUnavailableRecoverySummary(t *testing.T) 
 	}
 }
 
-func TestHookStateCanUseBoundedTranscriptContext(t *testing.T) {
+func TestHookRuntimeCanUseBoundedTranscriptContext(t *testing.T) {
 	env := hookEnv(t)
 	transcriptPath := filepath.Join(t.TempDir(), "codex.jsonl")
 	body := strings.Join([]string{
@@ -196,16 +215,23 @@ func TestHookStateCanUseBoundedTranscriptContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := Run(context.Background(), env, "codex", "pre-compact", strings.NewReader(`{"transcript_path":"`+filepath.ToSlash(transcriptPath)+`"}`), &out); err != nil {
+	if err := Run(context.Background(), env, "codex", "PreCompact", strings.NewReader(`{"transcript_path":"`+filepath.ToSlash(transcriptPath)+`"}`), &out); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	state, err := os.ReadFile(filepath.Join(env.ProjectWT, "state", "active", "latest.md"))
+	sessions, err := filepath.Glob(filepath.Join(env.ProjectWT, "runtime", "sessions", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected one runtime session, got %d", len(sessions))
+	}
+	state, err := os.ReadFile(sessions[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(state)
 	if !strings.Contains(text, "Implement bounded recovery context.") || !strings.Contains(text, "Ran go test ./internal/hooks") {
-		t.Fatalf("state missing transcript context:\n%s", text)
+		t.Fatalf("runtime session missing transcript context:\n%s", text)
 	}
 }
 
@@ -230,8 +256,12 @@ func TestCursorStopSanitizesDurablePayloadAndRecordsObservedTranscript(t *testin
 	if !strings.Contains(out.String(), "cursor transcript observed") {
 		t.Fatalf("expected observed transcript warning in output: %s", out.String())
 	}
-	if strings.Contains(out.String(), `"candidate"`) {
-		t.Fatalf("cursor stop with transcript-only signal should not create a runtime record: %s", out.String())
+	sessions, err := filepath.Glob(filepath.Join(env.ProjectWT, "runtime", "sessions", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected one runtime session from transcript context, got %d", len(sessions))
 	}
 	observed, err := filepath.Glob(filepath.Join(env.ProjectWT, "raw", "cursor", "observed-*.metadata.json"))
 	if err != nil {
@@ -247,12 +277,8 @@ func TestCursorStopSanitizesDurablePayloadAndRecordsObservedTranscript(t *testin
 	if !strings.Contains(string(registry), filepath.ToSlash(transcript)) {
 		t.Fatalf("registry should keep private transcript path for local import:\n%s", registry)
 	}
-	state, err := os.ReadFile(filepath.Join(env.ProjectWT, "state", "active", "latest.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(state), "hello") {
-		t.Fatalf("state should retain transcript-derived goal context:\n%s", state)
+	if _, err := os.Stat(filepath.Join(env.ProjectWT, "state", "active", "latest.md")); !os.IsNotExist(err) {
+		t.Fatalf("transcript-only stop must not write primary active state, err=%v", err)
 	}
 	candidates, err := filepath.Glob(filepath.Join(env.ProjectWT, "candidates", "project", "cand_*.md"))
 	if err != nil {
@@ -260,5 +286,33 @@ func TestCursorStopSanitizesDurablePayloadAndRecordsObservedTranscript(t *testin
 	}
 	if len(candidates) != 0 {
 		t.Fatalf("expected no candidate for transcript-only signal, got %d", len(candidates))
+	}
+}
+
+func TestHookStopDoesNotOverwriteExplicitActiveState(t *testing.T) {
+	env := hookEnv(t)
+	if _, err := wtstate.Start(env, wtstate.StartOptions{
+		Scope:      "project",
+		Title:      "Explicit CLI task",
+		Body:       "# State Capsule: Explicit CLI task\n\n## Next Step\nKeep explicit state intact.\n",
+		SourceTool: "worktrail",
+		Actor:      "cli:state-start",
+	}); err != nil {
+		t.Fatalf("Start explicit state: %v", err)
+	}
+	before, err := wtstate.LatestExplicit(env, "project")
+	if err != nil {
+		t.Fatalf("LatestExplicit: %v", err)
+	}
+	var out bytes.Buffer
+	if err := Run(context.Background(), env, "cursor", "stop", strings.NewReader(`{"task":"Hook chatter only","status":"completed"}`), &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	after, err := wtstate.LatestExplicit(env, "project")
+	if err != nil {
+		t.Fatalf("LatestExplicit after hook: %v", err)
+	}
+	if after.State.ID != before.State.ID || !strings.Contains(after.Body, "Keep explicit state intact") {
+		t.Fatalf("hook stop overwrote explicit active state:\n%s", after.Body)
 	}
 }

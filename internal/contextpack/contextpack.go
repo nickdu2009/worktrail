@@ -346,20 +346,21 @@ func sectionSpecsForStage(stage string, includeEvidence bool) []sectionSpec {
 		"validation":   {"Validation", func(e index.Entry) bool { return e.Type == "validation" }},
 		"glossary":     {"Glossary", func(e index.Entry) bool { return e.Type == "glossary" }},
 		"workflows":    {"Workflows", func(e index.Entry) bool { return e.Type == "workflow" }},
+		"recovery":     {"Recovery", func(e index.Entry) bool { return isRecoveryEntry(e) }},
 		"state":        {"Active State", func(e index.Entry) bool { return e.Type == "state" && e.Active }},
 		"decisions":    {"Decisions", func(e index.Entry) bool { return e.Type == "decision" }},
 		"handoffs":     {"Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }},
 		"rules":        {"Rules", func(e index.Entry) bool { return e.Type == "rule" }},
 		"pending":      {"Pending Candidates", func(e index.Entry) bool { return pendingCandidateVisible(e, includeEvidence) }},
 	}
-	order := []string{"state", "handoffs", "user", "project", "requirements", "architecture", "decisions", "validation", "rules", "workflows", "integrations", "glossary", "pending"}
+	order := []string{"handoffs", "recovery", "state", "user", "project", "requirements", "architecture", "decisions", "validation", "rules", "workflows", "integrations", "glossary", "pending"}
 	switch stage {
 	case "requirements":
-		order = []string{"state", "handoffs", "user", "project", "requirements", "decisions", "glossary", "architecture", "validation", "workflows", "rules", "integrations", "pending"}
+		order = []string{"handoffs", "recovery", "state", "user", "project", "requirements", "decisions", "glossary", "architecture", "validation", "workflows", "rules", "integrations", "pending"}
 	case "design":
-		order = []string{"state", "handoffs", "user", "project", "requirements", "architecture", "decisions", "glossary", "integrations", "validation", "rules", "workflows", "pending"}
+		order = []string{"handoffs", "recovery", "state", "user", "project", "requirements", "architecture", "decisions", "glossary", "integrations", "validation", "rules", "workflows", "pending"}
 	case "implementation":
-		order = []string{"state", "handoffs", "user", "project", "architecture", "validation", "rules", "workflows", "decisions", "requirements", "integrations", "glossary", "pending"}
+		order = []string{"handoffs", "recovery", "state", "user", "project", "architecture", "validation", "rules", "workflows", "decisions", "requirements", "integrations", "glossary", "pending"}
 	}
 	out := make([]sectionSpec, 0, len(order))
 	for _, key := range order {
@@ -389,6 +390,11 @@ func isKnowledge(typ string) bool {
 	default:
 		return false
 	}
+}
+
+func isRecoveryEntry(e index.Entry) bool {
+	rel := filepath.ToSlash(e.Path)
+	return strings.HasPrefix(rel, "runtime/") || strings.HasPrefix(rel, "state/checkpoints/")
 }
 
 func isProjectKnowledge(typ string) bool {

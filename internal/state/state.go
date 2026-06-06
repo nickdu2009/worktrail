@@ -410,6 +410,27 @@ func LatestActive(env paths.Env, scope string) (Capsule, error) {
 	return items[0], nil
 }
 
+func LatestExplicit(env paths.Env, scope string) (Capsule, error) {
+	items, err := List(env, ListOptions{Scope: scope, Directory: DirActive})
+	if err != nil {
+		return Capsule{}, err
+	}
+	for _, item := range items {
+		if isExplicitSession(item) {
+			return item, nil
+		}
+	}
+	return Capsule{}, os.ErrNotExist
+}
+
+func isExplicitSession(cap Capsule) bool {
+	tool := strings.TrimSpace(cap.State.SourceTool)
+	if tool == "" || tool == defaultSourceTool {
+		return true
+	}
+	return false
+}
+
 func TaskID(cap Capsule) string {
 	meta, err := decodeMetadata(cap.Metadata)
 	if err != nil {

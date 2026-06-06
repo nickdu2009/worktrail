@@ -106,11 +106,35 @@ func TestNormalizeObjectMetaLegacyState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormalizeObjectMeta() error = %v", err)
 	}
+	if obj.Schema != SchemaState {
+		t.Fatalf("unexpected normalized schema: %+v", obj)
+	}
+	if obj.ResumePriority != ResumePriorityExplicitSession || obj.SourceTool != "worktrail" {
+		t.Fatalf("unexpected explicit session metadata: %+v", obj)
+	}
+}
+
+func TestNormalizeObjectMetaLegacyHookCheckpoint(t *testing.T) {
+	meta := map[string]any{
+		"schema":      SchemaState,
+		"id":          "chk_1",
+		"scope":       "project",
+		"type":        "checkpoint",
+		"title":       "Checkpoint",
+		"status":      "active",
+		"source_tool": "cursor",
+		"created_at":  time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		"updated_at":  time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC).Format(time.RFC3339),
+	}
+	obj, err := NormalizeObjectMeta("state/checkpoints/20260605-stop.md", meta)
+	if err != nil {
+		t.Fatalf("NormalizeObjectMeta() error = %v", err)
+	}
 	if obj.Schema != SchemaRuntimeV2 || obj.ObjectKind != ObjectKindRuntime {
 		t.Fatalf("unexpected normalized schema/kind: %+v", obj)
 	}
-	if obj.RuntimeType != RuntimeTypeSessionState {
-		t.Fatalf("RuntimeType = %q", obj.RuntimeType)
+	if obj.RuntimeType != RuntimeTypeCheckpoint || obj.ResumePriority != ResumePriorityRuntimeCheckpoint {
+		t.Fatalf("unexpected checkpoint metadata: %+v", obj)
 	}
 }
 

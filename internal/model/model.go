@@ -18,6 +18,13 @@ const (
 	CandidateTypeMigrationSource = "migration_source"
 )
 
+const (
+	ResumePriorityManualHandoff      = "manual_handoff"
+	ResumePriorityExplicitSession    = "explicit_session"
+	ResumePriorityRuntimeCheckpoint  = "runtime_checkpoint"
+	ResumePriorityHookRuntimeState   = "hook_runtime_state"
+)
+
 type Knowledge struct {
 	Schema         string    `json:"schema"`
 	ID             string    `json:"id"`

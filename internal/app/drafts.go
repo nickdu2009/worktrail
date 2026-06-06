@@ -88,7 +88,7 @@ func printHandoffRecord(ioctx IO, rec handoff.Record, format string) error {
 }
 
 func latestStateIfAny(env paths.Env, scope string) (*wtstate.Capsule, error) {
-	cap, err := wtstate.LatestActive(env, scope)
+	cap, err := wtstate.LatestExplicit(env, scope)
 	if err == nil {
 		return &cap, nil
 	}

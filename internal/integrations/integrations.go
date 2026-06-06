@@ -349,8 +349,8 @@ func uninstallScope(cfg integrationConfig, scope string, report *Report) error {
 		}
 		report.Actions = append(report.Actions, Action{Path: path, Action: "managed-block-removed"})
 	}
-	if scope == "project" && cfg.projectJSONPath != "" {
-		if err := removeJSONWorktrail(cfg.projectJSONPath); err != nil {
+	if scope == "project" && cfg.projectJSONPath != "" && cfg.projectJSONTmpl != "" {
+		if err := removeJSONTemplate(cfg.projectJSONPath, cfg.projectJSONTmpl); err != nil {
 			return err
 		}
 		if err := removeLegacyMCPConfig(cfg.projectJSONPath); err != nil {
@@ -404,7 +404,7 @@ func doctorScope(cfg integrationConfig, scope string, report *Report) {
 	if scope == "project" && cfg.projectJSONPath != "" {
 		projectRoot := filepath.Dir(filepath.Dir(cfg.projectJSONPath))
 		report.Checks = append(report.Checks, hashManagedCheck(scope+" gitignore", filepath.Join(projectRoot, ".gitignore")))
-		ok, note := jsonHasWorktrail(cfg.projectJSONPath)
+		ok, note := jsonHasTemplate(cfg.projectJSONPath, cfg.projectJSONTmpl)
 		report.Checks = append(report.Checks, Check{Name: scope + " hooks/settings", Path: cfg.projectJSONPath, OK: ok, Note: note})
 		report.Checks = append(report.Checks, worktrailWritableChecks(projectRoot)...)
 	}
@@ -428,7 +428,9 @@ func worktrailWritableChecks(projectRoot string) []Check {
 	var checks []Check
 	for _, rel := range []string{
 		filepath.Join("state", "active"),
-		filepath.Join("state", "checkpoints"),
+		filepath.Join("runtime", "sessions"),
+		filepath.Join("runtime", "checkpoints"),
+		filepath.Join("runtime", "recovery"),
 		filepath.Join("candidates"),
 		"logs",
 	} {

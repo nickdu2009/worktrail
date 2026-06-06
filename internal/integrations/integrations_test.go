@@ -96,8 +96,9 @@ func TestInstallCodexProjectManagesHooksAndGitignoreOnly(t *testing.T) {
 	if _, ok := cfg["existing"]; !ok {
 		t.Fatalf("existing JSON key was not preserved: %s", raw)
 	}
-	if _, ok := cfg["worktrail"]; !ok {
-		t.Fatalf("worktrail JSON key missing: %s", raw)
+	hookCfg, ok := cfg["hooks"].(map[string]any)
+	if !ok || hookCfg["Stop"] == nil {
+		t.Fatalf("official hooks JSON missing: %s", raw)
 	}
 	gitignore := filepath.Join(env.ProjectRoot, ".gitignore")
 	raw, err = os.ReadFile(gitignore)
@@ -137,8 +138,8 @@ func TestInstallCodexProjectManagesHooksAndGitignoreOnly(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := cfg["worktrail"]; ok {
-		t.Fatalf("worktrail JSON key still present: %s", raw)
+	if hookCfg, ok := cfg["hooks"].(map[string]any); ok && hookCfg["Stop"] != nil {
+		t.Fatalf("official hooks JSON still present: %s", raw)
 	}
 	if _, ok := cfg["existing"]; !ok {
 		t.Fatalf("existing JSON key was removed: %s", raw)

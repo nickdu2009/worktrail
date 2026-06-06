@@ -193,10 +193,10 @@ func runState(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 }
 
 func latestStateID(env paths.Env, scope string) (string, error) {
-	cap, err := wtstate.LatestActive(env, scope)
+	cap, err := wtstate.LatestExplicit(env, scope)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", errors.New("no active state found")
+			return "", errors.New("no explicit active state found")
 		}
 		return "", err
 	}

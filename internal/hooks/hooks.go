@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,10 +13,8 @@ import (
 	"time"
 
 	wlog "github.com/nickdu2009/worktrail/internal/log"
-	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
-	wtstate "github.com/nickdu2009/worktrail/internal/state"
-	"github.com/nickdu2009/worktrail/internal/store"
+	"github.com/nickdu2009/worktrail/internal/runtime"
 	"github.com/nickdu2009/worktrail/internal/transcript"
 	"github.com/nickdu2009/worktrail/internal/util"
 )
@@ -26,9 +23,8 @@ type Result struct {
 	Tool       string   `json:"tool"`
 	Event      string   `json:"event"`
 	OK         bool     `json:"ok"`
-	State      string   `json:"state,omitempty"`
-	Checkpoint string   `json:"checkpoint,omitempty"`
 	Runtime    string   `json:"runtime,omitempty"`
+	Checkpoint string   `json:"checkpoint,omitempty"`
 	Warnings   []string `json:"warnings,omitempty"`
 }
 
@@ -42,7 +38,7 @@ func Run(ctx context.Context, env paths.Env, tool, event string, in io.Reader, o
 	result := Result{Tool: tool, Event: event, OK: true, Warnings: warnings}
 	root := env.ProjectWT
 	actor := "hook:" + tool + "-" + event
-	if err := ensureWorktrail(root); err != nil {
+	if err := runtime.EnsureDirs(root); err != nil {
 		return err
 	}
 	if tool == "cursor" {
@@ -60,28 +56,32 @@ func Run(ctx context.Context, env paths.Env, tool, event string, in io.Reader, o
 		return err
 	}
 
-	eventKey := normalizeEvent(event)
+	eventKey, err := normalizeEvent(tool, event)
+	if err != nil {
+		return err
+	}
 	switch eventKey {
 	case "stop", "pre-compact", "post-compact", "session-end":
 		hc := hookContextFromPayload(tool, payload)
-		statePath, err := writeState(env, tool, eventKey, payload, hc)
+		recorder := runtime.NewRecorder(root)
+		sessionPath, err := writeRuntimeSession(recorder, tool, eventKey, payload, hc, actor)
 		if err != nil {
 			return err
 		}
-		result.State = statePath
+		result.Runtime = sessionPath
 		if eventKey == "pre-compact" || eventKey == "post-compact" {
-			checkpoint, err := writeCheckpoint(env, tool, eventKey, payload, statePath, hc)
+			checkpoint, err := writeRuntimeCheckpoint(recorder, tool, eventKey, payload, sessionPath, hc, actor)
 			if err != nil {
 				return err
 			}
 			result.Checkpoint = checkpoint
 		}
-		if (eventKey == "stop" || eventKey == "session-end") && shouldCreateOperationalHandoff(hc) {
-			runtimePath, err := writeOperationalRuntime(env, tool, eventKey, payload, statePath, hc)
+		if (eventKey == "stop" || eventKey == "session-end") && shouldCreateTakeoverNote(hc) {
+			takeover, err := writeRuntimeTakeover(recorder, tool, eventKey, payload, sessionPath, hc, actor)
 			if err != nil {
 				return err
 			}
-			result.Runtime = runtimePath
+			result.Runtime = takeover
 		}
 	}
 	if out != nil {
@@ -116,107 +116,75 @@ func readPayload(in io.Reader) (map[string]any, []string) {
 	return payload, nil
 }
 
-func ensureWorktrail(root string) error {
-	return paths.EnsureDirs(
-		filepath.Join(root, "state", "active"),
-		filepath.Join(root, "state", "checkpoints"),
-		filepath.Join(root, "raw", "cursor"),
-		filepath.Join(root, "logs"),
-	)
-}
-
-func writeState(env paths.Env, tool, event string, payload map[string]any, hc hookContext) (string, error) {
+func writeRuntimeSession(recorder runtime.Recorder, tool, event string, payload map[string]any, hc hookContext, actor string) (string, error) {
 	if !hc.HasSignal {
 		return "", nil
 	}
 	title := titleFromHookContext(hc, event)
 	session := sessionFromPayload(tool, payload)
-	body := stateBody(title, tool, event, durablePayload(tool, payload), hc)
-	active, err := wtstate.LatestActive(env, "project")
-	if err == nil {
-		updated, err := wtstate.Update(env, wtstate.UpdateOptions{
-			Scope:          "project",
-			ID:             active.State.ID,
-			SourceSessions: optionalList(session),
-			ReplaceBody:    &body,
-			Actor:          "hook:" + tool + "-" + event,
-		})
-		if err != nil {
-			return "", err
-		}
-		return updated.Path, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	cap, err := wtstate.Start(env, wtstate.StartOptions{
-		Scope:          "project",
-		TaskID:         "task-" + util.Slug(title),
-		Type:           "implementation",
-		Title:          title,
-		SourceTool:     sourceTool(tool),
-		SourceSessions: optionalList(session),
-		Tags:           []string{tool, event},
-		Body:           body,
-		Actor:          "hook:" + tool + "-" + event,
+	body := runtimeSessionBody(title, tool, event, durablePayload(tool, payload), hc)
+	record, err := recorder.WriteSession(runtime.WriteOptions{
+		Scope:      "project",
+		Title:      title,
+		Body:       body,
+		SessionID:  session,
+		TaskID:     "task-" + util.Slug(title),
+		SourceTool: sourceTool(tool),
+		Event:      event,
+		Tags:       []string{tool, event, "hook"},
+		Actor:      actor,
+		FileSuffix: time.Now().UTC().Format("20060102-150405") + "-" + event,
 	})
 	if err != nil {
 		return "", err
 	}
-	return cap.Path, nil
+	return record.Path, nil
 }
 
-func writeCheckpoint(env paths.Env, tool, event string, payload map[string]any, statePath string, hc hookContext) (string, error) {
-	return writeRuntimeRecord(env, tool, event, payload, statePath, hc, "checkpoint")
-}
-
-func writeRuntimeRecord(env paths.Env, tool, event string, payload map[string]any, statePath string, hc hookContext, recordType string) (string, error) {
-	now := time.Now()
+func writeRuntimeCheckpoint(recorder runtime.Recorder, tool, event string, payload map[string]any, sessionPath string, hc hookContext, actor string) (string, error) {
 	title := titleFromHookContext(hc, event)
-	safePayload := durablePayload(tool, payload)
-	meta := map[string]any{
-		"schema":      model.SchemaState,
-		"id":          "chk_" + now.Format("20060102_150405") + "_" + util.Slug(title),
-		"scope":       "project",
-		"type":        recordType,
-		"title":       title,
-		"status":      "active",
-		"source_tool": sourceTool(tool),
-		"created_at":  now,
-		"updated_at":  now,
-		"tags":        []string{tool, event, recordType},
-	}
-	bodyHeading := "Checkpoint"
-	if recordType == "takeover_note" {
-		bodyHeading = "Takeover Note"
-	}
-	body := "# " + bodyHeading + ": " + title + "\n\n" +
-		"## Source State\n" + sourceStateSummary(statePath) + "\n\n" +
-		"## Recovery Summary\n" + recoverySummary(hc) + "\n\n" +
-		"## Event\n" + event + "\n\n" +
-		"## Payload Summary\n" + payloadSummary(safePayload) + "\n"
-	data, err := store.RenderMarkdown(meta, body)
+	body := checkpointBody(title, tool, event, durablePayload(tool, payload), sessionPath, hc)
+	record, err := recorder.WriteCheckpoint(runtime.WriteOptions{
+		Scope:      "project",
+		Title:      title,
+		Body:       body,
+		SessionID:  sessionFromPayload(tool, payload),
+		SourceTool: sourceTool(tool),
+		Event:      event,
+		Tags:       []string{tool, event, "checkpoint"},
+		Actor:      actor,
+		FileSuffix: time.Now().UTC().Format("20060102-150405") + "-" + event,
+	})
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(env.ProjectWT, "state", "checkpoints", now.Format("20060102-150405")+"-"+event+".md")
-	if err := util.AtomicWrite(path, data, 0o644); err != nil {
-		return "", err
-	}
-	if err := wlog.Append(env.ProjectWT, "state.checkpoint", meta["id"].(string), "hook:"+tool+"-"+event, map[string]any{"path": path}); err != nil {
-		return "", err
-	}
-	return path, nil
+	return record.Path, nil
 }
 
-func writeOperationalRuntime(env paths.Env, tool, event string, payload map[string]any, statePath string, hc hookContext) (string, error) {
-	if strings.TrimSpace(statePath) == "" {
+func writeRuntimeTakeover(recorder runtime.Recorder, tool, event string, payload map[string]any, sessionPath string, hc hookContext, actor string) (string, error) {
+	if strings.TrimSpace(sessionPath) == "" {
 		return "", nil
 	}
-	return writeRuntimeRecord(env, tool, event+"-takeover", payload, statePath, hc, "takeover_note")
+	title := titleFromHookContext(hc, event)
+	body := takeoverBody(title, tool, event+"-takeover", durablePayload(tool, payload), sessionPath, hc)
+	record, err := recorder.WriteTakeoverNote(runtime.WriteOptions{
+		Scope:      "project",
+		Title:      title,
+		Body:       body,
+		SessionID:  sessionFromPayload(tool, payload),
+		SourceTool: sourceTool(tool),
+		Event:      event + "-takeover",
+		Tags:       []string{tool, event, "takeover_note"},
+		Actor:      actor,
+		FileSuffix: time.Now().UTC().Format("20060102-150405") + "-" + event + "-takeover",
+	})
+	if err != nil {
+		return "", err
+	}
+	return record.Path, nil
 }
 
-func shouldCreateOperationalHandoff(hc hookContext) bool {
+func shouldCreateTakeoverNote(hc hookContext) bool {
 	if !hc.HasSignal {
 		return false
 	}
@@ -226,26 +194,33 @@ func shouldCreateOperationalHandoff(hc hookContext) bool {
 	return strings.TrimSpace(hc.CurrentGoal) != "" && strings.TrimSpace(hc.RecentAssistant) != ""
 }
 
-func stateBody(title, tool, event string, payload map[string]any, hc hookContext) string {
-	return "# State Capsule: " + title + "\n\n" +
+func runtimeSessionBody(title, tool, event string, payload map[string]any, hc hookContext) string {
+	return "# Runtime Session: " + title + "\n\n" +
 		"## Original Intent\nCaptured from " + tool + " hook event `" + event + "`.\n\n" +
 		"## Current Goal\n" + valueOrUnknown(hc.CurrentGoal) + "\n\n" +
-		"## Constraints\nHooks may create runtime records (state and checkpoints) plus logs, but never promote durable knowledge.\n\n" +
+		"## Constraints\nHooks write runtime-only artifacts and audit logs. They never promote durable knowledge or overwrite explicit session state.\n\n" +
 		"## Relevant Context\n" + valueOrUnknown(hc.RecentAssistant) + "\n\n" +
 		"## Evidence\n" + payloadSummary(payload) + "\n\n" +
 		"## Work Done\n" + valueOrUnknown(hc.WorkDone) + "\n\n" +
 		"## Validation\n" + valueOrUnknown(hc.Validation) + "\n\n" +
-		"## Open Questions\nReview generated candidates before promotion.\n\n" +
-		"## Next Step\n" + valueOrDefault(hc.NextStep, "Run `/worktrail-review` when ready to inspect pending candidates.") + "\n"
+		"## Open Questions\nTreat this as degraded recovery unless a manual handoff or explicit session state exists.\n\n" +
+		"## Next Step\n" + valueOrDefault(hc.NextStep, "Run `worktrail resume` or `worktrail handoff` before continuing substantial work.") + "\n"
 }
 
-func titleFromPayload(payload map[string]any, fallback string) string {
-	for _, key := range []string{"task", "prompt", "message", "summary", "transcript_summary"} {
-		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return "Worktrail " + fallback
+func checkpointBody(title, tool, event string, payload map[string]any, sessionPath string, hc hookContext) string {
+	return "# Checkpoint: " + title + "\n\n" +
+		"## Source Runtime Session\n" + sourceSessionSummary(sessionPath) + "\n\n" +
+		"## Recovery Summary\n" + recoverySummary(hc) + "\n\n" +
+		"## Event\n" + event + "\n\n" +
+		"## Payload Summary\n" + payloadSummary(payload) + "\n"
+}
+
+func takeoverBody(title, tool, event string, payload map[string]any, sessionPath string, hc hookContext) string {
+	return "# Takeover Note: " + title + "\n\n" +
+		"## Source Runtime Session\n" + sourceSessionSummary(sessionPath) + "\n\n" +
+		"## Recovery Summary\n" + recoverySummary(hc) + "\n\n" +
+		"## Event\n" + event + "\n\n" +
+		"## Payload Summary\n" + payloadSummary(payload) + "\n"
 }
 
 type hookContext struct {
@@ -264,7 +239,7 @@ func hookContextFromPayload(tool string, payload map[string]any) hookContext {
 		RecentAssistant: firstPayloadString(payload, "transcript_summary", "summary"),
 		Validation:      payloadStringList(payload, "commands"),
 	}
-	if hc.CurrentGoal != "" || hc.RecentAssistant != "" {
+	if hc.CurrentGoal != "" || hc.RecentAssistant != "" || hc.Validation != "" {
 		hc.HasSignal = true
 	}
 	if path := firstPayloadString(payload, "transcript_path", "transcript_file", "session_path"); path != "" {
@@ -326,7 +301,7 @@ func transcriptTailContext(tool, path string) (hookContext, error) {
 			hc.WorkDone = compactText(msg.Content, 300)
 		}
 	}
-	hc.HasSignal = hc.CurrentGoal != "" || hc.RecentAssistant != ""
+	hc.HasSignal = hc.CurrentGoal != "" || hc.RecentAssistant != "" || hc.Validation != ""
 	return hc, nil
 }
 
@@ -340,11 +315,11 @@ func titleFromHookContext(hc hookContext, fallback string) string {
 	return "Worktrail " + fallback
 }
 
-func sourceStateSummary(statePath string) string {
-	if strings.TrimSpace(statePath) == "" {
-		return "No active state was written because no meaningful task context was available."
+func sourceSessionSummary(sessionPath string) string {
+	if strings.TrimSpace(sessionPath) == "" {
+		return "No runtime session was written because no meaningful task context was available."
 	}
-	return statePath
+	return sessionPath
 }
 
 func recoverySummary(hc hookContext) string {
@@ -361,7 +336,7 @@ func recoverySummary(hc hookContext) string {
 	b.WriteString("\n- Validation: ")
 	b.WriteString(valueOrUnknown(hc.Validation))
 	b.WriteString("\n- Next safe action: ")
-	b.WriteString(valueOrDefault(hc.NextStep, "Review the latest state, checkpoint, and pending candidates."))
+	b.WriteString(valueOrDefault(hc.NextStep, "Review the latest handoff or explicit session state before continuing."))
 	return b.String()
 }
 
@@ -444,13 +419,6 @@ func sourceTool(tool string) string {
 	}
 }
 
-func optionalList(value string) []string {
-	if value == "" {
-		return nil
-	}
-	return []string{value}
-}
-
 func payloadSummary(payload map[string]any) string {
 	if len(payload) == 0 {
 		return "No hook payload was provided.\n"
@@ -484,16 +452,44 @@ func Main(ctx context.Context, env paths.Env, args []string, in io.Reader, out i
 	return Run(ctx, env, args[0], args[1], in, out)
 }
 
-func normalizeEvent(event string) string {
-	switch event {
-	case "preCompact":
-		return "pre-compact"
-	case "postCompact":
-		return "post-compact"
-	case "sessionEnd":
-		return "session-end"
+func normalizeEvent(tool, event string) (string, error) {
+	event = strings.TrimSpace(event)
+	switch tool {
+	case "cursor":
+		switch event {
+		case "sessionStart":
+			return "session-start", nil
+		case "preCompact":
+			return "pre-compact", nil
+		case "postCompact":
+			return "post-compact", nil
+		case "stop":
+			return "stop", nil
+		case "sessionEnd":
+			return "session-end", nil
+		}
+		return "", fmt.Errorf("unsupported cursor hook event %q; expected one of sessionStart, preCompact, postCompact, stop, sessionEnd", event)
+	case "claude", "codex":
+		switch event {
+		case "SessionStart":
+			return "session-start", nil
+		case "PreCompact":
+			return "pre-compact", nil
+		case "PostCompact":
+			return "post-compact", nil
+		case "Stop":
+			return "stop", nil
+		case "SessionEnd":
+			if tool == "claude" {
+				return "session-end", nil
+			}
+		}
+		if tool == "claude" {
+			return "", fmt.Errorf("unsupported claude hook event %q; expected one of SessionStart, PreCompact, PostCompact, Stop, SessionEnd", event)
+		}
+		return "", fmt.Errorf("unsupported codex hook event %q; expected one of SessionStart, PreCompact, PostCompact, Stop", event)
 	default:
-		return event
+		return "", fmt.Errorf("unknown hook tool %q", tool)
 	}
 }
 

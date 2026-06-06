@@ -510,7 +510,7 @@ func buildEntry(root, path, rel, scope string) (Entry, bool, error) {
 		Tags:          stringSliceMeta(meta, "tags"),
 		Content:       strings.TrimSpace(body),
 		UpdatedAt:     timeMeta(meta, "updated_at", info.ModTime().UTC()),
-		Active:        rel == "current-state.md" || strings.HasPrefix(rel, "state/active/"),
+		Active:        activeEntryPath(rel),
 	}
 	entry.SourceSessions = stringSliceMeta(meta, "source_sessions")
 	entry.CandidateType = stringMeta(meta, "candidate_type", "")
@@ -539,7 +539,7 @@ func buildEntry(root, path, rel, scope string) (Entry, bool, error) {
 		if entry.CandidateType == "" {
 			entry.CandidateType = entryCandidateTypeFromObject(norm)
 		}
-		entry.Active = entry.Active || activeRuntimeEntry(norm)
+		entry.Active = activeEntry(norm, rel, entry.Active)
 	}
 	if entry.Scope == "" {
 		entry.Scope = scope
@@ -609,7 +609,7 @@ func inferType(rel string, meta map[string]any) string {
 		return "workflow"
 	case strings.HasPrefix(rel, "lessons/"):
 		return "lesson"
-	case rel == "current-state.md":
+	case strings.HasPrefix(rel, "runtime/"):
 		return "state"
 	case rel == "project.md":
 		return "project"
@@ -623,6 +623,13 @@ func inferType(rel string, meta map[string]any) string {
 }
 
 func entryTypeFromObject(meta model.ObjectMetaV2, rel string) string {
+	rel = filepath.ToSlash(strings.TrimSpace(rel))
+	if strings.HasPrefix(rel, "state/active/") || meta.ResumePriority == model.ResumePriorityExplicitSession {
+		return "state"
+	}
+	if strings.HasPrefix(rel, "runtime/") || strings.HasPrefix(rel, "state/checkpoints/") {
+		return "state"
+	}
 	switch {
 	case meta.IsKnowledgeDoc():
 		if meta.KnowledgeType != "" {
@@ -659,10 +666,27 @@ func entryCandidateTypeFromObject(meta model.ObjectMetaV2) string {
 	}
 }
 
-func activeRuntimeEntry(meta model.ObjectMetaV2) bool {
-	return meta.IsRuntimeRecord() &&
-		meta.RuntimeType == model.RuntimeTypeSessionState &&
-		(meta.LifecycleStatus == model.LifecycleActive || meta.LifecycleStatus == model.LifecycleCurrent)
+func activeEntryPath(rel string) bool {
+	rel = filepath.ToSlash(strings.TrimSpace(rel))
+	return strings.HasPrefix(rel, "state/active/") && rel != "state/active/latest.md"
+}
+
+func activeEntry(meta model.ObjectMetaV2, rel string, fallback bool) bool {
+	rel = filepath.ToSlash(strings.TrimSpace(rel))
+	if strings.HasPrefix(rel, "runtime/") || strings.HasPrefix(rel, "state/checkpoints/") {
+		return false
+	}
+	if !strings.HasPrefix(rel, "state/active/") || rel == "state/active/latest.md" {
+		return false
+	}
+	tool := strings.TrimSpace(meta.SourceTool)
+	if tool != "" && tool != "worktrail" {
+		return false
+	}
+	if meta.IsRuntimeRecord() && meta.ResumePriority == model.ResumePriorityHookRuntimeState {
+		return false
+	}
+	return fallback
 }
 
 func normalizeEntryStatus(status string, meta model.ObjectMetaV2) string {
@@ -733,7 +757,7 @@ func knowledgeTypeFallback(rel string) string {
 		return "workflow"
 	case strings.HasPrefix(rel, "lessons/"):
 		return "lesson"
-	case rel == "current-state.md":
+	case strings.HasPrefix(rel, "runtime/"):
 		return "state"
 	case rel == "log.md":
 		return "log"
