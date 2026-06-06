@@ -2,7 +2,7 @@
 
 Last updated: 2026-06-06
 
-Status: proposed
+Status: implemented
 
 ## Summary
 
@@ -166,17 +166,11 @@ Each scope gets its own SQLite database:
 - project scope: `.worktrail/index/index.sqlite`
 - user scope: `<user-worktrail-root>/index/index.sqlite`
 
-JSON manifest compatibility can remain temporarily during migration, but SQLite
-becomes the authoritative acceleration layer for indexing commands.
+SQLite is the only authoritative acceleration layer for indexing commands.
 
-For compatibility, the first SQLite release should keep emitting the existing
-status-style machine contract:
-
-- `index_path` points to `index.sqlite`
-- `manifest.json` remains available as a lightweight compatibility artifact until
-  a separate migration explicitly retires it
-- status and diff JSON should not silently drop fields that existing callers may
-  parse today
+Status and diff JSON continue to expose machine-readable fields such as
+`index_path`, which points to `index.sqlite`. Legacy JSON `index.db` and
+`manifest.json` artifacts are not read or written.
 
 ### Driver And Build Contract
 
@@ -625,8 +619,9 @@ with rebuild results on the same fixture set.
    capped to reduce database growth?
 2. Should the project dictionary be purely derived, or should Worktrail support
    an optional checked-in domain dictionary later?
-3. Should `search --scope all` merge results in Go only, or should a later
-   version support temporary `ATTACH`-based cross-database queries?
+3. Resolved: `search --scope all` merges project and user results in Go,
+   ranks them globally by score, and returns the top 20. Cross-database
+   `ATTACH` is not planned for the first release.
 
 ## Decision
 

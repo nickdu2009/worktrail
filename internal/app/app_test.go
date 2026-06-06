@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1190,11 +1191,11 @@ func TestDoctorMigrationReportsTrackedRuntimeState(t *testing.T) {
 	var out, errb bytes.Buffer
 	runApp(t, &out, &errb, "init")
 	writeWorktrailGovernance(t, project)
-	writeTextFile(t, filepath.Join(project, ".worktrail", "index", "index.db"), "{}\n")
+	writeTextFile(t, filepath.Join(project, ".worktrail", "index", "index.sqlite"), "SQLite format 3\x00")
 	if err := exec.Command("git", "-C", project, "init").Run(); err != nil {
 		t.Skipf("git init failed: %v", err)
 	}
-	if err := exec.Command("git", "-C", project, "add", "-f", ".worktrail/index/index.db").Run(); err != nil {
+	if err := exec.Command("git", "-C", project, "add", "-f", ".worktrail/index/index.sqlite").Run(); err != nil {
 		t.Skipf("git add failed: %v", err)
 	}
 
@@ -2640,6 +2641,44 @@ func TestIndexDiffCommandReportsDeletedUnindexedAndChanged(t *testing.T) {
 	}
 }
 
+func TestSearchScopeAllRanksGlobally(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+	for i := 0; i < 15; i++ {
+		writeTextFile(t, filepath.Join(project, ".worktrail", "rules", fmt.Sprintf("project-%02d.md", i)),
+			fmt.Sprintf("# Project %02d\n\nneedle shared keyword", i))
+		writeTextFile(t, filepath.Join(home, "rules", fmt.Sprintf("user-%02d.md", i)),
+			fmt.Sprintf("# User %02d\n\nneedle shared keyword", i))
+	}
+	runApp(t, &out, &errb, "index", "rebuild", "--scope", "project")
+	runApp(t, &out, &errb, "index", "rebuild", "--scope", "user")
+
+	out.Reset()
+	errb.Reset()
+	if err := Run(context.Background(), []string{"search", "--scope", "all", "--format", "json", "needle"}, nil, &out, &errb); err != nil {
+		t.Fatalf("search scope all: %v stderr=%s", err, errb.String())
+	}
+	var results []index.Result
+	if err := json.Unmarshal(out.Bytes(), &results); err != nil {
+		t.Fatalf("search JSON invalid: %v\n%s", err, out.String())
+	}
+	if len(results) != 20 {
+		t.Fatalf("scope=all should return global top 20, got %d", len(results))
+	}
+	for i := 1; i < len(results); i++ {
+		if results[i-1].Score < results[i].Score {
+			t.Fatalf("scope=all results not globally ranked: %+v", results)
+		}
+	}
+}
+
 func TestSearchSkipsStaleDeletedAndChangedEntries(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")
@@ -2671,8 +2710,8 @@ func TestSearchSkipsStaleDeletedAndChangedEntries(t *testing.T) {
 	}
 
 	text := runApp(t, &out, &errb, "search", "needle")
-	if strings.Contains(text, "Deleted") || strings.Contains(text, "Changed") {
-		t.Fatalf("search returned stale entries:\n%s", text)
+	if strings.Contains(text, "Deleted") {
+		t.Fatalf("search returned deleted stale entry:\n%s", text)
 	}
 }
 

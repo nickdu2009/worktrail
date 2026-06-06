@@ -1,27 +1,16 @@
 package index
 
 import (
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/nickdu2009/worktrail/internal/knowledge"
-	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
-	"github.com/nickdu2009/worktrail/internal/store"
-	"github.com/nickdu2009/worktrail/internal/util"
 )
 
-const (
-	DBFile       = "index.db"
-	ManifestFile = "manifest.json"
-)
 
 type Entry struct {
 	Schema         string    `json:"schema"`
@@ -60,12 +49,11 @@ type Manifest struct {
 }
 
 type StatusInfo struct {
-	Exists       bool      `json:"exists"`
-	Scope        string    `json:"scope,omitempty"`
-	GeneratedAt  time.Time `json:"generated_at,omitempty"`
-	IndexPath    string    `json:"index_path"`
-	ManifestPath string    `json:"manifest_path"`
-	Entries      int       `json:"entries"`
+	Exists      bool      `json:"exists"`
+	Scope       string    `json:"scope,omitempty"`
+	GeneratedAt time.Time `json:"generated_at,omitempty"`
+	IndexPath   string    `json:"index_path"`
+	Entries     int       `json:"entries"`
 }
 
 type DiffSummary struct {
@@ -135,53 +123,15 @@ type Result struct {
 	Score float64 `json:"score"`
 }
 
+func Refresh(root string) error {
+	return refreshSQLite(root, defaultTokenizer)
+}
+
 func Rebuild(root string, opts RebuildOptions) (Manifest, error) {
 	if root == "" {
 		return Manifest{}, errors.New("index root is required")
 	}
-	root, err := filepath.Abs(root)
-	if err != nil {
-		return Manifest{}, err
-	}
-	now := opts.Now
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
-	scope := opts.Scope
-	if scope == "" {
-		scope = inferScope(root)
-	}
-	entries, err := scan(root, scope)
-	if err != nil {
-		return Manifest{}, err
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Path < entries[j].Path
-	})
-	db := DB{Schema: "worktrail.index.db.v1", GeneratedAt: now, Entries: entries}
-	dbBytes, err := json.MarshalIndent(db, "", "  ")
-	if err != nil {
-		return Manifest{}, err
-	}
-	indexPath := filepath.Join(root, "index", DBFile)
-	if err := util.AtomicWrite(indexPath, append(dbBytes, '\n'), 0o644); err != nil {
-		return Manifest{}, err
-	}
-	manifest := Manifest{
-		Schema:      "worktrail.index.manifest.v1",
-		Scope:       scope,
-		GeneratedAt: now,
-		IndexPath:   filepath.ToSlash(filepath.Join("index", DBFile)),
-		Entries:     len(entries),
-	}
-	manifestBytes, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return Manifest{}, err
-	}
-	if err := util.AtomicWrite(filepath.Join(root, "index", ManifestFile), append(manifestBytes, '\n'), 0o644); err != nil {
-		return Manifest{}, err
-	}
-	return manifest, nil
+	return rebuildSQLite(root, opts, defaultTokenizer)
 }
 
 func Status(root string) (StatusInfo, error) {
@@ -190,90 +140,81 @@ func Status(root string) (StatusInfo, error) {
 		return StatusInfo{}, err
 	}
 	info := StatusInfo{
-		IndexPath:    filepath.Join(root, "index", DBFile),
-		ManifestPath: filepath.Join(root, "index", ManifestFile),
+		IndexPath: filepath.Join(root, "index", SQLiteFile),
 	}
-	b, err := os.ReadFile(info.ManifestPath)
-	if errors.Is(err, os.ErrNotExist) {
+	if !sqliteExists(root) {
 		return info, nil
 	}
-	if err != nil {
-		return StatusInfo{}, err
-	}
-	var manifest Manifest
-	if err := json.Unmarshal(b, &manifest); err != nil {
+	if err := ensureSQLiteHealthy(root); err != nil {
 		return StatusInfo{}, err
 	}
 	info.Exists = true
-	info.Scope = manifest.Scope
-	info.GeneratedAt = manifest.GeneratedAt
-	info.Entries = manifest.Entries
+	db, err := openSQLite(root)
+	if err != nil {
+		return StatusInfo{}, err
+	}
+	defer db.Close()
+	info.GeneratedAt, _ = sqliteStateTime(db, "generated_at")
+	_ = db.QueryRow(`SELECT value FROM index_state WHERE key = 'scope'`).Scan(&info.Scope)
+	if info.Scope == "" {
+		info.Scope = inferScope(root)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM entries`).Scan(&info.Entries); err != nil {
+		return StatusInfo{}, err
+	}
 	return info, nil
 }
 
 func Search(root string, query Query) ([]Result, error) {
-	db, err := Load(root)
+	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
 	}
-	return SearchEntries(db.Entries, query), nil
+	if !sqliteExists(root) {
+		if _, rebuildErr := rebuildSQLite(root, RebuildOptions{Scope: inferScope(root)}, defaultTokenizer); rebuildErr != nil {
+			return nil, rebuildErr
+		}
+	} else if err := ensureSQLiteHealthy(root); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(query.Content) != "" {
+		return searchSQLite(root, query, defaultTokenizer)
+	}
+	entries, err := loadFreshSearchEntries(root)
+	if err != nil {
+		return nil, err
+	}
+	return SearchEntries(entries, query), nil
 }
 
-func SearchEntries(entries []Entry, query Query) []Result {
-	needle := strings.ToLower(strings.TrimSpace(query.Content))
-	tags := append([]string{}, query.Tags...)
-	if query.Tag != "" {
-		tags = append(tags, query.Tag)
+func loadFreshSearchEntries(root string) ([]Entry, error) {
+	if err := refreshSQLite(root, defaultTokenizer); err != nil {
+		return nil, err
 	}
-	var results []Result
-	for _, entry := range entries {
-		if query.Scope != "" && entry.Scope != query.Scope {
-			continue
+	db, err := Load(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if _, rebuildErr := rebuildSQLite(root, RebuildOptions{Scope: inferScope(root)}, defaultTokenizer); rebuildErr != nil {
+				return nil, rebuildErr
+			}
+			db, err = Load(root)
 		}
-		if query.Type != "" && entry.Type != query.Type {
-			continue
-		}
-		if query.Topic != "" && entry.Topic != query.Topic {
-			continue
-		}
-		if len(tags) > 0 && !hasAllTags(entry.Tags, tags) {
-			continue
-		}
-		if needle != "" && !strings.Contains(strings.ToLower(entry.Title+"\n"+entry.Content), needle) {
-			continue
-		}
-		score := scoreEntry(entry, needle)
-		if !query.IncludeContent {
-			entry.Content = ""
-		}
-		results = append(results, Result{Entry: entry, Score: score})
 	}
-	sort.SliceStable(results, func(i, j int) bool {
-		if results[i].Score == results[j].Score {
-			return results[i].Entry.UpdatedAt.After(results[j].Entry.UpdatedAt)
-		}
-		return results[i].Score > results[j].Score
-	})
-	if query.Limit > 0 && len(results) > query.Limit {
-		results = results[:query.Limit]
+	if err != nil {
+		return nil, err
 	}
-	return results
+	entries, _, err := FilterFresh(root, db)
+	return entries, err
 }
 
 func Load(root string) (DB, error) {
-	root, err := filepath.Abs(root)
-	if err != nil {
+	if !sqliteExists(root) {
+		return DB{}, os.ErrNotExist
+	}
+	if err := ensureSQLiteHealthy(root); err != nil {
 		return DB{}, err
 	}
-	b, err := os.ReadFile(filepath.Join(root, "index", DBFile))
-	if err != nil {
-		return DB{}, err
-	}
-	var db DB
-	if err := json.Unmarshal(b, &db); err != nil {
-		return DB{}, err
-	}
-	return db, nil
+	return loadSQLite(root)
 }
 
 func Diff(root string) (DiffReport, error) {
@@ -437,515 +378,6 @@ func FilterFresh(root string, db DB) ([]Entry, FreshReport, error) {
 	return fresh, report, nil
 }
 
-func scan(root, scope string) ([]Entry, error) {
-	var entries []Entry
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case "index", "logs", "raw", "exports":
-				if path != root {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if shouldSkip(rel) {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".md" && ext != ".json" {
-			return nil
-		}
-		entry, ok, err := buildEntry(root, path, rel, scope)
-		if err != nil {
-			return err
-		}
-		if ok {
-			entries = append(entries, entry)
-		}
-		return nil
-	})
-	return entries, err
-}
-
-func buildEntry(root, path, rel, scope string) (Entry, bool, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return Entry{}, false, err
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return Entry{}, false, err
-	}
-	body := string(b)
-	meta := map[string]any{}
-	if strings.HasSuffix(strings.ToLower(path), ".md") {
-		if doc, err := store.ParseMarkdown(b); err == nil {
-			meta = doc.Meta
-			body = doc.Body
-		}
-	}
-	entry := Entry{
-		Schema:        "worktrail.index.entry.v1",
-		ID:            stringMeta(meta, "id", util.Slug(strings.TrimSuffix(rel, filepath.Ext(rel)))),
-		Scope:         stringMeta(meta, "scope", scope),
-		Type:          inferType(rel, meta),
-		Path:          rel,
-		Title:         stringMeta(meta, "title", inferTitle(rel, body)),
-		Status:        stringMeta(meta, "status", ""),
-		Stage:         stringMeta(meta, "stage", ""),
-		Lifecycle:     knowledge.NormalizeLifecycle(stringMeta(meta, "lifecycle", ""), stringMeta(meta, "stage", ""), stringMeta(meta, "status", "")),
-		Topic:         stringMeta(meta, "topic", ""),
-		SourceOfTruth: boolMeta(meta, "source_of_truth"),
-		Supersedes:    stringListMeta(meta, "supersedes"),
-		SupersededBy:  stringListMeta(meta, "superseded_by"),
-		Tags:          stringSliceMeta(meta, "tags"),
-		Content:       strings.TrimSpace(body),
-		UpdatedAt:     timeMeta(meta, "updated_at", info.ModTime().UTC()),
-		Active:        activeEntryPath(rel),
-	}
-	entry.SourceSessions = stringSliceMeta(meta, "source_sessions")
-	entry.CandidateType = stringMeta(meta, "candidate_type", "")
-	if norm, err := model.NormalizeObjectMeta(rel, meta); err == nil {
-		entry.ID = withFallback(entry.ID, norm.ID)
-		entry.Scope = withFallback(entry.Scope, norm.Scope)
-		entry.Type = entryTypeFromObject(norm, rel)
-		entry.Title = withFallback(entry.Title, norm.Title)
-		entry.Status = normalizeEntryStatus(entry.Status, norm)
-		entry.Stage = withFallback(entry.Stage, norm.Stage)
-		entry.Lifecycle = withFallback(entry.Lifecycle, normalizeEntryLifecycle(norm))
-		entry.Topic = withFallback(entry.Topic, norm.Topic)
-		entry.SourceOfTruth = entry.SourceOfTruth || norm.SourceOfTruth
-		if len(entry.Supersedes) == 0 {
-			entry.Supersedes = append([]string(nil), norm.Supersedes...)
-		}
-		if len(entry.SupersededBy) == 0 {
-			entry.SupersededBy = append([]string(nil), norm.SupersededBy...)
-		}
-		if len(entry.Tags) == 0 {
-			entry.Tags = append([]string(nil), norm.Tags...)
-		}
-		if entry.UpdatedAt.IsZero() && !norm.UpdatedAt.IsZero() {
-			entry.UpdatedAt = norm.UpdatedAt
-		}
-		if entry.CandidateType == "" {
-			entry.CandidateType = entryCandidateTypeFromObject(norm)
-		}
-		entry.Active = activeEntry(norm, rel, entry.Active)
-	}
-	if entry.Scope == "" {
-		entry.Scope = scope
-	}
-	if entry.Type == "config" {
-		return Entry{}, false, nil
-	}
-	return entry, true, nil
-}
-
-func shouldSkip(rel string) bool {
-	base := filepath.Base(rel)
-	return base == "config.json" || base == ".DS_Store" || rel == "state/active/latest.md"
-}
-
-func inferScope(root string) string {
-	if b, err := os.ReadFile(filepath.Join(root, "config.json")); err == nil {
-		var cfg struct {
-			Scope string `json:"scope"`
-		}
-		if json.Unmarshal(b, &cfg) == nil && cfg.Scope != "" {
-			return cfg.Scope
-		}
-	}
-	if filepath.Base(root) == ".worktrail" {
-		return "project"
-	}
-	return "user"
-}
-
-func inferType(rel string, meta map[string]any) string {
-	if norm, err := model.NormalizeObjectMeta(rel, meta); err == nil {
-		return entryTypeFromObject(norm, rel)
-	}
-	if typ := stringMeta(meta, "type", ""); typ != "" {
-		return typ
-	}
-	if typ := stringMeta(meta, "candidate_type", ""); typ != "" {
-		return "candidate"
-	}
-	switch {
-	case strings.HasPrefix(rel, "candidates/"):
-		return "candidate"
-	case strings.HasPrefix(rel, "state/"):
-		return "state"
-	case strings.HasPrefix(rel, "architecture/"):
-		return "architecture"
-	case strings.HasPrefix(rel, "requirements/"):
-		return "requirement"
-	case strings.HasPrefix(rel, "decisions/"):
-		return "decision"
-	case strings.HasPrefix(rel, "glossary/"):
-		return "glossary"
-	case strings.HasPrefix(rel, "handoffs/"):
-		return "handoff"
-	case strings.HasPrefix(rel, "integrations/"):
-		return "integration"
-	case strings.HasPrefix(rel, "rules/"):
-		return "rule"
-	case strings.HasPrefix(rel, "validation/"):
-		return "validation"
-	case strings.HasPrefix(rel, "prompts/"):
-		return "prompt"
-	case strings.HasPrefix(rel, "profile/"):
-		return "profile"
-	case strings.HasPrefix(rel, "workflows/"):
-		return "workflow"
-	case strings.HasPrefix(rel, "lessons/"):
-		return "lesson"
-	case strings.HasPrefix(rel, "runtime/"):
-		return "state"
-	case rel == "project.md":
-		return "project"
-	case rel == "index.md":
-		return "index"
-	case rel == "log.md":
-		return "log"
-	default:
-		return "knowledge"
-	}
-}
-
-func entryTypeFromObject(meta model.ObjectMetaV2, rel string) string {
-	rel = filepath.ToSlash(strings.TrimSpace(rel))
-	if strings.HasPrefix(rel, "state/active/") || meta.ResumePriority == model.ResumePriorityExplicitSession {
-		return "state"
-	}
-	if strings.HasPrefix(rel, "runtime/") || strings.HasPrefix(rel, "state/checkpoints/") {
-		return "state"
-	}
-	switch {
-	case meta.IsKnowledgeDoc():
-		if meta.KnowledgeType != "" {
-			return meta.KnowledgeType
-		}
-		return knowledgeTypeFallback(rel)
-	case meta.IsDraft(), meta.IsEvidence():
-		return "candidate"
-	case meta.IsRuntimeRecord():
-		return "state"
-	default:
-		return knowledgeTypeFallback(rel)
-	}
-}
-
-func entryCandidateTypeFromObject(meta model.ObjectMetaV2) string {
-	switch {
-	case meta.IsEvidence():
-		switch meta.EvidenceType {
-		case "transcript":
-			return model.CandidateTypeTranscriptNotes
-		case "migration_source":
-			return model.CandidateTypeMigrationSource
-		default:
-			return meta.EvidenceType
-		}
-	case meta.IsDraft():
-		if meta.ProposedKnowledgeType != "" {
-			return meta.ProposedKnowledgeType
-		}
-		return meta.DraftKind
-	default:
-		return ""
-	}
-}
-
-func activeEntryPath(rel string) bool {
-	rel = filepath.ToSlash(strings.TrimSpace(rel))
-	return strings.HasPrefix(rel, "state/active/") && rel != "state/active/latest.md"
-}
-
-func activeEntry(meta model.ObjectMetaV2, rel string, fallback bool) bool {
-	rel = filepath.ToSlash(strings.TrimSpace(rel))
-	if strings.HasPrefix(rel, "runtime/") || strings.HasPrefix(rel, "state/checkpoints/") {
-		return false
-	}
-	if !strings.HasPrefix(rel, "state/active/") || rel == "state/active/latest.md" {
-		return false
-	}
-	tool := strings.TrimSpace(meta.SourceTool)
-	if tool != "" && tool != "worktrail" {
-		return false
-	}
-	if meta.IsRuntimeRecord() && meta.ResumePriority == model.ResumePriorityHookRuntimeState {
-		return false
-	}
-	return fallback
-}
-
-func normalizeEntryStatus(status string, meta model.ObjectMetaV2) string {
-	status = strings.TrimSpace(status)
-	if status != "" {
-		return status
-	}
-	switch meta.LifecycleStatus {
-	case model.LifecyclePendingReview, model.LifecyclePendingDistill:
-		return "pending"
-	case model.LifecyclePromoted:
-		return "promoted"
-	case model.LifecycleMerged:
-		return "merged"
-	case model.LifecycleDiscarded:
-		return "discarded"
-	case model.LifecycleRetired:
-		return "retired"
-	case model.LifecycleArchived:
-		return "archived"
-	default:
-		return meta.LifecycleStatus
-	}
-}
-
-func normalizeEntryLifecycle(meta model.ObjectMetaV2) string {
-	if meta.LifecycleStatus == "" {
-		return ""
-	}
-	switch meta.LifecycleStatus {
-	case model.LifecyclePendingReview, model.LifecyclePendingDistill:
-		return ""
-	case model.LifecycleCurrent:
-		return ""
-	default:
-		return meta.LifecycleStatus
-	}
-}
-
-func knowledgeTypeFallback(rel string) string {
-	rel = filepath.ToSlash(strings.TrimSpace(rel))
-	switch {
-	case rel == "project.md":
-		return "project"
-	case rel == "index.md":
-		return "index"
-	case strings.HasPrefix(rel, "architecture/"):
-		return "architecture"
-	case strings.HasPrefix(rel, "requirements/"):
-		return "requirement"
-	case strings.HasPrefix(rel, "decisions/"):
-		return "decision"
-	case strings.HasPrefix(rel, "glossary/"):
-		return "glossary"
-	case strings.HasPrefix(rel, "handoffs/"):
-		return "handoff"
-	case strings.HasPrefix(rel, "integrations/"):
-		return "integration"
-	case strings.HasPrefix(rel, "rules/"):
-		return "rule"
-	case strings.HasPrefix(rel, "validation/"):
-		return "validation"
-	case strings.HasPrefix(rel, "prompts/"):
-		return "prompt"
-	case strings.HasPrefix(rel, "profile/"):
-		return "profile"
-	case strings.HasPrefix(rel, "workflows/"):
-		return "workflow"
-	case strings.HasPrefix(rel, "lessons/"):
-		return "lesson"
-	case strings.HasPrefix(rel, "runtime/"):
-		return "state"
-	case rel == "log.md":
-		return "log"
-	default:
-		return "knowledge"
-	}
-}
-
-func withFallback(current, fallback string) string {
-	if strings.TrimSpace(current) != "" {
-		return current
-	}
-	return strings.TrimSpace(fallback)
-}
-
-func InferType(rel string, meta map[string]any) string {
-	return inferType(rel, meta)
-}
-
-func inferTitle(rel, body string) string {
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "#") {
-			return strings.TrimSpace(strings.TrimLeft(line, "#"))
-		}
-	}
-	name := strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))
-	return strings.ReplaceAll(name, "-", " ")
-}
-
-func stringMeta(meta map[string]any, key, fallback string) string {
-	v, ok := meta[key]
-	if !ok {
-		return fallback
-	}
-	switch x := v.(type) {
-	case string:
-		if x == "" {
-			return fallback
-		}
-		return x
-	case fmt.Stringer:
-		return x.String()
-	default:
-		return fallback
-	}
-}
-
-func stringSliceMeta(meta map[string]any, key string) []string {
-	v, ok := meta[key]
-	if !ok {
-		return nil
-	}
-	switch x := v.(type) {
-	case []string:
-		return x
-	case []any:
-		out := make([]string, 0, len(x))
-		for _, item := range x {
-			if s, ok := item.(string); ok && s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func stringListMeta(meta map[string]any, key string) []string {
-	v, ok := meta[key]
-	if !ok {
-		return nil
-	}
-	switch x := v.(type) {
-	case string:
-		if strings.TrimSpace(x) == "" {
-			return nil
-		}
-		return []string{filepath.ToSlash(strings.TrimSpace(x))}
-	case []string:
-		out := make([]string, 0, len(x))
-		for _, item := range x {
-			if s := strings.TrimSpace(item); s != "" {
-				out = append(out, filepath.ToSlash(s))
-			}
-		}
-		return out
-	case []any:
-		out := make([]string, 0, len(x))
-		for _, item := range x {
-			if s, ok := item.(string); ok {
-				if s = strings.TrimSpace(s); s != "" {
-					out = append(out, filepath.ToSlash(s))
-				}
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func boolMeta(meta map[string]any, key string) bool {
-	v, ok := meta[key]
-	if !ok {
-		return false
-	}
-	switch x := v.(type) {
-	case bool:
-		return x
-	case string:
-		return strings.EqualFold(strings.TrimSpace(x), "true")
-	default:
-		return false
-	}
-}
-
-func timeMeta(meta map[string]any, key string, fallback time.Time) time.Time {
-	s := stringMeta(meta, key, "")
-	if s == "" {
-		return fallback
-	}
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return fallback
-	}
-	return t
-}
-
-func hasAllTags(have []string, want []string) bool {
-	set := map[string]bool{}
-	for _, tag := range have {
-		set[strings.ToLower(tag)] = true
-	}
-	for _, tag := range want {
-		if !set[strings.ToLower(tag)] {
-			return false
-		}
-	}
-	return true
-}
-
-func scoreEntry(entry Entry, needle string) float64 {
-	score := 1.0
-	if needle != "" {
-		title := strings.ToLower(entry.Title)
-		content := strings.ToLower(entry.Content)
-		if strings.Contains(title, needle) {
-			score += 8
-		}
-		score += float64(strings.Count(content, needle))
-	}
-	if entry.Active {
-		score += 5
-	}
-	if entry.Active {
-		score += 3
-	}
-	if entry.SourceOfTruth {
-		score += 5
-	}
-	if len(entry.SupersededBy) > 0 || knowledge.IsNonCurrentLifecycle(entry.Lifecycle) || entry.Stage == "historical" || entry.Stage == "retired" {
-		score -= 5
-	}
-	age := time.Since(entry.UpdatedAt)
-	if age < 0 {
-		age = 0
-	}
-	switch {
-	case age <= 24*time.Hour:
-		score += 3
-	case age <= 7*24*time.Hour:
-		score += 2
-	case age <= 30*24*time.Hour:
-		score += 1
-	}
-	return score
-}
-
-func entryModTime(root string, entry Entry) (time.Time, error) {
-	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(entry.Path)))
-	if err != nil {
-		return time.Time{}, err
-	}
-	return info.ModTime().UTC(), nil
-}
-
 func sortDiffItems(items []DiffItem) {
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].Path < items[j].Path
@@ -959,3 +391,4 @@ func RebuildEnv(env paths.Env, scope string) (Manifest, error) {
 	}
 	return Rebuild(root, RebuildOptions{Scope: scope})
 }
+

@@ -76,6 +76,42 @@ worktrail context "task"
 worktrail context --include-lifecycle historical "task"
 ```
 
+## 搜索没有结果或结果明显过期
+<div class="title-en">Search Returns Nothing or Stale Results</div>
+
+### 现象
+<div class="title-en">Symptom</div>
+
+`worktrail search` 搜不到刚写入的知识，或 `worktrail context` / `worktrail doctor knowledge` 提示索引过期。
+
+### 处理
+<div class="title-en">Fix</div>
+
+Worktrail 使用 `.worktrail/index/index.sqlite`（SQLite + FTS5）作为可重建派生索引。Markdown 仍是唯一真源。
+
+1. 先看索引健康状态：
+
+```bash
+worktrail index status
+worktrail index diff
+```
+
+2. 若 `diff` 显示 deleted / changed / unindexed，执行全量重建：
+
+```bash
+worktrail index rebuild --scope project
+worktrail search "keyword"
+```
+
+3. 若 `index.sqlite` 损坏或无法打开，删除该文件后重建：
+
+```bash
+rm .worktrail/index/index.sqlite
+worktrail index rebuild --scope project
+```
+
+`context` 和 `search` 会在读取前做 bounded refresh；当 refresh 失败或差异过大时，仍应优先使用 `worktrail index rebuild` 恢复。
+
 ## Agent 没有自动使用 Worktrail
 <div class="title-en">Agent Does Not Use Worktrail Automatically</div>
 

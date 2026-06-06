@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
+	"github.com/nickdu2009/worktrail/internal/index"
 	kddmigration "github.com/nickdu2009/worktrail/internal/migration/kdd"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
@@ -264,13 +265,9 @@ func (r *migrationDoctorReport) checkGovernance(env paths.Env) {
 }
 
 func (r *migrationDoctorReport) checkIndex(env paths.Env) {
-	for _, manifest := range []string{
-		filepath.Join(env.ProjectWT, "index", "manifest.json"),
-		filepath.Join(env.ProjectWT, "derived", "index", "manifest.json"),
-	} {
-		if _, err := os.Stat(manifest); errors.Is(err, os.ErrNotExist) {
-			r.add("IDX001", "warning", manifest, "index manifest missing; run worktrail index rebuild --scope project")
-		}
+	sqlitePath := filepath.Join(env.ProjectWT, "index", index.SQLiteFile)
+	if _, err := os.Stat(sqlitePath); errors.Is(err, os.ErrNotExist) {
+		r.add("IDX001", "warning", sqlitePath, "SQLite search index missing; run worktrail index rebuild --scope project")
 	}
 }
 

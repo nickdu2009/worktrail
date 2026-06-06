@@ -279,6 +279,9 @@ func loadOrRebuild(root, scope string) ([]index.Entry, IndexHealth, error) {
 	} else if err != nil {
 		return nil, IndexHealth{}, err
 	}
+	if err := index.Refresh(root); err != nil {
+		return nil, IndexHealth{}, err
+	}
 	db, err := index.Load(root)
 	if err != nil {
 		if _, rebuildErr := index.Rebuild(root, index.RebuildOptions{Scope: scope}); rebuildErr != nil {

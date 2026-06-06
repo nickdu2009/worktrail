@@ -150,21 +150,32 @@ func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	if scope == "all" {
 		scopes = []string{"project", "user"}
 	}
+	const searchResultLimit = 20
+	perScopeLimit := searchResultLimit
+	if scope == "all" {
+		perScopeLimit = 0
+	}
 	var results []index.Result
 	for _, s := range scopes {
-		entries, err := loadFreshSearchEntries(env, s)
+		root, err := env.ScopeRoot(s)
 		if err != nil {
 			return err
 		}
-		found := index.SearchEntries(entries, index.Query{
+		found, err := index.Search(root, index.Query{
 			Scope:   s,
 			Type:    flagValue(flags, "type", ""),
 			Topic:   flagValue(flags, "topic", ""),
 			Tag:     flagValue(flags, "tag", ""),
 			Content: query,
-			Limit:   20,
+			Limit:   perScopeLimit,
 		})
+		if err != nil {
+			return err
+		}
 		results = append(results, found...)
+	}
+	if scope == "all" {
+		results = index.RankSearchResults(results, searchResultLimit)
 	}
 	if flagValue(flags, "format", "text") == "json" {
 		return json.NewEncoder(ioctx.Out).Encode(results)
@@ -185,28 +196,6 @@ func printSearchHelp(out interface{ Write([]byte) (int, error) }) {
 	fmt.Fprintln(out, "  worktrail search --scope all \"deployment lesson\"")
 	fmt.Fprintln(out, "  worktrail search --type decision \"oauth\"")
 	fmt.Fprintln(out, "  worktrail search --topic auth-session \"resume\"")
-}
-
-func loadFreshSearchEntries(env paths.Env, scope string) ([]index.Entry, error) {
-	root, err := env.ScopeRoot(scope)
-	if err != nil {
-		return nil, err
-	}
-	db, err := index.Load(root)
-	if err != nil {
-		if _, rebuildErr := index.RebuildEnv(env, scope); rebuildErr != nil {
-			return nil, rebuildErr
-		}
-		db, err = index.Load(root)
-	}
-	if err != nil {
-		return nil, err
-	}
-	entries, _, err := index.FilterFresh(root, db)
-	if err != nil {
-		return nil, err
-	}
-	return entries, nil
 }
 
 func renderIndexDiff(out interface{ Write([]byte) (int, error) }, report index.DiffReport) {

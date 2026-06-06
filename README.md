@@ -16,6 +16,8 @@ Hard boundaries:
 
 Formal knowledge is Markdown with JSON frontmatter. Local indexes are rebuildable acceleration data, not source of truth.
 
+Search and context use a SQLite + FTS5 index at `.worktrail/index/index.sqlite` (or the user-scope equivalent) with application-layer Chinese tokenization via `gse`. Markdown remains the only source of truth; delete a corrupted `index.sqlite` and run `worktrail index rebuild` when search or context reports index health issues.
+
 ## User Manual
 
 - [`docs/manual/README.md`](docs/manual/README.md) - `Worktrail 使用手册`
@@ -66,7 +68,9 @@ candidates; use `review`, `promote`, or `merge` for the explicit review step.
 
 `worktrail review plan --format json` emits the read-only agent contract `worktrail.review.plan.v1`. It groups pending semantic candidates into deterministic recommendations: `promote`, `merge`, `discard`, or `needs_human_review`. The command never changes candidate state or formal knowledge; state-changing commands still require explicit user confirmation.
 
-`worktrail context <task>` is the read-only navigation entry for a task. It prioritizes active runtime state and durable handoffs, hides pending evidence by default, reports how many evidence candidates are hidden, and skips stale indexed entries instead of surfacing deleted or outdated cached content. Use `worktrail context --evidence <task>` when evidence items need to be included in the pending section, and use `worktrail index diff` or `worktrail index rebuild` when context reports a stale index.
+`worktrail search` tokenizes queries with `gse`, retrieves candidates through SQLite FTS5, and reranks with Worktrail semantics (`source_of_truth`, `active`, lifecycle, recency). Filter with `--type`, `--topic`, `--tag`, and `--scope`; pass `--include-content` only when the body is needed.
+
+`worktrail context <task>` is the read-only navigation entry for a task. It prioritizes active runtime state and durable handoffs, hides pending evidence by default, reports how many evidence candidates are hidden, and skips stale indexed entries instead of surfacing deleted or outdated cached content. Use `worktrail context --evidence <task>` when evidence items need to be included in the pending section, and use `worktrail index diff` or `worktrail index rebuild` when context reports a stale index. Context and search refresh the SQLite index incrementally before reads; `worktrail index rebuild` remains the full-recovery oracle.
 
 `worktrail handoff` writes a durable handoff record under `.worktrail/handoffs/`. Stop and session-end hooks now keep their output in runtime records (`state/` plus checkpoints and audit logs) instead of creating pending handoff candidates by default, so routine hook residue no longer accumulates in the default review inbox.
 

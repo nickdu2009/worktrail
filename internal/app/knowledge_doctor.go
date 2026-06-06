@@ -765,7 +765,7 @@ func knowledgeFindingRemediation(code, scope, path string) (string, []string) {
 	case "ESCAPE005":
 		return "prefer retiring the applied candidate trail instead of deleting the formal document directly", nil
 	case "IDX001", "IDX002", "IDX003":
-		return "rebuild the local text index so context and search read the current filesystem state", []string{rebuild}
+		return "rebuild the local SQLite search index (index.sqlite) so context and search read the current filesystem state", []string{rebuild}
 	case "ESCAPE001", "ESCAPE002", "ESCAPE003":
 		return "recover through Worktrail-managed note/promote/merge flow instead of editing formal knowledge directly", nil
 	default:

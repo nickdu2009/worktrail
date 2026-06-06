@@ -227,7 +227,7 @@ func TestBuildOmitsMaintenanceTextWhenCountsAreZero(t *testing.T) {
 	}
 }
 
-func TestBuildSkipsStaleIndexedEntriesAndReportsIndexHealth(t *testing.T) {
+func TestBuildRefreshesIndexBeforeContext(t *testing.T) {
 	tmp := t.TempDir()
 	env := paths.Env{
 		UserRoot:  filepath.Join(tmp, "user"),
@@ -288,19 +288,15 @@ func TestBuildSkipsStaleIndexedEntriesAndReportsIndexHealth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build() with stale index error = %v", err)
 	}
-	if len(pack.IndexHealth) != 1 {
-		t.Fatalf("IndexHealth len = %d, want 1: %+v", len(pack.IndexHealth), pack.IndexHealth)
-	}
-	health := pack.IndexHealth[0]
-	if !health.Stale || health.StaleEntriesSkipped != 2 || health.MissingFromFS != 1 || health.Changed != 1 || health.MissingFromIndex != 1 {
-		t.Fatalf("unexpected index health: %+v", health)
+	if len(pack.IndexHealth) != 0 {
+		t.Fatalf("refresh should keep index fresh, IndexHealth = %+v", pack.IndexHealth)
 	}
 	rendered := RenderMarkdown(pack)
-	if !strings.Contains(rendered, "## Index Health") || !strings.Contains(rendered, "worktrail index rebuild --scope project") {
-		t.Fatalf("rendered pack missing index health guidance:\n%s", rendered)
+	if !strings.Contains(rendered, "Current Rule") || !strings.Contains(rendered, "New Rule") {
+		t.Fatalf("rendered pack should include refreshed entries:\n%s", rendered)
 	}
-	if strings.Contains(rendered, "Current Rule") || strings.Contains(rendered, "Deleted Rule") || strings.Contains(rendered, "New Rule") {
-		t.Fatalf("rendered pack should hide stale or unindexed rule entries:\n%s", rendered)
+	if strings.Contains(rendered, "Deleted Rule") {
+		t.Fatalf("rendered pack should hide deleted indexed entries:\n%s", rendered)
 	}
 }
 

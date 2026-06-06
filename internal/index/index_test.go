@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,18 +51,17 @@ func TestRebuildStatusSearch(t *testing.T) {
 		"tags":           []string{"api"},
 	}, "candidate body")
 
-	manifest, err := Rebuild(root, RebuildOptions{Now: time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)})
+	rebuildAt := time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)
+	touchWorktrailDocs(t, root, rebuildAt)
+	manifest, err := Rebuild(root, RebuildOptions{Now: rebuildAt})
 	if err != nil {
 		t.Fatalf("Rebuild() error = %v", err)
 	}
 	if manifest.Entries != 4 {
 		t.Fatalf("manifest entries = %d, want 4", manifest.Entries)
 	}
-	if _, err := os.Stat(filepath.Join(root, "index", DBFile)); err != nil {
-		t.Fatalf("index db missing: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "index", ManifestFile)); err != nil {
-		t.Fatalf("manifest missing: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "index", SQLiteFile)); err != nil {
+		t.Fatalf("sqlite index missing: %v", err)
 	}
 
 	status, err := Status(root)
@@ -173,6 +173,19 @@ func TestDiffHealthAndFilterFresh(t *testing.T) {
 	}
 }
 
+func TestRankSearchResultsLimitsGlobally(t *testing.T) {
+	now := time.Now().UTC()
+	results := []Result{
+		{Entry: Entry{ID: "low", UpdatedAt: now}, Score: 1},
+		{Entry: Entry{ID: "high", UpdatedAt: now}, Score: 9},
+		{Entry: Entry{ID: "mid", UpdatedAt: now}, Score: 5},
+	}
+	ranked := RankSearchResults(results, 2)
+	if len(ranked) != 2 || ranked[0].Entry.ID != "high" || ranked[1].Entry.ID != "mid" {
+		t.Fatalf("RankSearchResults() = %+v", ranked)
+	}
+}
+
 func TestSearchEntriesUsesProvidedEntries(t *testing.T) {
 	entries := []Entry{
 		{ID: "rule", Scope: "project", Type: "rule", Title: "Rule", Content: "needle", UpdatedAt: time.Now().UTC()},
@@ -194,6 +207,22 @@ func mustWriteDoc(t *testing.T, path string, meta any, body string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func touchWorktrailDocs(t *testing.T, root string, at time.Time) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".json") {
+			return os.Chtimes(path, at, at)
+		}
+		return nil
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 }

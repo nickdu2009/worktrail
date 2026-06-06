@@ -15,6 +15,11 @@ worktrail
 .worktrail/raw/
 .worktrail/index/
 .worktrail/logs/
+.worktrail/staging/
+.worktrail/runtime/
+.worktrail/derived/index/
+.worktrail/derived/cache/
+.worktrail/derived/exports/
 .worktrail/.cache/
 .worktrail/exports/
 # END WORKTRAIL MANAGED BLOCK
