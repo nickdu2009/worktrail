@@ -17,6 +17,7 @@ Use this skill when initializing Worktrail or installing Worktrail-managed agent
 - `--user` installs user-level Worktrail instructions and skills where supported. `--project` installs local integration files where supported, such as Cursor hooks and tool settings.
 - User-level instructions and skills must not auto-run Worktrail in a project unless `.worktrail/` exists at that workspace or repository root; project initialization or project install creates the project opt-in marker.
 - Cursor project installs do not create project-level skills or rules; they merge `.cursor/hooks.json`.
+- Determine what to install from explicit user intent first. Use the environment only to choose the appropriate install scope, target, prerequisites, and exact command. If intent is ambiguous, ask before installing.
 
 ## Workflow
 
@@ -26,7 +27,7 @@ Use this skill when initializing Worktrail or installing Worktrail-managed agent
    - If it is missing, install the CLI first, for example `go install ./cmd/worktrail` from this repository or by using the packaged binary, then ensure `worktrail` is in `PATH`.
 3. Inspect current Worktrail state in `.worktrail/config.json`, `.gitignore`, `.cursor/hooks.json`, `.codex/hooks.json`, and `.claude/settings.json`.
 4. Run `worktrail init` to initialize user and project Worktrail roots. It may create or update project `.worktrail`, `.gitignore`, and `.codex/hooks.json`.
-5. Install requested integrations with `worktrail install cursor|codex|claude|all --user|--project`.
+5. Install the integration requested by the user. Use the current environment to choose the appropriate scope and exact command, such as `worktrail install cursor|codex|claude|all --user|--project`. If the user intent is ambiguous, stop and clarify before installing.
 6. Verify with `worktrail doctor <tool> --user|--project`; the doctor report must include a passing `worktrail command available` check.
 7. Report only Worktrail-managed changes and any remaining setup step.
 
