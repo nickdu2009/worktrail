@@ -55,7 +55,7 @@ worktrail preview
 worktrail search "keyword"
 worktrail state start "task title"
 worktrail state update "progress, validation, and next step"
-worktrail handoff "summary, validation, risks, and next step"
+worktrail state close --to handoff "summary, validation, risks, and next step"
 worktrail resume "continue the task"
 worktrail doctor knowledge
 ```
@@ -70,11 +70,11 @@ candidates; use `review`, `promote`, or `merge` for the explicit review step.
 
 `worktrail search` tokenizes queries with `gse`, retrieves candidates through SQLite FTS5, and reranks with Worktrail semantics (`source_of_truth`, `active`, lifecycle, recency). Filter with `--type`, `--topic`, `--tag`, and `--scope`; pass `--include-content` only when the body is needed.
 
-`worktrail context <task>` is the read-only navigation entry for a task. It prioritizes active runtime state and durable handoffs, hides pending evidence by default, reports how many evidence candidates are hidden, and skips stale indexed entries instead of surfacing deleted or outdated cached content. Use `worktrail context --evidence <task>` when evidence items need to be included in the pending section, and use `worktrail index diff` or `worktrail index rebuild` when context reports a stale index. Context and search refresh the SQLite index incrementally before reads; `worktrail index rebuild` remains the full-recovery oracle.
+`worktrail context <task>` is the read-only navigation entry for a task. It now prioritizes fresh explicit state first, then current durable handoffs, hides pending evidence by default, reports how many evidence candidates are hidden, and skips stale indexed entries instead of surfacing deleted or outdated cached content. Use `worktrail context --evidence <task>` when evidence items need to be included in the pending section, and use `worktrail index diff` or `worktrail index rebuild` when context reports a stale index. Context and search refresh the SQLite index incrementally before reads; `worktrail index rebuild` remains the full-recovery oracle.
 
-`worktrail handoff` writes a durable handoff record under `.worktrail/handoffs/`. Stop and session-end hooks now keep their output in runtime records (`state/` plus checkpoints and audit logs) instead of creating pending handoff candidates by default, so routine hook residue no longer accumulates in the default review inbox.
+`worktrail state close --to handoff "<summary>"` is the primary durable handoff path when an explicit state exists: it binds the handoff to the latest explicit state and closes that state in one flow. Bare `worktrail handoff "<summary>"` remains available as an exception path when no active explicit state exists or when a handoff-only record is intentionally needed. Stop and session-end hooks now keep their output in runtime records (`state/` plus checkpoints and audit logs) instead of creating pending handoff candidates by default, so routine hook residue no longer accumulates in the default review inbox.
 
-`worktrail resume [<task>]` creates a fresh active state from the latest active state and/or latest durable handoff, so a new session can continue without manually stitching together `context`, `state show`, and handoff files.
+`worktrail resume [<task>]` creates a fresh active state from the best available recovery source, preferring fresh explicit state over handoffs and using runtime artifacts only as degraded fallback, so a new session can continue without manually stitching together `context`, `state show`, and handoff files.
 
 Project knowledge can use `.worktrail/requirements/` for PRDs, user goals, persona or primary-user scope, workflow problems, MVP boundaries, out-of-scope notes, requirement-level acceptance criteria, business capability requirements, failure exits, and requirement-stage open questions. This complements, rather than replaces, `architecture/`, `decisions/`, `validation/`, and `workflows/`.
 

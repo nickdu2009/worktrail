@@ -65,8 +65,7 @@ func Create(env paths.Env, opts CreateOptions) (Record, error) {
 	}
 	ts := time.Now().UTC()
 	id := fmt.Sprintf("handoff_%s_%s", util.Slug(title), ts.Format("20060102T150405.000000000Z"))
-	fileName := ts.Format("20060102-150405") + "-" + util.Slug(title) + ".md"
-	path, err := paths.SafeJoin(root, "handoffs", fileName)
+	path, err := uniqueHandoffPath(root, title, ts)
 	if err != nil {
 		return Record{}, err
 	}
@@ -93,6 +92,9 @@ func Create(env paths.Env, opts CreateOptions) (Record, error) {
 		return Record{}, err
 	}
 	if err := util.AtomicWrite(path, data, 0o644); err != nil {
+		return Record{}, err
+	}
+	if err := supersedeCurrentTaskHandoffs(env, scope, meta.TaskID, meta.ID, withDefault(opts.Actor, "handoff")); err != nil {
 		return Record{}, err
 	}
 	if err := wlog.Append(root, "handoff.create", id, withDefault(opts.Actor, "handoff"), map[string]any{"path": relToRoot(root, path), "task_id": meta.TaskID}); err != nil {
@@ -144,6 +146,9 @@ func List(env paths.Env, scope string) ([]Record, error) {
 		out = append(out, record)
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if statusRank(out[i].Meta.Status) != statusRank(out[j].Meta.Status) {
+			return statusRank(out[i].Meta.Status) < statusRank(out[j].Meta.Status)
+		}
 		if !out[i].Meta.UpdatedAt.Equal(out[j].Meta.UpdatedAt) {
 			return out[i].Meta.UpdatedAt.After(out[j].Meta.UpdatedAt)
 		}
@@ -249,4 +254,78 @@ func inferTitle(path, body string) string {
 	}
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	return strings.ReplaceAll(name, "-", " ")
+}
+
+func uniqueHandoffPath(root, title string, ts time.Time) (string, error) {
+	base := ts.Format("20060102-150405") + "-" + util.Slug(title)
+	for attempt := 0; ; attempt++ {
+		fileName := base + ".md"
+		if attempt > 0 {
+			fileName = fmt.Sprintf("%s-%02d.md", base, attempt)
+		}
+		path, err := paths.SafeJoin(root, "handoffs", fileName)
+		if err != nil {
+			return "", err
+		}
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			return path, nil
+		} else if err != nil {
+			return "", err
+		}
+	}
+}
+
+func supersedeCurrentTaskHandoffs(env paths.Env, scope, taskID, currentID, actor string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	items, err := List(env, scope)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Meta.ID == currentID || strings.TrimSpace(item.Meta.TaskID) != taskID || strings.TrimSpace(item.Meta.Status) != "current" {
+			continue
+		}
+		if err := rewriteStatus(item, "superseded"); err != nil {
+			return err
+		}
+		root, _, err := scopeRoot(env, scope)
+		if err != nil {
+			return err
+		}
+		if err := wlog.Append(root, "handoff.supersede", item.Meta.ID, actor, map[string]any{
+			"path":          relToRoot(root, item.Path),
+			"task_id":       taskID,
+			"superseded_by": currentID,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rewriteStatus(rec Record, status string) error {
+	rec.Meta.Status = status
+	if rec.MetadataMap == nil {
+		rec.MetadataMap = map[string]any{}
+	}
+	rec.MetadataMap["status"] = status
+	data, err := store.RenderMarkdown(rec.MetadataMap, rec.Body)
+	if err != nil {
+		return err
+	}
+	return util.AtomicWrite(rec.Path, data, 0o644)
+}
+
+func statusRank(status string) int {
+	switch strings.TrimSpace(status) {
+	case "", "current":
+		return 0
+	case "superseded":
+		return 1
+	default:
+		return 2
+	}
 }

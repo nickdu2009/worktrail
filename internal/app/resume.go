@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/handoff"
+	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/recovery"
 	wtstate "github.com/nickdu2009/worktrail/internal/state"
@@ -16,13 +17,13 @@ import (
 )
 
 type resumeResult struct {
-	State          wtstate.Capsule     `json:"state"`
-	SourceState    *wtstate.Capsule    `json:"source_state,omitempty"`
-	SourceHandoff  *handoff.Record     `json:"source_handoff,omitempty"`
-	RecoverySource string              `json:"recovery_source_kind,omitempty"`
-	RecoveryQuality string             `json:"recovery_quality,omitempty"`
-	DegradedReason string              `json:"degraded_reason,omitempty"`
-	RuntimePath    string              `json:"runtime_path,omitempty"`
+	State           wtstate.Capsule  `json:"state"`
+	SourceState     *wtstate.Capsule `json:"source_state,omitempty"`
+	SourceHandoff   *handoff.Record  `json:"source_handoff,omitempty"`
+	RecoverySource  string           `json:"recovery_source_kind,omitempty"`
+	RecoveryQuality string           `json:"recovery_quality,omitempty"`
+	DegradedReason  string           `json:"degraded_reason,omitempty"`
+	RuntimePath     string           `json:"runtime_path,omitempty"`
 }
 
 func runResume(_ context.Context, env paths.Env, ioctx IO, args []string) error {
@@ -97,7 +98,7 @@ func printResumeHelp(out interface{ Write([]byte) (int, error) }) {
 	fmt.Fprintln(out, "usage: worktrail resume [--scope project|user] [--format text|json] [<task>]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Creates a fresh explicit session state from the prioritized recovery selector.")
-	fmt.Fprintln(out, "Manual handoffs and explicit session state rank above hook runtime artifacts.")
+	fmt.Fprintln(out, "Fresh explicit session state ranks above manual handoffs; both rank above hook runtime artifacts.")
 }
 
 func resumeTaskID(sourceState *wtstate.Capsule, sourceHandoff *handoff.Record, title string) string {
@@ -141,10 +142,14 @@ func renderResumeStateBody(title string, sel recovery.Selection) string {
 	}
 	b.WriteString("\n## Current Goal\n\n")
 	switch {
-	case sel.Handoff != nil:
+	case sel.SourceKind == model.ResumePriorityExplicitSession && sel.State != nil:
+		b.WriteString(sel.State.State.Title)
+	case sel.SourceKind == model.ResumePriorityManualHandoff && sel.Handoff != nil:
 		b.WriteString(sel.Handoff.Meta.Title)
 	case sel.State != nil:
 		b.WriteString(sel.State.State.Title)
+	case sel.Handoff != nil:
+		b.WriteString(sel.Handoff.Meta.Title)
 	case sel.Runtime != nil:
 		b.WriteString(sel.Title)
 	default:
@@ -171,7 +176,7 @@ func renderResumeStateBody(title string, sel recovery.Selection) string {
 	}
 	b.WriteString("\n## Current Diff Intent\n\nContinue from the last validated point instead of recomputing context manually.\n\n")
 	b.WriteString("## Validation\n\n")
-	if sel.Handoff != nil && strings.TrimSpace(sel.Handoff.Meta.Summary) != "" {
+	if sel.SourceKind == model.ResumePriorityManualHandoff && sel.Handoff != nil && strings.TrimSpace(sel.Handoff.Meta.Summary) != "" {
 		b.WriteString(sel.Handoff.Meta.Summary)
 	} else {
 		b.WriteString("Review the latest handoff, explicit state, or runtime fallback notes before making changes.")
@@ -181,9 +186,16 @@ func renderResumeStateBody(title string, sel recovery.Selection) string {
 		b.WriteString("\n\n## Prior Explicit State Snapshot\n\n")
 		b.WriteString(strings.TrimSpace(sel.State.Body))
 	}
-	if sel.Handoff != nil {
+	if sel.SourceKind == model.ResumePriorityManualHandoff && sel.Handoff != nil {
 		b.WriteString("\n\n## Latest Handoff\n\n")
 		b.WriteString(strings.TrimSpace(sel.Handoff.Body))
+	} else if sel.Handoff != nil {
+		b.WriteString("\n\n## Latest Handoff Summary\n\n")
+		if strings.TrimSpace(sel.Handoff.Meta.Summary) != "" {
+			b.WriteString(sel.Handoff.Meta.Summary)
+		} else {
+			b.WriteString("A durable handoff exists but is not the primary recovery source.\n")
+		}
 	}
 	if sel.Runtime != nil && sel.State == nil {
 		b.WriteString("\n\n## Runtime Fallback Snapshot\n\n")

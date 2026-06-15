@@ -24,21 +24,24 @@ func testEnv(t *testing.T) paths.Env {
 	}
 }
 
-func TestSelectPrefersHandoffOverExplicitState(t *testing.T) {
+func TestSelectPrefersExplicitStateOverManualHandoff(t *testing.T) {
 	env := testEnv(t)
-	if _, err := wtstate.Start(env, wtstate.StartOptions{
+	state, err := wtstate.Start(env, wtstate.StartOptions{
 		Scope: "project",
 		Title: "Explicit state",
 		Body:  "explicit",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(10 * time.Millisecond)
 	if _, err := handoff.Create(env, handoff.CreateOptions{
-		Scope: "project",
-		Title: "Manual handoff",
-		Body:  "handoff",
-		Tags:  []string{"handoff", "manual"},
+		Scope:         "project",
+		Title:         "Manual handoff",
+		Summary:       "handoff summary",
+		Body:          "handoff",
+		SourceStateID: state.State.ID,
+		Tags:          []string{"handoff", "manual"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -46,14 +49,41 @@ func TestSelectPrefersHandoffOverExplicitState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sel.SourceKind != model.ResumePriorityManualHandoff {
-		t.Fatalf("got %s, want manual_handoff", sel.SourceKind)
+	if sel.SourceKind != model.ResumePriorityExplicitSession {
+		t.Fatalf("got %s, want explicit_session", sel.SourceKind)
 	}
 	if sel.Quality != QualityPrimary {
 		t.Fatalf("got quality %s", sel.Quality)
 	}
 	if sel.Handoff == nil || sel.State == nil {
 		t.Fatalf("selection should retain both handoff and explicit state: %+v", sel)
+	}
+}
+
+func TestSelectMarksUnboundHandoffDegradedWhenNoExplicitStateExists(t *testing.T) {
+	env := testEnv(t)
+	if _, err := handoff.Create(env, handoff.CreateOptions{
+		Scope:   "project",
+		Title:   "Loose handoff",
+		Summary: "continue carefully",
+		Body:    "handoff",
+		Tags:    []string{"handoff", "manual"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sel, err := Select(env, "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel.SourceKind != model.ResumePriorityManualHandoff {
+		t.Fatalf("got %s, want manual_handoff", sel.SourceKind)
+	}
+	if sel.Quality != QualityDegraded {
+		t.Fatalf("got quality %s, want degraded", sel.Quality)
+	}
+	if sel.DegradedReason == "" {
+		t.Fatalf("expected degraded reason for unbound handoff")
 	}
 }
 

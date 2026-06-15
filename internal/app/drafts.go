@@ -23,13 +23,14 @@ func runHandoff(_ context.Context, env paths.Env, ioctx IO, args []string) error
 		printHandoffHelp(ioctx.Out)
 		return nil
 	}
-	flags, positional := splitFlags(args)
+	flags, positional := splitFlagsWithBooleans(args, map[string]bool{"handoff-only": true})
 	scope := flagValue(flags, "scope", "project")
 	title := flagValue(flags, "title", "Handoff")
-	summary := joinArgs(positional)
+	summary := strings.TrimSpace(joinArgs(positional))
 	if summary == "" {
-		summary = "Worktrail handoff generated from the latest active state."
+		return errors.New("handoff summary is required")
 	}
+	handoffOnly := flagValue(flags, "handoff-only", "") == "true"
 	sourceState, err := latestStateIfAny(env, scope)
 	if err != nil {
 		return handoffWriteError(env, scope, err)
@@ -41,21 +42,68 @@ func runHandoff(_ context.Context, env paths.Env, ioctx IO, args []string) error
 	if err != nil {
 		return handoffWriteError(env, scope, err)
 	}
-	rec, err := handoff.Create(env, handoff.CreateOptions{
-		Scope:             scope,
-		Title:             title,
-		Summary:           summary,
-		TaskID:            taskIDForHandoff(sourceState, latestHandoff, title),
-		SourceStateID:     sourceStateID(sourceState),
-		PreviousHandoffID: previousHandoffID(latestHandoff),
-		Tags:              []string{"handoff", "manual"},
-		Body:              renderHandoffRecordBody(title, summary, sourceState, "", latestHandoff),
-		Actor:             "cli:handoff",
+	sourceStatePath := ""
+	if sourceState != nil && !handoffOnly {
+		sourceStatePath = projectedArchivedStatePath(env, scope, sourceState.State.ID)
+	}
+	rec, err := createHandoffRecord(env, createHandoffRecordOptions{
+		Scope:           scope,
+		Title:           title,
+		Summary:         summary,
+		SourceState:     sourceState,
+		SourceStatePath: sourceStatePath,
+		Previous:        latestHandoff,
+		Tags:            []string{"handoff", "manual"},
+		Actor:           "cli:handoff",
 	})
 	if err != nil {
 		return handoffWriteError(env, scope, err)
 	}
+	if sourceState != nil && !handoffOnly {
+		if _, err := wtstate.Close(env, wtstate.CloseOptions{
+			Scope:   scope,
+			ID:      sourceState.State.ID,
+			Summary: summary,
+			Handoff: true,
+			Actor:   "cli:handoff",
+		}); err != nil {
+			return err
+		}
+	}
 	return printHandoffRecord(ioctx, rec, flagValue(flags, "format", "text"))
+}
+
+type createHandoffRecordOptions struct {
+	Scope           string
+	Title           string
+	Summary         string
+	SourceState     *wtstate.Capsule
+	SourceStatePath string
+	Previous        *handoff.Record
+	Tags            []string
+	Actor           string
+}
+
+func createHandoffRecord(env paths.Env, opts createHandoffRecordOptions) (handoff.Record, error) {
+	summary := strings.TrimSpace(opts.Summary)
+	if summary == "" {
+		return handoff.Record{}, errors.New("handoff summary is required")
+	}
+	title := strings.TrimSpace(opts.Title)
+	if title == "" {
+		title = "Handoff"
+	}
+	return handoff.Create(env, handoff.CreateOptions{
+		Scope:             opts.Scope,
+		Title:             title,
+		Summary:           summary,
+		TaskID:            taskIDForHandoff(opts.SourceState, opts.Previous, title),
+		SourceStateID:     sourceStateID(opts.SourceState),
+		PreviousHandoffID: previousHandoffID(opts.Previous),
+		Tags:              opts.Tags,
+		Body:              renderHandoffRecordBody(title, summary, opts.SourceState, opts.SourceStatePath, opts.Previous),
+		Actor:             opts.Actor,
+	})
 }
 
 func handoffWriteError(env paths.Env, scope string, err error) error {
@@ -74,9 +122,9 @@ func requiredWorktrailWriteDirs(root string) []string {
 }
 
 func printHandoffHelp(out io.Writer) {
-	fmt.Fprintln(out, "usage: worktrail handoff [--scope project|user] [--title <title>] [--format text|json] <summary>")
+	fmt.Fprintln(out, "usage: worktrail handoff [--scope project|user] [--title <title>] [--format text|json] [--handoff-only] <summary>")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Writes a durable handoff record under `.worktrail/handoffs/` without modifying formal knowledge outside the handoff log.")
+	fmt.Fprintln(out, "Writes a durable handoff record under `.worktrail/handoffs/`. By default, an active explicit state is closed after the handoff is created; use `--handoff-only` to keep the active state open.")
 }
 
 func printHandoffRecord(ioctx IO, rec handoff.Record, format string) error {

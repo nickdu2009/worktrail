@@ -119,15 +119,19 @@ func runState(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 			if err != nil {
 				return err
 			}
-			rec, err := handoff.Create(env, handoff.CreateOptions{
-				Scope:         scope,
-				Title:         cap.State.Title,
-				Summary:       joinArgs(positional),
-				TaskID:        wtstate.TaskID(cap),
-				SourceStateID: cap.State.ID,
-				Body:          renderHandoffRecordBody(cap.State.Title, joinArgs(positional), &cap, projectedArchivedStatePath(env, scope, cap.State.ID), nil),
-				Tags:          []string{"handoff", "state-close"},
-				Actor:         "cli:state-close",
+			latestHandoff, err := latestHandoffIfAny(env, scope)
+			if err != nil {
+				return handoffWriteError(env, scope, err)
+			}
+			rec, err := createHandoffRecord(env, createHandoffRecordOptions{
+				Scope:           scope,
+				Title:           cap.State.Title,
+				Summary:         strings.TrimSpace(joinArgs(positional)),
+				SourceState:     &cap,
+				SourceStatePath: projectedArchivedStatePath(env, scope, cap.State.ID),
+				Previous:        latestHandoff,
+				Tags:            []string{"handoff", "state-close"},
+				Actor:           "cli:state-close",
 			})
 			if err != nil {
 				return handoffWriteError(env, scope, err)

@@ -79,16 +79,16 @@ worktrail note add \
 ### 5. 建立工作记录并写一次交接
 <div class="title-en">Write a Work Log and Handoff</div>
 
-长任务开始后，先建 active state；结束时写 durable handoff：
+长任务开始后，先建 active state；显式交接时优先通过关闭 state 来写 durable handoff：
 
 ```bash
 worktrail state start "task title"
 worktrail state update "what changed, validation, and next step"
-worktrail handoff "summary of current state, validation, risks, and next step"
+worktrail state close --to handoff "summary of current state, validation, risks, and next step"
 worktrail resume "continue the same task"
 ```
 
-`worktrail handoff` 会直接写入 `.worktrail/handoffs/`；`stop` / `session-end` hooks 默认把退出现场保存在 runtime records（`state/`、checkpoint 和审计日志）里，不再起草 pending handoff candidate。
+`worktrail state close --to handoff` 会把 durable handoff 绑定到最新 explicit state，并归档该 state。裸 `worktrail handoff "<summary>"` 仍然可用，但应当只用于没有 active explicit state 的例外路径。`stop` / `session-end` hooks 默认把退出现场保存在 runtime records（`state/`、checkpoint 和审计日志）里，不再起草 pending handoff candidate。
 
 ### 6. 评审并应用候选知识
 <div class="title-en">Review and Apply Candidate Knowledge</div>
@@ -126,7 +126,7 @@ worktrail state update "what changed and what remains"
 worktrail state checkpoint --reason "safe checkpoint before next step"
 ```
 
-结束或切换工具前运行 `worktrail handoff`；新 session 开始时优先运行 `worktrail resume`。
+只有在明确交接边界（例如切 Agent、切 chat、结束当天工作）时才运行 durable handoff；若存在 active explicit state，优先运行 `worktrail state close --to handoff`。新 session 开始时优先运行 `worktrail resume`。
 
 ## 两个常见误区
 <div class="title-en">Two Common Mistakes</div>

@@ -128,6 +128,9 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 			t.Fatalf("missing section %q in %+v", title, pack.Sections)
 		}
 	}
+	if sectionIndex(pack, "Active State") > sectionIndex(pack, "Handoffs") {
+		t.Fatalf("active state should render before handoffs: %+v", pack.Sections)
+	}
 	requirements := section(pack, "Requirements")
 	if len(requirements.Items) != 1 || requirements.Items[0].Title != "New Requirement" {
 		t.Fatalf("requirements priority or superseded marker unexpected: %+v", requirements.Items)
@@ -430,6 +433,60 @@ func TestBuildTopicFiltersStateAndHandoffs(t *testing.T) {
 		if strings.Contains(rendered, absent) {
 			t.Fatalf("topic-scoped context leaked %q:\n%s", absent, rendered)
 		}
+	}
+}
+
+func TestBuildLimitsHandoffsAndPrefersCurrentEntries(t *testing.T) {
+	tmp := t.TempDir()
+	env := paths.Env{
+		UserRoot:  filepath.Join(tmp, "user"),
+		ProjectWT: filepath.Join(tmp, "project", ".worktrail"),
+	}
+	writePackDoc(t, filepath.Join(env.ProjectWT, "state", "active", "current.md"), map[string]any{
+		"id":     "current",
+		"scope":  "project",
+		"type":   "state",
+		"title":  "Current Work",
+		"status": "active",
+	}, "Continue current work.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "a.md"), map[string]any{
+		"id":         "handoff-a",
+		"scope":      "project",
+		"type":       "handoff",
+		"title":      "Current Handoff A",
+		"status":     "current",
+		"updated_at": time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+	}, "A")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "b.md"), map[string]any{
+		"id":         "handoff-b",
+		"scope":      "project",
+		"type":       "handoff",
+		"title":      "Current Handoff B",
+		"status":     "current",
+		"updated_at": time.Date(2026, 6, 15, 9, 0, 0, 0, time.UTC),
+	}, "B")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "c.md"), map[string]any{
+		"id":         "handoff-c",
+		"scope":      "project",
+		"type":       "handoff",
+		"title":      "Superseded Handoff",
+		"status":     "superseded",
+		"updated_at": time.Date(2026, 6, 15, 11, 0, 0, 0, time.UTC),
+	}, "C")
+
+	pack, err := Build(env, Options{Task: "limit handoffs"})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	handoffs := section(pack, "Handoffs")
+	if len(handoffs.Items) != 2 {
+		t.Fatalf("expected handoff section to be limited to 2 items, got %+v", handoffs.Items)
+	}
+	if handoffs.Items[0].Title != "Current Handoff A" || handoffs.Items[1].Title != "Current Handoff B" {
+		t.Fatalf("expected current handoffs to win over superseded entries: %+v", handoffs.Items)
+	}
+	if sectionIndex(pack, "Active State") > sectionIndex(pack, "Handoffs") {
+		t.Fatalf("active state should remain before handoffs: %+v", pack.Sections)
 	}
 }
 

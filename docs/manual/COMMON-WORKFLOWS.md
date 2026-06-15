@@ -65,7 +65,7 @@ worktrail state close "manual created and linked from README"
 worktrail state close --to handoff "continue from validation and README link review"
 ```
 
-如果你只是想在当前任务节点单独写一份交接记录：
+如果当前没有 active explicit state，或者你明确需要保留 state 不关闭时，才单独写一份 handoff-only 交接记录：
 
 ```bash
 worktrail handoff "Goal, current diff intent, validation, risks, open questions, and next step."
@@ -177,18 +177,18 @@ worktrail maintain knowledge --format json
 ### 何时使用
 <div class="title-en">When to Use</div>
 
-适合切换 Agent、打开新会话、准备压缩上下文、结束当天工作或需要留下恢复入口时。
+适合切换 Agent、打开新会话、结束当天工作，或者用户明确要求留下 durable 恢复入口时。
 
 ### 如何运行
 <div class="title-en">How It Runs</div>
 
-`handoff` 会写一份真实的 `.worktrail/handoffs/*.md` durable 交接记录，不会提升正式知识。`stop` / `session-end` hooks 现在默认只写 runtime records（`state/` 与 checkpoint/audit 路径），不再把 routine 退出噪音堆进 pending review inbox。
+推荐主路径是 `worktrail state close --to handoff "<summary>"`：它会写一份真实的 `.worktrail/handoffs/*.md` durable 交接记录，并关闭对应 explicit state。裸 `worktrail handoff "<summary>"` 是例外路径，适合没有 active explicit state 或明确需要 handoff-only 记录时使用。`stop` / `session-end` hooks 现在默认只写 runtime records（`state/` 与 checkpoint/audit 路径），不再把 routine 退出噪音堆进 pending review inbox。
 
 新 session 开始时优先用：
 
 ```bash
 worktrail resume
-worktrail resume "continue from latest handoff"
+worktrail resume "continue from latest explicit state or current handoff"
 ```
 
 ## 工作流 7：预览 Worktrail 文档

@@ -24,7 +24,7 @@ func resumeEnv(t *testing.T) paths.Env {
 	}
 }
 
-func TestResumePrefersManualHandoffOverHookRuntime(t *testing.T) {
+func TestResumePrefersExplicitStateOverManualHandoffAndHookRuntime(t *testing.T) {
 	env := resumeEnv(t)
 	if err := os.MkdirAll(filepath.Join(env.ProjectWT, "runtime", "sessions"), 0o755); err != nil {
 		t.Fatal(err)
@@ -49,12 +49,13 @@ func TestResumePrefersManualHandoffOverHookRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := handoff.Create(env, handoff.CreateOptions{
-		Scope:   "project",
-		Title:   "Real handoff task",
-		Summary: "Continue the real work.",
-		Tags:    []string{"handoff", "manual"},
-		Body:    "# Handoff: Real handoff task\n\n## Next Step\nShip the real feature.\n",
-		Actor:   "cli:handoff",
+		Scope:         "project",
+		Title:         "Real handoff task",
+		Summary:       "Continue the real work.",
+		SourceStateID: "older-state",
+		Tags:          []string{"handoff", "manual"},
+		Body:          "# Handoff: Real handoff task\n\n## Next Step\nShip the real feature.\n",
+		Actor:         "cli:handoff",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -62,14 +63,17 @@ func TestResumePrefersManualHandoffOverHookRuntime(t *testing.T) {
 	if err := runResume(context.Background(), env, IO{Out: &out}, []string{"--format", "json"}); err != nil {
 		t.Fatalf("runResume: %v", err)
 	}
-	if !strings.Contains(out.String(), `"recovery_source_kind":"manual_handoff"`) {
-		t.Fatalf("expected manual handoff recovery source, got %s", out.String())
+	if !strings.Contains(out.String(), `"recovery_source_kind":"explicit_session"`) {
+		t.Fatalf("expected explicit session recovery source, got %s", out.String())
 	}
 	if !strings.Contains(out.String(), `"source_state"`) {
 		t.Fatalf("resume JSON should retain explicit session as supporting source, got %s", out.String())
 	}
-	if !strings.Contains(out.String(), "Real handoff task") {
-		t.Fatalf("resume body should prefer handoff, got %s", out.String())
+	if strings.Contains(out.String(), "## Latest Handoff\\n\\n# Handoff: Real handoff task") {
+		t.Fatalf("resume body should not embed full handoff when explicit state is primary, got %s", out.String())
+	}
+	if !strings.Contains(out.String(), "Latest Handoff Summary") {
+		t.Fatalf("resume body should retain handoff summary as supporting context, got %s", out.String())
 	}
 }
 

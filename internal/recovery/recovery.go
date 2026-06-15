@@ -35,17 +35,6 @@ func Select(env paths.Env, scope string) (Selection, error) {
 	sessionRec, sessionErr := runtime.Latest(env, scope, runtime.DirSessions)
 
 	var candidates []candidate
-	if handoffErr == nil {
-		candidates = append(candidates, candidate{
-			kind:      model.ResumePriorityManualHandoff,
-			quality:   QualityPrimary,
-			title:     handoffRec.Meta.Title,
-			handoff:   &handoffRec,
-			updatedAt: handoffRec.Meta.UpdatedAt,
-		})
-	} else if !errors.Is(handoffErr, os.ErrNotExist) {
-		return Selection{}, handoffErr
-	}
 	if stateErr == nil {
 		candidates = append(candidates, candidate{
 			kind:      model.ResumePriorityExplicitSession,
@@ -56,6 +45,11 @@ func Select(env paths.Env, scope string) (Selection, error) {
 		})
 	} else if !errors.Is(stateErr, os.ErrNotExist) {
 		return Selection{}, stateErr
+	}
+	if handoffErr == nil {
+		candidates = append(candidates, handoffCandidate(handoffRec, stateErr == nil, &stateRec))
+	} else if !errors.Is(handoffErr, os.ErrNotExist) {
+		return Selection{}, handoffErr
 	}
 	if checkpointErr == nil {
 		candidates = append(candidates, candidate{
@@ -165,9 +159,9 @@ type candidate struct {
 
 func priorityRank(kind string) int {
 	switch kind {
-	case model.ResumePriorityManualHandoff:
-		return 1
 	case model.ResumePriorityExplicitSession:
+		return 1
+	case model.ResumePriorityManualHandoff:
 		return 2
 	case model.ResumePriorityRuntimeCheckpoint:
 		return 3
@@ -187,4 +181,26 @@ func titleFromRuntime(rec runtime.Record) string {
 
 func filepathToSlash(path string) string {
 	return strings.ReplaceAll(path, "\\", "/")
+}
+
+func handoffCandidate(rec handoff.Record, hasState bool, state *wtstate.Capsule) candidate {
+	cand := candidate{
+		kind:      model.ResumePriorityManualHandoff,
+		quality:   QualityPrimary,
+		title:     rec.Meta.Title,
+		handoff:   &rec,
+		updatedAt: rec.Meta.UpdatedAt,
+	}
+	switch {
+	case strings.TrimSpace(rec.Meta.Status) != "" && strings.TrimSpace(rec.Meta.Status) != "current":
+		cand.quality = QualityDegraded
+		cand.degradedReason = "Recovery is based on a superseded handoff. Prefer the latest explicit session state or a newer current handoff."
+	case strings.TrimSpace(rec.Meta.SourceStateID) == "":
+		cand.quality = QualityDegraded
+		cand.degradedReason = "Recovery is based on a handoff that is not bound to an explicit session state."
+	case hasState && state != nil && rec.Meta.SourceStateID != state.State.ID:
+		cand.quality = QualityDegraded
+		cand.degradedReason = "Recovery is based on a handoff that points to an older explicit state than the current active session."
+	}
+	return cand
 }

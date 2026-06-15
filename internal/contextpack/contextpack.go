@@ -151,8 +151,12 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 			}
 			return items[i].UpdatedAt.After(items[j].UpdatedAt)
 		})
-		if len(items) > limit {
-			items = items[:limit]
+		sectionLimit := limit
+		if spec.limit > 0 && spec.limit < sectionLimit {
+			sectionLimit = spec.limit
+		}
+		if len(items) > sectionLimit {
+			items = items[:sectionLimit]
 		}
 		if len(items) > 0 {
 			pack.Sections = append(pack.Sections, Section{Title: spec.title, Items: items})
@@ -337,33 +341,34 @@ func itemFromEntry(entry index.Entry, supersededBy []string) Item {
 type sectionSpec struct {
 	title string
 	keep  func(index.Entry) bool
+	limit int
 }
 
 func sectionSpecsForStage(stage string, includeEvidence bool) []sectionSpec {
 	specs := map[string]sectionSpec{
-		"user":         {"User Knowledge", func(e index.Entry) bool { return e.Scope == "user" && isKnowledge(e.Type) }},
-		"project":      {"Project Knowledge", func(e index.Entry) bool { return e.Scope == "project" && isProjectKnowledge(e.Type) }},
-		"requirements": {"Requirements", func(e index.Entry) bool { return e.Type == "requirement" }},
-		"architecture": {"Architecture", func(e index.Entry) bool { return e.Type == "architecture" }},
-		"integrations": {"Integrations", func(e index.Entry) bool { return e.Type == "integration" }},
-		"validation":   {"Validation", func(e index.Entry) bool { return e.Type == "validation" }},
-		"glossary":     {"Glossary", func(e index.Entry) bool { return e.Type == "glossary" }},
-		"workflows":    {"Workflows", func(e index.Entry) bool { return e.Type == "workflow" }},
-		"recovery":     {"Recovery", func(e index.Entry) bool { return isRecoveryEntry(e) }},
-		"state":        {"Active State", func(e index.Entry) bool { return e.Type == "state" && e.Active }},
-		"decisions":    {"Decisions", func(e index.Entry) bool { return e.Type == "decision" }},
-		"handoffs":     {"Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }},
-		"rules":        {"Rules", func(e index.Entry) bool { return e.Type == "rule" }},
-		"pending":      {"Pending Candidates", func(e index.Entry) bool { return pendingCandidateVisible(e, includeEvidence) }},
+		"user":         {"User Knowledge", func(e index.Entry) bool { return e.Scope == "user" && isKnowledge(e.Type) }, 0},
+		"project":      {"Project Knowledge", func(e index.Entry) bool { return e.Scope == "project" && isProjectKnowledge(e.Type) }, 0},
+		"requirements": {"Requirements", func(e index.Entry) bool { return e.Type == "requirement" }, 0},
+		"architecture": {"Architecture", func(e index.Entry) bool { return e.Type == "architecture" }, 0},
+		"integrations": {"Integrations", func(e index.Entry) bool { return e.Type == "integration" }, 0},
+		"validation":   {"Validation", func(e index.Entry) bool { return e.Type == "validation" }, 0},
+		"glossary":     {"Glossary", func(e index.Entry) bool { return e.Type == "glossary" }, 0},
+		"workflows":    {"Workflows", func(e index.Entry) bool { return e.Type == "workflow" }, 0},
+		"recovery":     {"Recovery", func(e index.Entry) bool { return isRecoveryEntry(e) }, 0},
+		"state":        {"Active State", func(e index.Entry) bool { return e.Type == "state" && e.Active }, 0},
+		"decisions":    {"Decisions", func(e index.Entry) bool { return e.Type == "decision" }, 0},
+		"handoffs":     {"Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }, 2},
+		"rules":        {"Rules", func(e index.Entry) bool { return e.Type == "rule" }, 0},
+		"pending":      {"Pending Candidates", func(e index.Entry) bool { return pendingCandidateVisible(e, includeEvidence) }, 0},
 	}
-	order := []string{"handoffs", "recovery", "state", "user", "project", "requirements", "architecture", "decisions", "validation", "rules", "workflows", "integrations", "glossary", "pending"}
+	order := []string{"state", "handoffs", "recovery", "user", "project", "requirements", "architecture", "decisions", "validation", "rules", "workflows", "integrations", "glossary", "pending"}
 	switch stage {
 	case "requirements":
-		order = []string{"handoffs", "recovery", "state", "user", "project", "requirements", "decisions", "glossary", "architecture", "validation", "workflows", "rules", "integrations", "pending"}
+		order = []string{"state", "handoffs", "recovery", "user", "project", "requirements", "decisions", "glossary", "architecture", "validation", "workflows", "rules", "integrations", "pending"}
 	case "design":
-		order = []string{"handoffs", "recovery", "state", "user", "project", "requirements", "architecture", "decisions", "glossary", "integrations", "validation", "rules", "workflows", "pending"}
+		order = []string{"state", "handoffs", "recovery", "user", "project", "requirements", "architecture", "decisions", "glossary", "integrations", "validation", "rules", "workflows", "pending"}
 	case "implementation":
-		order = []string{"handoffs", "recovery", "state", "user", "project", "architecture", "validation", "rules", "workflows", "decisions", "requirements", "integrations", "glossary", "pending"}
+		order = []string{"state", "handoffs", "recovery", "user", "project", "architecture", "validation", "rules", "workflows", "decisions", "requirements", "integrations", "glossary", "pending"}
 	}
 	out := make([]sectionSpec, 0, len(order))
 	for _, key := range order {
@@ -374,6 +379,18 @@ func sectionSpecsForStage(stage string, includeEvidence bool) []sectionSpec {
 
 func itemPriority(item Item, requestedStage string) int {
 	score := 0
+	switch item.Type {
+	case "state":
+		score += 60
+	case "handoff":
+		score += 20
+	}
+	switch strings.TrimSpace(item.Status) {
+	case "", "current", "active":
+		score += 15
+	case "superseded":
+		score -= 25
+	}
 	if len(item.SupersededBy) == 0 && !knowledge.IsNonCurrentLifecycle(item.Lifecycle) && item.Stage != "historical" && item.Stage != "retired" {
 		score += 100
 	}

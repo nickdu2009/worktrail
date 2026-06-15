@@ -80,7 +80,7 @@ skills 是 Worktrail 的对话内工作流入口。它们把多步命令链包�
 - `/worktrail-review`：把 pending semantic candidates 按推荐动作分组，并在确认后执行安全的 CLI 写操作
 - `/worktrail-distill`：从 evidence 生成 distill pack、proposal、validate/apply 链路
 - `/worktrail-maintain`：串起 `context "maintenance"`、`distill --summary`、`review plan`、`evidence plan`
-- `/worktrail-handoff`：在结束、压缩、切换工具或换会话前创建 handoff
+- `/worktrail-handoff`：只在显式交接边界创建 durable handoff，例如用户明确要求 handoff、切 Agent、切 chat 或结束当天工作
 
 skills 自动化的是流程编排，不是绕过边界。
 
