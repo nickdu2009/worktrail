@@ -20,7 +20,7 @@ Worktrail 的自动化目标很克制：
 在 Worktrail 里，自动化主要来自四层：
 
 1. agent 集成安装后的运行时文件，例如 hooks、settings 配置和用户级 skills
-2. 对话内 skills，例如 `/worktrail-context`、`/worktrail-review`、`/worktrail-distill`、`/worktrail-maintain`、`/worktrail-handoff`
+2. 对话内 skills，例如 `worktrail-context`、`worktrail-review`、`worktrail-distill`、`worktrail-maintain`、`worktrail-handoff`
 3. `context` 暴露的 maintenance hints 和只读计划命令
 4. hooks 在特定事件点生成 state、checkpoint、runtime records 或其他操作记录的能力
 
@@ -69,6 +69,21 @@ hooks 的职责是把会话事件转换成 Worktrail 可用的运行材料。
 
 也就是说，hooks 可以“自动采集和准备”，但不能“自动采纳”。
 
+## ZCode Agent 的自动化边界
+<div class="title-en">ZCode Agent Automation Boundary</div>
+
+对 ZCode Agent 来说，Worktrail 的自动化最佳实践不是依赖 hooks，而是依赖三件事：
+
+1. `~/.zcode/AGENTS.md` 中的长期规则，用来把任务语义路由到正确的 Worktrail 工作流
+2. `~/.zcode/skills/` 中已安装的 Worktrail skills，用来封装可复用流程
+3. `worktrail` CLI 本身，用来执行 `context`、`resume`、`search`、`state`、`handoff` 等命令
+
+因此，在 ZCode Agent 中更准确的说法是“语义自动化”：
+
+- Agent 在读到规则后，会在合适任务场景下主动选择 Worktrail 技能或对应 CLI
+- 这类自动化依然受 `.worktrail/` opt-in 门控约束
+- 它不依赖 Worktrail-managed 的项目级 hooks、runtime settings 或 transcript import
+
 ## Skills 自动化了什么
 <div class="title-en">What Skills Automate</div>
 
@@ -76,11 +91,11 @@ skills 是 Worktrail 的对话内工作流入口。它们把多步命令链包�
 
 常见分工是：
 
-- `/worktrail-context`：任务开始、恢复旧任务、继续长任务时先生成 Context Pack
-- `/worktrail-review`：把 pending semantic candidates 按推荐动作分组，并在确认后执行安全的 CLI 写操作
-- `/worktrail-distill`：从 evidence 生成 distill pack、proposal、validate/apply 链路
-- `/worktrail-maintain`：串起 `context "maintenance"`、`distill --summary`、`review plan`、`evidence plan`
-- `/worktrail-handoff`：只在显式交接边界创建 durable handoff，例如用户明确要求 handoff、切 Agent、切 chat 或结束当天工作
+- `worktrail-context`：任务开始、恢复旧任务、继续长任务时先生成 Context Pack
+- `worktrail-review`：把 pending semantic candidates 按推荐动作分组，并在确认后执行安全的 CLI 写操作
+- `worktrail-distill`：从 evidence 生成 distill pack、proposal、validate/apply 链路
+- `worktrail-maintain`：串起 `context "maintenance"`、`distill --summary`、`review plan`、`evidence plan`
+- `worktrail-handoff`：只在显式交接边界创建 durable handoff，例如用户明确要求 handoff、切 Agent、切 chat 或结束当天工作
 
 skills 自动化的是流程编排，不是绕过边界。
 
@@ -110,7 +125,7 @@ worktrail context "maintenance"
 - `worktrail review plan --format json`
 - `worktrail evidence plan --format json`
 
-如果使用 `/worktrail-maintain`，Agent 会先跑只读发现链，再在需要改变状态时请求明确确认。
+如果使用已安装的 `worktrail-maintain` skill，Agent 会先跑只读发现链，再在需要改变状态时请求明确确认。
 
 这类自动化的重点是：
 
@@ -165,7 +180,7 @@ Agent 可以提前完成这些准备工作：
 
 1. `worktrail init` 创建 `.worktrail/`
 2. `worktrail install <tool> --user --project` 安装工具集成
-3. 任务开始时，通过 `/worktrail-context` 或等价命令载入上下文
+3. 任务开始时，通过已安装的 `worktrail-context` skill 或等价 CLI 命令载入上下文
 4. 长任务中，通过 state、checkpoint、hooks 或 handoff 保留进度
 5. evidence 和 semantic candidates 通过 review/distill/maintain 被自动发现
 6. Agent 总结建议动作并等待确认

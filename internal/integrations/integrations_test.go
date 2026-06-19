@@ -256,6 +256,86 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 	}
 }
 
+func TestInstallZCodeDefaultIsUserOnly(t *testing.T) {
+	env := testEnv(t)
+	report, err := Install(env, ToolZCode, Options{})
+	if err != nil {
+		t.Fatalf("Install zcode: %v", err)
+	}
+	assertDoctorCheckNamed(t, report, "worktrail command available")
+	rootPath := filepath.Join(env.Home, ".zcode", "AGENTS.md")
+	data, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatalf("expected %s: %v", rootPath, err)
+	}
+	if !strings.Contains(string(data), util.ManagedBegin) {
+		t.Fatalf("expected managed block in %s", rootPath)
+	}
+	assertRenderedTriggerRouting(t, rootPath)
+	assertSemanticAutomationRootCopy(t, string(data))
+	assertInstalledSkills(t, filepath.Join(env.Home, ".zcode", "skills"))
+	assertNoPath(t, filepath.Join(env.ProjectRoot, ".gitignore"))
+	assertNoPath(t, env.ProjectWT)
+
+	doctor, err := Doctor(env, ToolZCode, Options{User: true})
+	if err != nil {
+		t.Fatalf("Doctor zcode: %v", err)
+	}
+	for _, check := range doctor.Checks {
+		if !check.OK {
+			t.Fatalf("doctor check failed: %+v", check)
+		}
+	}
+	assertDoctorCheckNamed(t, doctor, "user root instructions")
+	for _, skill := range allWorktrailSkills {
+		assertDoctorCheckNamed(t, doctor, "user skill "+skill)
+	}
+}
+
+func TestInstallZCodeProjectIsNoOp(t *testing.T) {
+	env := testEnv(t)
+	report, err := Install(env, ToolZCode, Options{Project: true})
+	if err != nil {
+		t.Fatalf("Install zcode project: %v", err)
+	}
+	if len(report.Actions) != 0 {
+		t.Fatalf("zcode project install should be a no-op, got actions: %+v", report.Actions)
+	}
+	assertNoPath(t, filepath.Join(env.ProjectRoot, ".gitignore"))
+	assertNoPath(t, env.ProjectWT)
+}
+
+func TestUninstallZCodeUserRemovesManagedFilesOnly(t *testing.T) {
+	env := testEnv(t)
+	if _, err := Install(env, ToolZCode, Options{User: true}); err != nil {
+		t.Fatalf("Install zcode: %v", err)
+	}
+
+	rootPath := filepath.Join(env.Home, ".zcode", "AGENTS.md")
+	rootWithUserContent := "# Local instructions\n\nkeep this\n\n" + util.ManagedBegin + "\nmanaged\n" + util.ManagedEnd + "\n"
+	if err := os.WriteFile(rootPath, []byte(rootWithUserContent), 0o644); err != nil {
+		t.Fatalf("seed zcode root with user content: %v", err)
+	}
+
+	if _, err := Uninstall(env, ToolZCode, Options{User: true}); err != nil {
+		t.Fatalf("Uninstall zcode: %v", err)
+	}
+
+	data, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatalf("read zcode root after uninstall: %v", err)
+	}
+	text := string(data)
+	if strings.Contains(text, util.ManagedBegin) || strings.Contains(text, util.ManagedEnd) {
+		t.Fatalf("managed zcode block should be removed after uninstall:\n%s", text)
+	}
+	if !strings.Contains(text, "keep this") {
+		t.Fatalf("unmanaged zcode instructions should remain after uninstall:\n%s", text)
+	}
+	assertNoInstalledSkills(t, filepath.Join(env.Home, ".zcode", "skills"))
+	assertNoPath(t, env.ProjectWT)
+}
+
 func TestUninstallCodexUserOnlyDoesNotCreateProjectWorktrail(t *testing.T) {
 	env := testEnv(t)
 	if _, err := UninstallCodex(env, Options{User: true}); err != nil {
@@ -675,9 +755,9 @@ func assertRenderedTriggerRouting(t *testing.T, path string) {
 		"### worktrail-review",
 		"### worktrail-maintain",
 		"worktrail handoff",
-		"new conversation",
-		"end current chat",
-		"Do not only output a copyable text handoff",
+		"another chat",
+		"worktrail install cursor|codex|claude|zcode|all",
+		"do not only output a copyable text handoff",
 		"worktrail evidence plan --format json",
 		"Root governance only summarizes the routing surface",
 	} {
@@ -687,5 +767,21 @@ func assertRenderedTriggerRouting(t *testing.T, path string) {
 	}
 	if strings.Contains(text, wtmpl.SkillTriggerRoutingPlaceholder) {
 		t.Fatalf("trigger routing placeholder leaked into %s:\n%s", path, text)
+	}
+}
+
+func assertSemanticAutomationRootCopy(t *testing.T, text string) {
+	t.Helper()
+	for _, want := range []string{
+		"installed `worktrail-context` skill",
+		"skill `worktrail-search`",
+		"installed `worktrail-review` skill",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected semantic automation wording %q in root copy:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Run `/worktrail-context`") {
+		t.Fatalf("root copy should not regress to slash-only worktrail-context guidance:\n%s", text)
 	}
 }

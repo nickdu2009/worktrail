@@ -162,7 +162,7 @@ worktrail evidence plan --format json
 worktrail maintain knowledge --format json
 ```
 
-如果使用已安装的 Agent skills，可以让 Agent 使用 `/worktrail-maintain`。它会先执行只读发现链，再等待明确确认后才执行状态改变命令。
+如果使用已安装的 Agent skills，可以让 Agent 使用 `worktrail-maintain`。它会先执行只读发现链，再等待明确确认后才执行状态改变命令。
 
 ### 何时停止
 <div class="title-en">Stop When</div>
@@ -182,7 +182,7 @@ worktrail maintain knowledge --format json
 ### 如何运行
 <div class="title-en">How It Runs</div>
 
-推荐主路径是 `worktrail state close --to handoff "<summary>"`：它会写一份真实的 `.worktrail/handoffs/*.md` durable 交接记录，并关闭对应 explicit state。裸 `worktrail handoff "<summary>"` 是例外路径，适合没有 active explicit state 或明确需要 handoff-only 记录时使用。`stop` / `session-end` hooks 现在默认只写 runtime records（`state/` 与 checkpoint/audit 路径），不再把 routine 退出噪音堆进 pending review inbox。
+推荐主路径是 `worktrail state close --to handoff "<summary>"`：它会写一份真实的 `.worktrail/handoffs/*.md` durable 交接记录，并关闭对应 explicit state。裸 `worktrail handoff "<summary>"` 是例外路径，适合没有 active explicit state 或明确需要 handoff-only 记录时使用。`stop` / `session-end` hooks 现在默认只写 runtime records（`state/` 与 checkpoint/audit 路径），不再把 routine 退出噪音堆进 pending review inbox。对 ZCode Agent 来说，这条工作流仍然成立，只是触发方式来自 `AGENTS.md` 路由和已安装 skills，而不是 Worktrail-managed hooks。
 
 新 session 开始时优先用：
 
@@ -225,4 +225,4 @@ worktrail preview --clear-cache
 worktrail preview --scope user --clear-cache
 ```
 
-如果你已经把 Worktrail skill/rule 安装到 Cursor、Codex 或 Claude，升级到这个整体预览行为后，记得重新运行 `worktrail install <tool> --user`（以及需要时的 `--project`）刷新 agent 侧规则。
+如果你已经把 Worktrail skill/指令安装到 Cursor、Codex、Claude 或 ZCode，升级到这个整体预览行为后，记得重新运行 `worktrail install <tool> --user`（以及需要时的 `--project`）刷新 agent 侧规则。

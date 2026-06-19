@@ -10,7 +10,7 @@ func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 		"worktrail-context":     {"worktrail context", "load context", "worktrail resume"},
 		"worktrail-doc-preview": {"worktrail preview", "--no-open", "keyword lookup", "worktrail search"},
 		"worktrail-search":      {"worktrail search", "keyword", "`rg`, `grep`, `find`, `worktrail context`, or `worktrail preview`"},
-		"worktrail-init":        {"worktrail init", "worktrail install cursor|codex|claude|all", "worktrail doctor <tool>", "`worktrail` CLI is available in `PATH`"},
+		"worktrail-init":        {"worktrail init", "worktrail install cursor|codex|claude|zcode|all", "worktrail doctor <tool>", "`worktrail` CLI is available in `PATH`"},
 		"worktrail-state":       {"worktrail state", "checkpoint", "worktrail resume"},
 		"worktrail-resume":      {"worktrail resume", "latest state", "durable handoff", "worktrail state inject", "worktrail state list", "worktrail state show"},
 		"worktrail-handoff":     {"worktrail state close --to handoff", "continue later in another chat", "switch agents", "do not only output a copyable text handoff"},
@@ -58,7 +58,7 @@ func TestRenderRootTemplateReplacesRoutingPlaceholder(t *testing.T) {
 			t.Fatalf("placeholder %q was not replaced:\n%s", placeholder, rendered)
 		}
 	}
-	for _, want := range []string{"# Worktrail", "## Skill Trigger Routing", "Project activation gate", "worktrail-handoff", "worktrail state close --to handoff", "continue later in another chat", "switch agents"} {
+	for _, want := range []string{"# Worktrail", "## Skill Trigger Routing", "Project activation gate", "worktrail-handoff", "worktrail state close --to handoff", "continue later in another chat", "switch agents", "installed `worktrail-context` skill", "skill `worktrail-search`"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered root template missing %q:\n%s", want, rendered)
 		}
@@ -116,7 +116,7 @@ func TestSkillTemplatesExposeTriggerIntent(t *testing.T) {
 		"worktrail-context":     {"description:", "Use this skill when", "starting", "continuing", "load context", ".worktrail/"},
 		"worktrail-doc-preview": {"description:", "Use this skill when", "preview", "overall", "candidate", ".worktrail/"},
 		"worktrail-search":      {"description:", "Use this skill when", "search", "keyword", "do not substitute", ".worktrail/"},
-		"worktrail-init":        {"description:", "Use this skill when", "initialize Worktrail", "install", "doctor", "worktrail --help", ".worktrail/"},
+		"worktrail-init":        {"description:", "Use this skill when", "initialize Worktrail", "install", "doctor", "worktrail --help", ".worktrail/", ".zcode/skills"},
 		"worktrail-state":       {"description:", "Use this skill when", "long", "risky", "checkpoint", "worktrail-resume", ".worktrail/"},
 		"worktrail-resume":      {"description:", "Use this skill when", "resume", "latest state", "state inject", ".worktrail/"},
 		"worktrail-handoff":     {"description:", "Use this skill", "continue later in another chat", "switch agents", "worktrail state close --to handoff", "do not only output", ".worktrail/"},

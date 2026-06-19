@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// FS contains Worktrail integration assets installed into Codex and Claude Code.
+// FS contains Worktrail integration assets installed into supported agent surfaces.
 //
 //go:embed skills/*/SKILL.md root/*.md root/*.mdc config/*.json
 var FS embed.FS

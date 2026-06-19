@@ -19,7 +19,7 @@ func runInstall(_ context.Context, env paths.Env, ioctx IO, args []string) error
 	opts := integrationOptions(flags)
 	target := args[0]
 	if target == "all" {
-		for _, tool := range []integrations.Tool{integrations.ToolCodex, integrations.ToolClaude, integrations.ToolCursor} {
+		for _, tool := range []integrations.Tool{integrations.ToolCodex, integrations.ToolClaude, integrations.ToolCursor, integrations.ToolZCode} {
 			report, err := integrations.Install(env, tool, opts)
 			if err != nil {
 				return err

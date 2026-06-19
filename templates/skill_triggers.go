@@ -25,7 +25,7 @@ var skillTriggers = []SkillTrigger{
 			"starting substantial project work, loading project memory, or when the user asks to start work, load context, or load project context",
 		},
 		RequiredActions: []string{
-			"Run `/worktrail-context` or `worktrail context \"<task>\"` before substantial work.",
+			"Use the installed `worktrail-context` skill when available, or run `worktrail context \"<task>\"` before substantial work.",
 			"Read the Context Pack and follow active state, constraints, maintenance hints, and next steps.",
 		},
 		Never: []string{
@@ -76,12 +76,12 @@ var skillTriggers = []SkillTrigger{
 	{
 		Skill: "worktrail-init",
 		UseWhen: []string{
-			"the user asks to initialize Worktrail, set up Worktrail, install Worktrail for Cursor, Codex, Claude, or all agents, configure Worktrail hooks, rules, skills, or tool settings",
+			"the user asks to initialize Worktrail, set up Worktrail, install Worktrail for Cursor, Codex, Claude, ZCode, or all agents, configure Worktrail hooks, rules, skills, or tool settings",
 		},
 		RequiredActions: []string{
 			"Ensure the Worktrail CLI is installed and `worktrail` is available in `PATH` before installing Worktrail-managed skills, hooks, or tool settings.",
 			"Run `worktrail init` for Worktrail user and project initialization.",
-			"Run `worktrail install cursor|codex|claude|all --user|--project` as requested and verify with `worktrail doctor <tool> --user|--project`.",
+			"Run `worktrail install cursor|codex|claude|zcode|all --user|--project` as requested and verify with `worktrail doctor <tool> --user|--project`.",
 			"Report the Worktrail-managed files affected, including `.worktrail`, `.gitignore`, agent hooks, tool settings, rules, and skills as applicable.",
 		},
 		Never: []string{
@@ -89,7 +89,7 @@ var skillTriggers = []SkillTrigger{
 			"Do not require the target project to have any specific technology stack or overwrite non-Worktrail configuration.",
 		},
 		RootIntent:    "the user asks to initialize Worktrail, install Worktrail integrations, or configure Worktrail hooks, rules, skills, or tool settings",
-		RootCommand:   "Run `worktrail init`, then `worktrail install cursor|codex|claude|all --user|--project`, and verify with `worktrail doctor <tool> --user|--project`.",
+		RootCommand:   "Run `worktrail init`, then `worktrail install cursor|codex|claude|zcode|all --user|--project`, and verify with `worktrail doctor <tool> --user|--project`.",
 		RootGuardrail: "Ensure the `worktrail` CLI is available in `PATH`, and do not initialize unrelated app/framework tooling.",
 	},
 	{
@@ -134,7 +134,7 @@ var skillTriggers = []SkillTrigger{
 		RequiredActions: []string{
 			"Summarize active state, current diff intent, validation, risks, open questions, and the next step.",
 			"If an active explicit state exists, run `worktrail state close --to handoff \"<summary>\"` so the handoff is bound to the latest state and that state is archived atomically.",
-			"If no active explicit state exists, run `/worktrail-handoff` or `worktrail handoff \"<summary>\"` and write a durable Worktrail handoff record.",
+			"If no active explicit state exists, use the installed `worktrail-handoff` skill or run `worktrail handoff \"<summary>\"` and write a durable Worktrail handoff record.",
 		},
 		Never: []string{
 			"Do not only output a copyable text handoff when the user asked for a Worktrail handoff.",
@@ -152,7 +152,7 @@ var skillTriggers = []SkillTrigger{
 		},
 		RequiredActions: []string{
 			"Run the relevant bounded dry-run first: `worktrail import codex --since 14d`, `worktrail import cursor --limit 20`, `worktrail sync <source> <file>`, or `worktrail migrate kdd`; prefer the exact command from `worktrail context \"maintenance\"` when present.",
-			"Create pending candidates only after the user asked to proceed, then hand off review to `/worktrail-review`.",
+			"Create pending candidates only after the user asked to proceed, then hand off review to the installed `worktrail-review` skill or the equivalent review CLI flow.",
 		},
 		Never: []string{
 			"Do not promote imported transcript notes or migration sources directly.",
@@ -170,7 +170,7 @@ var skillTriggers = []SkillTrigger{
 		RequiredActions: []string{
 			"Run `worktrail distill --pending --summary` first and preserve any suggested `--scope`.",
 			"Create a temporary evidence pack, draft a `worktrail.distill.proposal.v1` proposal, run `worktrail distill validate <proposal.json>`, wait for explicit confirmation, then run `worktrail distill apply <proposal.json>`.",
-			"Run `worktrail review plan --format json` after apply and hand off review to `/worktrail-review`.",
+			"Run `worktrail review plan --format json` after apply and hand off review to the installed `worktrail-review` skill or the equivalent review CLI flow.",
 		},
 		Never: []string{
 			"Do not paste transcript evidence bodies, local paths, usernames, session ids, or temporary file paths into durable docs.",
@@ -250,16 +250,16 @@ func RenderRootShared() string {
 		"- If `.worktrail/` is absent, do not automatically run Worktrail context, preview, search, state, resume, handoff, import, review, maintain, distill, or note workflows.",
 		"- This gate does not block explicit user requests to initialize, install, inspect, or repair Worktrail itself.",
 		"",
-		"- Run `/worktrail-context` or `worktrail context \"<task>\"` before starting substantial work.",
-		"- Use `/worktrail-doc-preview` or `worktrail preview` when you need to browse Worktrail knowledge.",
-		"- Use `/worktrail-search` or `worktrail search \"<keyword>\"` when you need to pinpoint Worktrail knowledge.",
-		"- Keep `/worktrail-state` current for long or risky sessions.",
-		"- Use `/worktrail-handoff` only when the user explicitly asks to hand off, continue later in another chat, or switch agents with durable recovery context.",
+		"- Use the installed `worktrail-context` skill, or run `worktrail context \"<task>\"`, before starting substantial work.",
+		"- Use the installed `worktrail-doc-preview` skill, or `worktrail preview`, when you need to browse Worktrail knowledge.",
+		"- Use the installed `worktrail-search` skill, or `worktrail search \"<keyword>\"`, when you need to pinpoint Worktrail knowledge.",
+		"- Keep the installed `worktrail-state` skill current for long or risky sessions.",
+		"- Use the installed `worktrail-handoff` skill only when the user explicitly asks to hand off, continue later in another chat, or switch agents with durable recovery context.",
 		"- Prefer `worktrail state close --to handoff \"<summary>\"` over bare `worktrail handoff` whenever an active explicit state exists.",
-		"- Use `/worktrail-resume` or `worktrail resume \"<task>\"` at the start of a new session when you need to continue prior work from the latest state and handoff.",
-		"- Use `/worktrail-import` only for explicit transcript files that should become pending candidates.",
+		"- Use the installed `worktrail-resume` skill, or `worktrail resume \"<task>\"`, at the start of a new session when you need to continue prior work from the latest state and handoff.",
+		"- Use the installed `worktrail-import` skill only for explicit transcript files that should become pending candidates.",
 		"- Use `worktrail note add ...` when the user asks to write, capture, or land a finding into Worktrail knowledge; this creates a pending candidate instead of editing formal `.worktrail` knowledge directly.",
-		"- Use `/worktrail-review` or `worktrail review` to inspect candidates before any promote, merge, discard, restore, or retire action.",
+		"- Use the installed `worktrail-review` skill, or `worktrail review`, to inspect candidates before any promote, merge, discard, restore, or retire action.",
 		"",
 		"Worktrail is the only project knowledge route. Use Worktrail context, note, review, and handoff flows for durable knowledge; do not read from or write to legacy KDD directories. Do not directly edit formal `.worktrail` knowledge files. Use `worktrail handoff` for durable handoff records under `.worktrail/handoffs/`.",
 		"",
@@ -269,12 +269,12 @@ func RenderRootShared() string {
 		"",
 		"| User intent | Use this command | Do NOT use these substitutes |",
 		"| --- | --- | --- |",
-		"| Look up a Worktrail rule, lesson, decision, workflow, or note by keyword/term/phrase (\"find\", \"search\", \"look up\", \"where is X documented\") | `worktrail search \"<keyword>\"` (skill `/worktrail-search`) | `rg`, `grep`, `find`, `cat`, `worktrail context`, `worktrail preview` |",
-		"| Continue prior Worktrail work in a new session (\"resume\", \"pick up where I left off\", \"continue previous session\", \"load my previous Worktrail context for this new chat\") | `worktrail resume [<task>]` (skill `/worktrail-resume`) | `worktrail context`, `worktrail state inject`, `worktrail state start`, `worktrail state list`, `worktrail state show` |",
-		"| Browse the rendered Worktrail knowledge site for a doc, candidate, handoff, workflow, profile, rule, or lesson | `worktrail preview --scope <scope>` (skill `/worktrail-doc-preview`) | `worktrail search`, target project's dev server, ad hoc Markdown viewers |",
-		"| Start substantial project work or load project memory for a new task | `worktrail context \"<task>\"` (skill `/worktrail-context`) | `worktrail resume`, `worktrail search`, `worktrail preview` |",
-		"| Record current state, checkpoint, or update progress for the active session | `worktrail state start|update|checkpoint|inject` (skill `/worktrail-state`) | `worktrail resume`, `worktrail handoff` (until ending the session) |",
-		"| Create a durable handoff because the user explicitly wants to hand off, switch agents, or continue later in a new chat | `worktrail state close --to handoff \"<summary>\"` (or `worktrail handoff \"<summary>\"` when no active explicit state exists) (skill `/worktrail-handoff`) | `worktrail state checkpoint` alone, copy-pasted text summaries, automatic handoff at normal task boundaries |",
+		"| Look up a Worktrail rule, lesson, decision, workflow, or note by keyword/term/phrase (\"find\", \"search\", \"look up\", \"where is X documented\") | `worktrail search \"<keyword>\"` (skill `worktrail-search`) | `rg`, `grep`, `find`, `cat`, `worktrail context`, `worktrail preview` |",
+		"| Continue prior Worktrail work in a new session (\"resume\", \"pick up where I left off\", \"continue previous session\", \"load my previous Worktrail context for this new chat\") | `worktrail resume [<task>]` (skill `worktrail-resume`) | `worktrail context`, `worktrail state inject`, `worktrail state start`, `worktrail state list`, `worktrail state show` |",
+		"| Browse the rendered Worktrail knowledge site for a doc, candidate, handoff, workflow, profile, rule, or lesson | `worktrail preview --scope <scope>` (skill `worktrail-doc-preview`) | `worktrail search`, target project's dev server, ad hoc Markdown viewers |",
+		"| Start substantial project work or load project memory for a new task | `worktrail context \"<task>\"` (skill `worktrail-context`) | `worktrail resume`, `worktrail search`, `worktrail preview` |",
+		"| Record current state, checkpoint, or update progress for the active session | `worktrail state start|update|checkpoint|inject` (skill `worktrail-state`) | `worktrail resume`, `worktrail handoff` (until ending the session) |",
+		"| Create a durable handoff because the user explicitly wants to hand off, switch agents, or continue later in a new chat | `worktrail state close --to handoff \"<summary>\"` (or `worktrail handoff \"<summary>\"` when no active explicit state exists) (skill `worktrail-handoff`) | `worktrail state checkpoint` alone, copy-pasted text summaries, automatic handoff at normal task boundaries |",
 		"",
 		"If two rows seem to fit, pick the more specific intent (search/resume win over context/preview/state when keyword lookup or session recovery is the primary goal).",
 		"",

@@ -10,7 +10,7 @@ Worktrail 有三件事需要区分：
 
 - CLI：本机可执行的 `worktrail` 命令
 - Worktrail scope：用户级 `~/.worktrail/` 和项目级 `.worktrail/`
-- Agent 集成：给 Codex、Claude Code、Cursor 安装规则、skills、hooks 或工具配置
+- Agent 集成：给 Codex、Claude Code、Cursor、ZCode Agent 安装规则、skills、hooks 或工具配置
 
 普通使用者可以按这个顺序理解：
 
@@ -66,7 +66,7 @@ worktrail init-project
 ## 安装 Agent 集成
 <div class="title-en">Install Agent Integrations</div>
 
-Worktrail 当前支持 `codex`、`claude`、`cursor` 和 `all`。
+Worktrail 当前支持 `codex`、`claude`、`cursor`、`zcode` 和 `all`。
 
 ### 用户级集成
 <div class="title-en">User Scope Integration</div>
@@ -77,11 +77,12 @@ Worktrail 当前支持 `codex`、`claude`、`cursor` 和 `all`。
 worktrail install cursor --user
 worktrail install codex --user
 worktrail install claude --user
+worktrail install zcode --user
 ```
 
 默认未指定 scope 时，`worktrail install <tool>` 等价于用户级安装。
 
-用户级安装会写入跟随个人环境的规则和 skills。Cursor 用户级安装会把 Worktrail rule 和 skills 写入 Cursor 自己的用户目录；如果已有兼容的 `$HOME/.agents/skills`、`$HOME/.codex/skills` 或 `$HOME/.claude/skills`，`doctor cursor --user` 会把这些重复可见副本提示为 warning，但不会阻止安装。
+用户级安装会写入跟随个人环境的规则和 skills。Cursor 用户级安装会把 Worktrail rule 和 skills 写入 Cursor 自己的用户目录；如果已有兼容的 `$HOME/.agents/skills`、`$HOME/.codex/skills` 或 `$HOME/.claude/skills`，`doctor cursor --user` 会把这些重复可见副本提示为 warning，但不会阻止安装。ZCode Agent 的用户级安装会写入 `~/.zcode/AGENTS.md` 和 `~/.zcode/skills/`，并通过这些指令与技能把 Worktrail 自动化表达成 Agent 的语义路由，而不是项目级 hooks。
 
 ### 项目级集成
 <div class="title-en">Project Scope Integration</div>
@@ -94,7 +95,7 @@ worktrail install codex --project
 worktrail install claude --project
 ```
 
-项目级安装主要写入当前仓库需要的 hooks、settings 配置和 `.gitignore` 运行时条目。它不会从 `templates/root/**` 或 `templates/skills/**` 安装项目级规则或项目级 skills。
+项目级安装主要写入当前仓库需要的 hooks、settings 配置和 `.gitignore` 运行时条目。它不会从 `templates/root/**` 或 `templates/skills/**` 安装项目级规则或项目级 skills。ZCode Agent 当前没有 Worktrail-managed 的项目级 hooks 或 runtime settings，因此不需要 `worktrail install zcode --project`。
 
 ### 一次安装用户级和项目级
 <div class="title-en">Install Both Scopes</div>
@@ -105,11 +106,19 @@ worktrail install claude --project
 worktrail install cursor --user --project
 ```
 
-如果你要同时接入 Codex、Claude Code 和 Cursor：
+如果你想完整接入 ZCode Agent，当前只需要用户级安装：
+
+```bash
+worktrail install zcode --user
+```
+
+如果你要同时接入 Codex、Claude Code、Cursor 和 ZCode Agent：
 
 ```bash
 worktrail install all --user --project
 ```
+
+这条命令会同时安装 ZCode Agent 的用户级集成；ZCode Agent 当前不会额外生成项目级 hooks 或 settings。
 
 ## 检查安装
 <div class="title-en">Check the Installation</div>
@@ -127,6 +136,7 @@ worktrail doctor cursor --user
 worktrail doctor cursor --project
 worktrail doctor codex --user --project
 worktrail doctor claude --user --project
+worktrail doctor zcode --user
 ```
 
 检查知识治理问题：
@@ -145,6 +155,7 @@ worktrail doctor knowledge
 ```bash
 worktrail uninstall cursor --user
 worktrail uninstall cursor --project
+worktrail uninstall zcode --user
 ```
 
 卸载集成只处理对应集成写入的托管文件，不等同于删除 `.worktrail/` 中的知识、状态或候选记录。

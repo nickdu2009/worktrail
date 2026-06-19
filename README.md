@@ -1,6 +1,6 @@
 # Worktrail
 
-`worktrail` is a local-first knowledge base, work log, and handoff tool for AI coding sessions in Codex, Claude Code, and Cursor.
+`worktrail` is a local-first knowledge base, work log, and handoff tool for AI coding sessions in Codex, Claude Code, Cursor, and ZCode Agent.
 
 The command name is `worktrail`; the Go module path is `github.com/nickdu2009/worktrail`.
 
@@ -44,7 +44,7 @@ worktrail preview --scope user
 
 `worktrail preview` renders a local multi-page static site for the selected scope and opens the entry page in the browser. The entry path is stable under `.worktrail/.cache/preview/index.html`, and the command does not start a long-running HTTP preview service.
 
-If you already installed Worktrail-managed skills or rules for Cursor, Codex, or Claude, rerun `worktrail install <tool> --user` (and `--project` where applicable) after upgrading so agents pick up the new preview contract.
+If you already installed Worktrail-managed skills or rules for Cursor, Codex, Claude, or ZCode, rerun `worktrail install <tool> --user` (and `--project` where applicable) after upgrading so agents pick up the new preview contract.
 
 ## Main workflow
 
@@ -123,13 +123,16 @@ worktrail install <tool> --project
 
 When Worktrail updates bundled rules, skills, or hook/settings templates, rerun `worktrail install <tool> --user --project` for the affected tool so the managed integration files pick up the new contract.
 
-Use `worktrail install all --user --project` to set up Codex, Claude Code, and Cursor together, or explicit targets such as `worktrail install codex --user --project` and `worktrail install claude --user --project` when only a subset should be installed.
+Use `worktrail install all --user --project` to set up Codex, Claude Code, Cursor, and ZCode Agent together, or explicit targets such as `worktrail install codex --user --project` and `worktrail install zcode --user` when only a subset should be installed. ZCode Agent currently uses only the user-level installation surface.
 
 Current capability matrix:
 
 - Codex: user instructions and skills, project hooks/runtime config, doctor, uninstall, current-project `import codex` discovery, and explicit transcript `sync`/`extract`.
 - Claude Code: user instructions and skills, project hooks/settings runtime config, doctor, uninstall, and explicit transcript `sync claude <file>` / `extract --source claude`. There is no automatic `import claude` discovery yet.
 - Cursor: user-level rule and skills, project hooks runtime config, doctor, uninstall, safe observed transcript metadata, and `import cursor` from explicit `--file` paths or Worktrail-observed transcript metadata. Cursor user install manages the Cursor-visible Worktrail rule and skills; Cursor project install does not create project rules or project skills. Cursor import does not scan undocumented private Cursor directories.
+- ZCode Agent: user instructions and skills via `~/.zcode/AGENTS.md` and `~/.zcode/skills`, doctor, and uninstall. ZCode Agent does not currently have Worktrail-managed project hooks/runtime config or transcript import support.
+
+For ZCode Agent, Worktrail automation is semantic rather than hook-driven: the installed `AGENTS.md` guidance routes the agent toward Worktrail skills and direct `worktrail` CLI commands when the workspace has opted in with `.worktrail/`.
 
 Cursor may also see user-level Worktrail skills through compatible roots such as `$HOME/.agents/skills`, `$HOME/.codex/skills`, and `$HOME/.claude/skills`. Cursor user install always writes managed skills to `$HOME/.cursor/skills` so they appear in Cursor directly; `doctor cursor --user` reports duplicate visible skills as warnings, not failures.
 
@@ -142,7 +145,7 @@ worktrail distill --pending --summary --scope user
 worktrail evidence plan --format json --scope user
 ```
 
-For routine upkeep, use the installed `/worktrail-maintain` skill. It chains `context "maintenance"`, `distill --pending --summary`, `review plan --format json`, `evidence plan --format json`, and `maintain knowledge --format json` when a proposal workflow is needed, then waits for explicit confirmation before any state-changing command. Maintenance counts track the default pending inbox (semantic review + evidence lanes); operational candidates remain inspectable through `worktrail review --all` and preview, but do not count as default review work.
+For routine upkeep, use the installed `worktrail-maintain` skill. It chains `context "maintenance"`, `distill --pending --summary`, `review plan --format json`, `evidence plan --format json`, and `maintain knowledge --format json` when a proposal workflow is needed, then waits for explicit confirmation before any state-changing command. Maintenance counts track the default pending inbox (semantic review + evidence lanes); operational candidates remain inspectable through `worktrail review --all` and preview, but do not count as default review work.
 
 Saved review plans can be applied only with confirmation:
 

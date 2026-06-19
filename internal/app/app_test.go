@@ -496,6 +496,43 @@ func TestInstallAllIncludesCursorAndPreservesCompatibleSkills(t *testing.T) {
 	}
 }
 
+func TestInstallAllUserIncludesZCode(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WORKTRAIL_HOME", filepath.Join(home, ".worktrail"))
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	t.Setenv("HOME", home)
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), []string{"install", "all", "--user"}, nil, &out, &errb); err != nil {
+		t.Fatalf("Run install all --user: %v stderr=%s", err, errb.String())
+	}
+	for _, path := range []string{
+		filepath.Join(home, ".codex", "AGENTS.md"),
+		filepath.Join(home, ".claude", "CLAUDE.md"),
+		filepath.Join(home, ".cursor", "rules", "worktrail.mdc"),
+		filepath.Join(home, ".zcode", "AGENTS.md"),
+		filepath.Join(home, ".zcode", "skills", "worktrail-context", "SKILL.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected install all user file %s: %v", path, err)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(project, ".gitignore"),
+		filepath.Join(project, ".codex", "hooks.json"),
+		filepath.Join(project, ".claude", "settings.json"),
+		filepath.Join(project, ".cursor", "hooks.json"),
+		filepath.Join(project, ".worktrail"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("user-only install should not create project file %s, err=%v", path, err)
+		}
+	}
+}
+
 func TestImportCodexDiscoversAndExtractsProjectSessions(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")

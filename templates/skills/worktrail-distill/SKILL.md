@@ -32,4 +32,4 @@ Never promote, merge, or discard `migration_source` or legacy KDD split-source c
 4. Run `worktrail distill validate <proposal.json>` and summarize candidate ids, target paths, candidate types, operations, warning codes, and error codes. Do not paste transcript evidence bodies.
 5. After confirmation, run `worktrail distill apply <proposal.json>` with the same scope used for validation.
 6. Delete temporary pack and proposal files unless the user explicitly asks to keep them.
-7. Run `worktrail review plan --format json` and hand off review to `/worktrail-review`.
+7. Run `worktrail review plan --format json` and hand off review to the installed `worktrail-review` skill or the equivalent `worktrail review` CLI flow.

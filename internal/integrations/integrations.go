@@ -23,6 +23,7 @@ const (
 	ToolCodex  Tool = "codex"
 	ToolClaude Tool = "claude"
 	ToolCursor Tool = "cursor"
+	ToolZCode  Tool = "zcode"
 )
 
 type Options struct {
@@ -53,7 +54,7 @@ func Install(env paths.Env, tool Tool, opts Options) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	opts = normalizeOptions(opts)
+	opts = effectiveOptions(tool, opts)
 	report := Report{Tool: tool}
 	if opts.User {
 		if err := installScope(cfg, "user", &report); err != nil {
@@ -75,7 +76,7 @@ func Uninstall(env paths.Env, tool Tool, opts Options) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	opts = normalizeOptions(opts)
+	opts = effectiveOptions(tool, opts)
 	report := Report{Tool: tool}
 	if opts.User {
 		if err := uninstallScope(cfg, "user", &report); err != nil {
@@ -106,7 +107,7 @@ func Doctor(env paths.Env, tool Tool, opts Options) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	opts = normalizeOptions(opts)
+	opts = effectiveOptions(tool, opts)
 	report := Report{Tool: tool}
 	report.Checks = append(report.Checks, worktrailCommandCheck())
 	if opts.User {
@@ -126,12 +127,20 @@ func InstallClaude(env paths.Env, opts Options) (Report, error) {
 	return Install(env, ToolClaude, opts)
 }
 
+func InstallZCode(env paths.Env, opts Options) (Report, error) {
+	return Install(env, ToolZCode, opts)
+}
+
 func UninstallCodex(env paths.Env, opts Options) (Report, error) {
 	return Uninstall(env, ToolCodex, opts)
 }
 
 func UninstallClaude(env paths.Env, opts Options) (Report, error) {
 	return Uninstall(env, ToolClaude, opts)
+}
+
+func UninstallZCode(env paths.Env, opts Options) (Report, error) {
+	return Uninstall(env, ToolZCode, opts)
 }
 
 type integrationConfig struct {
@@ -223,6 +232,15 @@ func configFor(tool Tool, env paths.Env) (integrationConfig, error) {
 			projectJSONs: []jsonTemplate{
 				{path: filepath.Join(env.ProjectRoot, ".cursor", "hooks.json"), template: "config/cursor-hooks.json"},
 			},
+		}, nil
+	case ToolZCode:
+		return integrationConfig{
+			tool:          tool,
+			projectRoot:   env.ProjectRoot,
+			rootTemplate:  "root/AGENTS.md",
+			userRootFile:  filepath.Join(env.Home, ".zcode", "AGENTS.md"),
+			userSkillRoot: filepath.Join(env.Home, ".zcode", "skills"),
+			userSkills:    worktrailUserSkills,
 		}, nil
 	default:
 		return integrationConfig{}, fmt.Errorf("unknown integration tool %q", tool)
@@ -945,6 +963,14 @@ func jsonSliceContains(slice []any, item any) bool {
 func normalizeOptions(opts Options) Options {
 	if !opts.User && !opts.Project {
 		return Options{User: true}
+	}
+	return opts
+}
+
+func effectiveOptions(tool Tool, opts Options) Options {
+	opts = normalizeOptions(opts)
+	if tool == ToolZCode {
+		opts.Project = false
 	}
 	return opts
 }

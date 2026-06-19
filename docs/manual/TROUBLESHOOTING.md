@@ -135,11 +135,17 @@ worktrail init-project
 worktrail doctor cursor --user --project
 worktrail doctor codex --user --project
 worktrail doctor claude --user --project
+worktrail doctor zcode --user
 ```
 
 3. 重新打开或重启对应 Agent，让它重新发现用户级 rules 和 skills。
 
 用户级 Worktrail skills 默认只在存在 `.worktrail/` 的项目中自动运行常规工作流。没有这个标记时，Worktrail 只应响应显式 init、install、inspect 或 repair 请求。
+
+如果你使用的是 ZCode Agent，还要额外确认两点：
+
+1. `~/.zcode/AGENTS.md` 和 `~/.zcode/skills/` 已经通过 `worktrail install zcode --user` 写入。
+2. 预期要调整成“语义自动化”：ZCode Agent 会根据 `AGENTS.md` 规则主动选择 Worktrail skill 或 CLI，而不是依赖 session/tool hooks 自动触发。
 
 ## Review 看不到刚才的证据
 <div class="title-en">Review Does Not Show Evidence</div>

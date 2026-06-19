@@ -21,7 +21,7 @@ Use this skill when a new session should continue prior Worktrail work from the 
 2. Run `worktrail resume "$ARGUMENTS"` or `worktrail resume` when no new task title is needed before using any fallback state/context command.
 3. Read the resumed state output and note the linked state and/or handoff records.
 4. Continue work from those linked records instead of reconstructing context manually.
-5. If the resumed task becomes long or risky again, keep using `/worktrail-state` for ongoing progress updates.
+5. If the resumed task becomes long or risky again, keep using the installed `worktrail-state` skill or `worktrail state ...` for ongoing progress updates.
 
 ## Output
 

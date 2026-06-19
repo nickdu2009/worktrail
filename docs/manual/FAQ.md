@@ -66,7 +66,7 @@ worktrail review --all
 worktrail handoff "summary, validation, risks, open questions, and next step"
 ```
 
-`worktrail handoff` 会直接写入 `.worktrail/handoffs/` 下的真实交接记录；自动 hooks 只会在需要时起草 pending handoff candidate。
+`worktrail handoff` 会直接写入 `.worktrail/handoffs/` 下的真实交接记录；`stop` / `session-end` hooks 现在默认只保留 runtime records，不再自动起草 pending handoff candidate。
 
 ## 什么时候用 `resume`？
 <div class="title-en">When Should I Use resume</div>
@@ -86,6 +86,15 @@ worktrail resume "continue review follow-up"
 安装 Cursor 用户级集成后，Cursor 可以看到 Worktrail rule 和 skills。用户级 skills 只有在当前 workspace 或 repo root 存在 `.worktrail/` 时才应自动运行常规 Worktrail 工作流。
 
 如果没有 `.worktrail/`，Worktrail 仍可用于显式 init、install、inspect 或 repair 请求。
+
+## ZCode Agent 会自动使用 Worktrail 吗？
+<div class="title-en">Does ZCode Agent Use Worktrail Automatically?</div>
+
+会，但最佳实践要理解成“语义自动化”而不是“hooks 自动触发”。
+
+安装 `worktrail install zcode --user` 后，ZCode Agent 会读取 `~/.zcode/AGENTS.md` 和 `~/.zcode/skills/`。当当前 workspace 或 repo root 已经存在 `.worktrail/` 时，Agent 应该根据这些规则主动选择 Worktrail skill 或直接运行对应 CLI，例如 `worktrail context`、`worktrail resume`、`worktrail search`、`worktrail state`、`worktrail handoff`。
+
+ZCode Agent 当前没有 Worktrail-managed 的项目级 hooks、runtime settings 或 transcript import 支持，所以不要把它理解成 Cursor / Claude Code 那种事件驱动自动化。
 
 ## 什么时候需要 `doctor knowledge`？
 <div class="title-en">When Should I Run doctor knowledge?</div>
