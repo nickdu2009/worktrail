@@ -32,6 +32,7 @@ type Entry struct {
 	Active         bool      `json:"active,omitempty"`
 	SourceSessions []string  `json:"source_sessions,omitempty"`
 	CandidateType  string    `json:"candidate_type,omitempty"`
+	generatedID    bool // synthesized from Path and safe to disambiguate during scans
 }
 
 type DB struct {
@@ -391,4 +392,3 @@ func RebuildEnv(env paths.Env, scope string) (Manifest, error) {
 	}
 	return Rebuild(root, RebuildOptions{Scope: scope})
 }
-

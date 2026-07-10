@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nickdu2009/worktrail/internal/util"
 )
 
 func TestFTS5Smoke(t *testing.T) {
@@ -135,5 +137,53 @@ func TestChineseFTSSearch(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].Entry.ID != "zh-rule" {
 		t.Fatalf("Chinese search results = %+v", results)
+	}
+}
+
+func TestRebuildDisambiguatesCollidingGeneratedIDs(t *testing.T) {
+	root := t.TempDir()
+	mustWriteJSON(t, filepath.Join(root, "config.json"), map[string]any{"scope": "project"})
+	paths := []string{
+		"validation/implementation-validation-2026-05-20-review-console-configurator-controlled-editing.md",
+		"validation/implementation-validation-2026-05-20-review-console-configurator-interaction-parity.md",
+	}
+	firstBaseID := util.Slug(strings.TrimSuffix(paths[0], filepath.Ext(paths[0])))
+	secondBaseID := util.Slug(strings.TrimSuffix(paths[1], filepath.Ext(paths[1])))
+	if firstBaseID != secondBaseID {
+		t.Fatalf("test paths do not reproduce the generated ID collision: %q != %q", firstBaseID, secondBaseID)
+	}
+	for _, path := range paths {
+		mustWriteDoc(t, filepath.Join(root, filepath.FromSlash(path)), map[string]any{}, path)
+	}
+
+	if _, err := Rebuild(root, RebuildOptions{}); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	db, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(db.Entries) != len(paths) {
+		t.Fatalf("entries = %d, want %d", len(db.Entries), len(paths))
+	}
+	if db.Entries[0].ID == db.Entries[1].ID {
+		t.Fatalf("generated IDs still collide: %q", db.Entries[0].ID)
+	}
+
+	firstIDs := map[string]string{}
+	for _, entry := range db.Entries {
+		firstIDs[entry.Path] = entry.ID
+	}
+	if _, err := Rebuild(root, RebuildOptions{}); err != nil {
+		t.Fatalf("second Rebuild() error = %v", err)
+	}
+	db, err = Load(root)
+	if err != nil {
+		t.Fatalf("second Load() error = %v", err)
+	}
+	for _, entry := range db.Entries {
+		if entry.ID != firstIDs[entry.Path] {
+			t.Fatalf("generated ID for %s changed from %q to %q", entry.Path, firstIDs[entry.Path], entry.ID)
+		}
 	}
 }

@@ -1,8 +1,11 @@
 package index
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"io/fs"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -42,7 +45,57 @@ func scan(root, scope string) ([]Entry, error) {
 		}
 		return nil
 	})
-	return entries, err
+	if err != nil {
+		return nil, err
+	}
+	if err := resolveEntryIDCollisions(entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func resolveEntryIDCollisions(entries []Entry) error {
+	byID := make(map[string][]int, len(entries))
+	for i := range entries {
+		byID[entries[i].ID] = append(byID[entries[i].ID], i)
+	}
+
+	var duplicateIDs []string
+	for id, indexes := range byID {
+		if len(indexes) > 1 {
+			duplicateIDs = append(duplicateIDs, id)
+		}
+	}
+	sort.Strings(duplicateIDs)
+
+	for _, id := range duplicateIDs {
+		indexes := byID[id]
+		var explicitPaths []string
+		for _, index := range indexes {
+			if !entries[index].generatedID {
+				explicitPaths = append(explicitPaths, entries[index].Path)
+			}
+		}
+		if len(explicitPaths) > 1 {
+			return fmt.Errorf("duplicate explicit Worktrail id %q in %s", id, strings.Join(explicitPaths, ", "))
+		}
+		for _, index := range indexes {
+			if !entries[index].generatedID {
+				continue
+			}
+			sum := sha256.Sum256([]byte(entries[index].Path))
+			entries[index].ID = fmt.Sprintf("%s-%x", id, sum[:6])
+		}
+	}
+
+	seen := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if previousPath, ok := seen[entry.ID]; ok {
+			return fmt.Errorf("duplicate Worktrail index id %q in %s and %s", entry.ID, previousPath, entry.Path)
+		}
+		seen[entry.ID] = entry.Path
+	}
+	return nil
 }
 
 func shouldSkip(rel string) bool {

@@ -364,9 +364,14 @@ func buildEntry(root, path, rel, scope string) (Entry, bool, error) {
 			body = doc.Body
 		}
 	}
+	id := stringMeta(meta, "id", "")
+	generatedID := id == ""
+	if generatedID {
+		id = util.Slug(strings.TrimSuffix(rel, filepath.Ext(rel)))
+	}
 	entry := Entry{
 		Schema:        "worktrail.index.entry.v1",
-		ID:            stringMeta(meta, "id", util.Slug(strings.TrimSuffix(rel, filepath.Ext(rel)))),
+		ID:            id,
 		Scope:         stringMeta(meta, "scope", scope),
 		Type:          inferType(rel, meta),
 		Path:          rel,
@@ -382,6 +387,7 @@ func buildEntry(root, path, rel, scope string) (Entry, bool, error) {
 		Content:       strings.TrimSpace(body),
 		UpdatedAt:     timeMeta(meta, "updated_at", info.ModTime().UTC()),
 		Active:        activeEntryPath(rel),
+		generatedID:   generatedID,
 	}
 	entry.SourceSessions = stringSliceMeta(meta, "source_sessions")
 	entry.CandidateType = stringMeta(meta, "candidate_type", "")
