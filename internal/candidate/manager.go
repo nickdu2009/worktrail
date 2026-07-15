@@ -33,15 +33,17 @@ const (
 )
 
 var (
-	ErrBlocked                = errors.New("candidate content contains blocked sensitive material")
-	ErrNotFound               = errors.New("candidate not found")
-	ErrTranscriptNotesApply   = errors.New("transcript notes are evidence and must be distilled before promote or merge")
-	ErrMigrationSourceApply   = errors.New("migration sources are evidence and must be distilled before promote or merge")
-	ErrRestoreUnsupported     = errors.New("restore only supports promoted replace candidates with missing targets")
-	ErrRetireUnsupported      = errors.New("retire only supports promoted or merged candidates with missing targets")
-	ErrRetireReasonRequired   = errors.New("retire reason is required")
-	ErrEvidenceReasonRequired = errors.New("evidence lifecycle reason is required")
-	ErrEvidenceUnsupported    = errors.New("evidence lifecycle only supports transcript_notes, migration_source, and KDD split-source lessons")
+	ErrBlocked                           = errors.New("candidate content contains blocked sensitive material")
+	ErrNotFound                          = errors.New("candidate not found")
+	ErrTranscriptNotesApply              = errors.New("transcript notes are evidence and must be distilled before promote or merge")
+	ErrMigrationSourceApply              = errors.New("migration sources are evidence and must be distilled before promote or merge")
+	ErrRestoreUnsupported                = errors.New("restore only supports promoted replace candidates with missing targets")
+	ErrRetireUnsupported                 = errors.New("retire only supports promoted or merged candidates with missing targets")
+	ErrRetireReasonRequired              = errors.New("retire reason is required")
+	ErrEvidenceReasonRequired            = errors.New("evidence lifecycle reason is required")
+	ErrEvidenceUnsupported               = errors.New("evidence lifecycle only supports transcript_notes, migration_source, and KDD split-source lessons")
+	ErrHandoffCandidateMigrationRequired = errors.New("legacy handoff candidate requires migration; run `worktrail migrate handoff-v2`")
+	ErrHandoffCandidateRetired           = fmt.Errorf("handoff candidates are retired: %w", ErrHandoffCandidateMigrationRequired)
 )
 
 type Manager struct {
@@ -102,6 +104,9 @@ func (m Manager) Create(req CreateRequest) (Record, error) {
 	candidateType := model.CanonicalSemanticCandidateType(req.CandidateType)
 	if candidateType == "" {
 		candidateType = "knowledge"
+	}
+	if candidateType == model.CandidateTypeHandoff {
+		return Record{}, ErrHandoffCandidateRetired
 	}
 	if errs := semanticCreateIssues(candidateType, req.Title, req.Summary, req.Body); len(errs) > 0 {
 		return Record{}, textsafety.NewValidationError(errs)
@@ -209,6 +214,9 @@ func (m Manager) List(scope string) ([]Record, error) {
 		if err != nil {
 			return nil, err
 		}
+		if rec.Meta.CandidateType == model.CandidateTypeHandoff {
+			continue
+		}
 		records = append(records, rec)
 	}
 	sort.SliceStable(records, func(i, j int) bool {
@@ -229,6 +237,9 @@ func (m Manager) Show(scope, id string) (Record, error) {
 	rec, err := readRecord(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return Record{}, ErrNotFound
+	}
+	if err == nil && rec.Meta.CandidateType == model.CandidateTypeHandoff {
+		return Record{}, ErrHandoffCandidateMigrationRequired
 	}
 	return rec, err
 }
@@ -267,6 +278,9 @@ func (m Manager) Restore(scope, id string) (ApplyResult, error) {
 	rec, err := m.Show(scope, id)
 	if err != nil {
 		return ApplyResult{}, err
+	}
+	if rec.Meta.CandidateType == model.CandidateTypeHandoff {
+		return ApplyResult{}, ErrHandoffCandidateRetired
 	}
 	if rec.Meta.Status != StatusPromoted || rec.Meta.Operation != OperationReplace {
 		return ApplyResult{}, ErrRestoreUnsupported
@@ -336,6 +350,9 @@ func (m Manager) Retire(scope, id, reason string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	if rec.Meta.CandidateType == model.CandidateTypeHandoff {
+		return Record{}, ErrHandoffCandidateRetired
+	}
 	if rec.Meta.Status != StatusPromoted && rec.Meta.Status != StatusMerged {
 		return Record{}, ErrRetireUnsupported
 	}
@@ -383,6 +400,9 @@ func (m Manager) Discard(scope, id string) (Record, error) {
 	rec, err := m.Show(scope, id)
 	if err != nil {
 		return Record{}, err
+	}
+	if rec.Meta.CandidateType == model.CandidateTypeHandoff {
+		return Record{}, ErrHandoffCandidateRetired
 	}
 	if terminalStatus(rec.Meta.Status) {
 		return Record{}, fmt.Errorf("candidate %q is already %s", rec.Meta.ID, rec.Meta.Status)
@@ -490,6 +510,9 @@ func (m Manager) apply(scope, id, op string) (ApplyResult, error) {
 	rec, err := m.Show(scope, id)
 	if err != nil {
 		return ApplyResult{}, err
+	}
+	if rec.Meta.CandidateType == model.CandidateTypeHandoff {
+		return ApplyResult{}, ErrHandoffCandidateRetired
 	}
 	if terminalStatus(rec.Meta.Status) {
 		return ApplyResult{}, fmt.Errorf("candidate %q is already %s", rec.Meta.ID, rec.Meta.Status)

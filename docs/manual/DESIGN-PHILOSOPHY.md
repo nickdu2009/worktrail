@@ -52,7 +52,7 @@ Worktrail 不把正式知识放进一套只能由工具自己理解的内部存�
 
 Worktrail 把知识生命周期拆成三个层次：
 
-1. 原始证据，例如 transcript evidence、导入记录、handoff
+1. 原始证据，例如 transcript evidence 和导入记录
 2. pending semantic candidates，也就是已经被提炼但还未正式采纳的知识候选
 3. formal knowledge，也就是经过 review 和明确确认后进入正式目录的内容
 
@@ -62,7 +62,16 @@ Worktrail 把知识生命周期拆成三个层次：
 - 提炼后的候选知识需要 review，而不是直接生效
 - 正式知识需要更稳定、更可复查的标准
 
-这也是为什么 `note add`、`import`、`distill apply`、`handoff` 都默认只会生成候选或操作记录，而不会直接修改正式知识。
+`note add`、`import` 和 `distill apply` 进入 candidate/evidence 流。Handoff V2 则属于另一条恢复运行时链：默认 local handoff 是当前机器上的 task-scoped runtime record，显式 publish 后才产生可由 Git 分享的 durable team handoff；两者都不是 formal knowledge，也不进入默认 semantic review。
+
+## 为什么 Handoff 默认 Local
+<div class="title-en">Why Handoff Defaults to Local</div>
+
+交接首先要忠实描述当前机器上的任务现场，而不是假设所有现场都适合团队共享。因此未完成任务使用 `worktrail handoff create --next-step "<action>" "<summary>"` 写入私有的 `.worktrail/handoffs/local/`；已完成任务明确传 `--complete`。Local 写入使用安全配置做脱敏或阻断。
+
+只有显式运行 `worktrail handoff publish <local-id>` 才会创建 `.worktrail/handoffs/team/` 记录。Team publish 使用更严格的内容安全规则，拒绝敏感信息、绝对本地路径、原始 transcript 和 diff；它只写 Worktrail 文件，不执行 `git add`、`git commit` 或 `git push`。
+
+Team handoff 不原地修改。每次 publish 都创建一个新节点，通过 `supersedes` 形成按 task 隔离的 immutable DAG；出现多个 head 时必须显式发布 reconciliation handoff。
 
 ## 为什么 Review 保持 Chat-Native
 <div class="title-en">Why Review Stays Chat-Native</div>

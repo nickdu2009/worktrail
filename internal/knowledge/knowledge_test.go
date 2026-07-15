@@ -56,3 +56,34 @@ func TestHasMarkdownLinkAndPathText(t *testing.T) {
 		t.Fatalf("unexpected markdown link match")
 	}
 }
+
+func TestHandoffPathsAreOperationalNotFormalKnowledge(t *testing.T) {
+	for _, path := range []string{
+		"handoffs/local/ho_local.md",
+		"handoffs/team/ho_team.md",
+		"handoffs/legacy.md",
+	} {
+		if IsFormalKnowledgePath(path) {
+			t.Fatalf("%q must not be formal knowledge", path)
+		}
+	}
+	if !IsFormalKnowledgePath("architecture/handoff-v2.md") {
+		t.Fatal("formal architecture path unexpectedly rejected")
+	}
+}
+
+func TestIsLegacyHandoffPathOnlyRecognizesRootMarkdown(t *testing.T) {
+	if !IsLegacyHandoffPath("handoffs/20260715-handoff.md") {
+		t.Fatal("expected legacy root handoff path")
+	}
+	for _, path := range []string{
+		"handoffs/local/ho_local.md",
+		"handoffs/team/ho_team.md",
+		"handoffs/archive/legacy.md",
+		"handoffs/README.txt",
+	} {
+		if IsLegacyHandoffPath(path) {
+			t.Fatalf("%q must not be recognized as a live legacy handoff", path)
+		}
+	}
+}

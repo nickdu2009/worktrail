@@ -59,3 +59,31 @@ func TestRunStateUpdateLatestUsesExplicitState(t *testing.T) {
 		t.Fatalf("hook state should not be updated by latest:\n%s", unchangedHook.Body)
 	}
 }
+
+func TestRunStateCloseToHandoffRejectsStdinPayloadAndRepeatedScalarFlags(t *testing.T) {
+	env := stateCommandEnv(t)
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"close", "--to", "handoff", "--stdin", "summary"}, want: "--stdin cannot be combined"},
+		{args: []string{"close", "--to", "handoff", "--stdin", "--complete"}, want: "--stdin cannot be combined"},
+		{args: []string{"close", "--to", "handoff", "--stdin", "--next-step", "continue"}, want: "--stdin cannot be combined"},
+		{args: []string{"close", "--to", "handoff", "--stdin", "--question", "question"}, want: "--stdin cannot be combined"},
+		{args: []string{"close", "--to", "handoff", "--stdin", "--risk", "risk"}, want: "--stdin cannot be combined"},
+		{args: []string{"close", "--to", "handoff", "--stdin", "--project-id", "project"}, want: "--stdin cannot be combined"},
+		{args: []string{"close", "--to", "handoff", "--stdin", "--task-id", "task"}, want: "--stdin cannot be combined"},
+		{args: []string{"close", "--to", "handoff", "--stdin", "--validation-note", "passed"}, want: "--stdin cannot be combined"},
+		{args: []string{"close", "--to", "handoff", "--stdin", "--body", "body"}, want: "not valid for state close"},
+		{args: []string{"close", "--to", "handoff", "--to", "handoff", "--complete", "summary"}, want: "may not be repeated"},
+		{args: []string{"close", "--to", "handoff", "--scope", "project", "--scope", "project", "--complete", "summary"}, want: "may not be repeated"},
+		{args: []string{"close", "--to", "handoff", "--id", "latest", "--id", "latest", "--complete", "summary"}, want: "may not be repeated"},
+		{args: []string{"close", "--to", "handoff", "--complete", "--complete", "summary"}, want: "may not be repeated"},
+	}
+	for _, tc := range cases {
+		err := runState(context.Background(), env, IO{Out: &bytes.Buffer{}}, tc.args)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("runState(%v) error = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+}

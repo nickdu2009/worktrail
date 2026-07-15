@@ -16,12 +16,13 @@ Use this skill when the user wants a keyword-based lookup in Worktrail instead o
 - Do not substitute generic shell tools such as `rg`, `grep`, `find`, or `cat` for Worktrail keyword lookup.
 - Do not open the preview site unless the user also asks to browse rendered Worktrail pages.
 - Do not use browser verification for search-only flows.
+- When a match is a handoff, identify it as a local/team task-scoped runtime record. Do not describe it as formal knowledge or a pending candidate.
 
 ## Workflow
 
 1. Identify the keyword or phrase the user wants to locate.
 2. Run `worktrail search "<keyword>"` before any fallback exploration.
-3. Report the relevant document paths or the lack of matches.
+3. Report the relevant document paths or the lack of matches. For handoffs, include visibility and task id when available so local and immutable team records are not confused.
 4. If the result is too broad, refine the keyword and rerun only while the user intent is still clearly search-oriented.
 5. Only after `worktrail search` proves insufficient, recommend `worktrail preview` for browsing a rendered page.
 

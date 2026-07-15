@@ -1,6 +1,16 @@
 package app
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/nickdu2009/worktrail/internal/candidate"
+	"github.com/nickdu2009/worktrail/internal/model"
+	"github.com/nickdu2009/worktrail/internal/paths"
+	"github.com/nickdu2009/worktrail/internal/store"
+)
 
 func TestRequirementHeadingSignalCount(t *testing.T) {
 	cases := []struct {
@@ -73,5 +83,61 @@ func TestRequirementHeadingSignalCountTolerantOfCaseAndWhitespace(t *testing.T) 
 	body := "# Title\n\n##    MVP   Scope   \n\nbody\n\n##\tAcceptance Criteria\n\nbody\n"
 	if got := requirementHeadingSignalCount(body); got != 2 {
 		t.Fatalf("expected 2 heading signal hits, got %d", got)
+	}
+}
+
+func TestKnowledgeDoctorScanExcludesHandoffRuntimeSurface(t *testing.T) {
+	root := t.TempDir()
+	for path, body := range map[string]string{
+		"rules/visible.md":        "# Visible\n\nRule.",
+		"handoffs/local/local.md": "# Local\n\nRuntime handoff.",
+		"handoffs/team/team.md":   "# Team\n\nRuntime handoff.",
+		"handoffs/legacy-root.md": "# Legacy\n\nV1 handoff.",
+	} {
+		target := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	docs, err := scanKnowledgeDocs(root, "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 1 || docs[0].Path != "rules/visible.md" {
+		t.Fatalf("knowledge doctor scanned runtime handoffs: %+v", docs)
+	}
+}
+
+func TestKnowledgeDoctorDoesNotScanOrExposeLegacyHandoffCandidate(t *testing.T) {
+	project := t.TempDir()
+	env := paths.Env{
+		ProjectRoot: project,
+		ProjectWT:   filepath.Join(project, ".worktrail"),
+	}
+	meta := model.Candidate{
+		Schema: model.SchemaCandidate, ID: "legacy-handoff", Scope: "project",
+		CandidateType: model.CandidateTypeHandoff, TargetPath: "handoffs/legacy.md",
+		Title: "Legacy Handoff", Operation: candidate.OperationReplace, Status: candidate.StatusPending,
+	}
+	data, err := store.RenderMarkdown(meta, "# Legacy Handoff\n\nMigrate me.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(env.ProjectWT, "candidates", "project", "legacy-handoff.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := buildKnowledgeDoctorReport(env, "project", false)
+	for _, finding := range report.Findings {
+		if finding.Code == "HANDOFF001" || strings.Contains(finding.Path, "legacy-handoff") ||
+			strings.Contains(finding.Message, "handoff candidate") {
+			t.Fatalf("knowledge doctor exposed migration-only handoff candidate: %+v", finding)
+		}
 	}
 }

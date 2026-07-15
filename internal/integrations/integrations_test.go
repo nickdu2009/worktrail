@@ -758,9 +758,14 @@ func assertRenderedTriggerRouting(t *testing.T, path string) {
 		"### worktrail-maintain",
 		"worktrail handoff",
 		"another chat",
+		"Prefer `worktrail state close --to handoff",
+		"otherwise run `worktrail handoff",
+		"Do not create a durable handoff for ordinary task progress",
+		"Do not substitute `worktrail context`, `worktrail state inject`",
 		"worktrail install cursor|codex|claude|zcode|all",
 		"do not only output a copyable text handoff",
 		"worktrail evidence plan --format json",
+		"worktrail doctor recovery",
 		"Root governance only summarizes the routing surface",
 	} {
 		if !strings.Contains(text, want) {

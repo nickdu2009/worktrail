@@ -19,6 +19,13 @@ Use this skill when the user wants to import, sync, extract, migrate, or reuse k
 
 Choose the lane that matches the source.
 
+### Legacy handoffs and handoff candidates
+
+1. Run `worktrail migrate handoff-v2` first. This is a complete read-only plan that validates every generated V2 record before any backup or target write.
+2. Report all `invalid`, `conflict`, and unresolved items. Do not apply while either invalid or conflict counts are non-zero.
+3. After the user confirms the reviewed plan, run `worktrail migrate handoff-v2 --apply --confirm`.
+4. Verify that migrated sources left the legacy handoff and candidate surfaces, terminal candidate lifecycle is preserved, the external backup manifest is complete, and the project index rebuild succeeded.
+
 ### Legacy KDD knowledge base
 
 1. Run `worktrail migrate kdd` first and show the dry-run matched, blocked, skipped, project item, and local item counts.

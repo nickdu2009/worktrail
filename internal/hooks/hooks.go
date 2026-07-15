@@ -9,12 +9,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	wlog "github.com/nickdu2009/worktrail/internal/log"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/runtime"
+	"github.com/nickdu2009/worktrail/internal/textsafety"
 	"github.com/nickdu2009/worktrail/internal/transcript"
 	"github.com/nickdu2009/worktrail/internal/util"
 )
@@ -34,10 +37,16 @@ func Run(ctx context.Context, env paths.Env, tool, event string, in io.Reader, o
 		return ctx.Err()
 	default:
 	}
-	payload, warnings := readPayload(in)
+	rawPayload, warnings := readPayload(in)
 	result := Result{Tool: tool, Event: event, OK: true, Warnings: warnings}
 	root := env.ProjectWT
 	actor := "hook:" + tool + "-" + event
+	eventKey, err := normalizeEvent(tool, event)
+	if err != nil {
+		return err
+	}
+	payload := allowlistedPayload(rawPayload)
+	durable := durablePayload(payload)
 	if err := runtime.EnsureDirs(root); err != nil {
 		return err
 	}
@@ -47,37 +56,41 @@ func Run(ctx context.Context, env paths.Env, tool, event string, in io.Reader, o
 			result.Warnings = warnings
 		} else if observed != "" {
 			result.Warnings = warnings
-			result.Warnings = append(result.Warnings, "cursor transcript observed: "+observed)
+			result.Warnings = append(result.Warnings, "cursor transcript observed: "+filepath.Base(observed))
 		} else {
 			result.Warnings = warnings
 		}
 	}
-	if err := wlog.Append(root, "hook.run", "", actor, map[string]any{"tool": tool, "event": event, "payload": payload}); err != nil {
+	if _, err := runtime.EnsurePrivateDir(root, "logs"); err != nil {
+		return err
+	}
+	if err := wlog.Append(root, "hook.run", "", actor, map[string]any{
+		"tool":              tool,
+		"event":             eventKey,
+		"payload_fields":    sortedPayloadKeys(durable),
+		"validation_status": validationStatus(payload, ""),
+	}); err != nil {
 		return err
 	}
 
-	eventKey, err := normalizeEvent(tool, event)
-	if err != nil {
-		return err
-	}
 	switch eventKey {
 	case "stop", "pre-compact", "post-compact", "session-end":
 		hc := hookContextFromPayload(tool, payload)
 		recorder := runtime.NewRecorder(root)
-		sessionPath, err := writeRuntimeSession(recorder, tool, eventKey, payload, hc, actor)
+		sessionPath, err := writeRuntimeSession(recorder, tool, eventKey, durable, hc, actor)
 		if err != nil {
 			return err
 		}
 		result.Runtime = sessionPath
 		if eventKey == "pre-compact" || eventKey == "post-compact" {
-			checkpoint, err := writeRuntimeCheckpoint(recorder, tool, eventKey, payload, sessionPath, hc, actor)
+			checkpoint, err := writeRuntimeCheckpoint(recorder, tool, eventKey, durable, sessionPath, hc, actor)
 			if err != nil {
 				return err
 			}
 			result.Checkpoint = checkpoint
 		}
 		if (eventKey == "stop" || eventKey == "session-end") && shouldCreateTakeoverNote(hc) {
-			takeover, err := writeRuntimeTakeover(recorder, tool, eventKey, payload, sessionPath, hc, actor)
+			takeover, err := writeRuntimeTakeover(recorder, tool, eventKey, durable, sessionPath, hc, actor)
 			if err != nil {
 				return err
 			}
@@ -109,9 +122,7 @@ func readPayload(in io.Reader) (map[string]any, []string) {
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	dec.UseNumber()
 	if err := dec.Decode(&payload); err != nil {
-		payload["_raw"] = string(data)
-		payload["_parse_error"] = err.Error()
-		return payload, []string{"invalid json on stdin; recorded raw payload"}
+		return map[string]any{}, []string{"invalid json on stdin; payload discarded"}
 	}
 	return payload, nil
 }
@@ -122,13 +133,14 @@ func writeRuntimeSession(recorder runtime.Recorder, tool, event string, payload 
 	}
 	title := titleFromHookContext(hc, event)
 	session := sessionFromPayload(tool, payload)
-	body := runtimeSessionBody(title, tool, event, durablePayload(tool, payload), hc)
+	body := runtimeSessionBody(title, tool, event, payload, hc)
 	record, err := recorder.WriteSession(runtime.WriteOptions{
 		Scope:      "project",
 		Title:      title,
 		Body:       body,
 		SessionID:  session,
-		TaskID:     "task-" + util.Slug(title),
+		ProjectID:  firstPayloadString(payload, "project_id"),
+		TaskID:     taskIDFromPayload(payload, title, hc.HasSignal),
 		SourceTool: sourceTool(tool),
 		Event:      event,
 		Tags:       []string{tool, event, "hook"},
@@ -143,12 +155,14 @@ func writeRuntimeSession(recorder runtime.Recorder, tool, event string, payload 
 
 func writeRuntimeCheckpoint(recorder runtime.Recorder, tool, event string, payload map[string]any, sessionPath string, hc hookContext, actor string) (string, error) {
 	title := titleFromHookContext(hc, event)
-	body := checkpointBody(title, tool, event, durablePayload(tool, payload), sessionPath, hc)
+	body := checkpointBody(title, tool, event, payload, sessionPath, hc)
 	record, err := recorder.WriteCheckpoint(runtime.WriteOptions{
 		Scope:      "project",
 		Title:      title,
 		Body:       body,
 		SessionID:  sessionFromPayload(tool, payload),
+		ProjectID:  firstPayloadString(payload, "project_id"),
+		TaskID:     taskIDFromPayload(payload, title, hc.HasSignal),
 		SourceTool: sourceTool(tool),
 		Event:      event,
 		Tags:       []string{tool, event, "checkpoint"},
@@ -166,12 +180,14 @@ func writeRuntimeTakeover(recorder runtime.Recorder, tool, event string, payload
 		return "", nil
 	}
 	title := titleFromHookContext(hc, event)
-	body := takeoverBody(title, tool, event+"-takeover", durablePayload(tool, payload), sessionPath, hc)
+	body := takeoverBody(title, tool, event+"-takeover", payload, sessionPath, hc)
 	record, err := recorder.WriteTakeoverNote(runtime.WriteOptions{
 		Scope:      "project",
 		Title:      title,
 		Body:       body,
 		SessionID:  sessionFromPayload(tool, payload),
+		ProjectID:  firstPayloadString(payload, "project_id"),
+		TaskID:     taskIDFromPayload(payload, title, hc.HasSignal),
 		SourceTool: sourceTool(tool),
 		Event:      event + "-takeover",
 		Tags:       []string{tool, event, "takeover_note"},
@@ -200,9 +216,9 @@ func runtimeSessionBody(title, tool, event string, payload map[string]any, hc ho
 		"## Current Goal\n" + valueOrUnknown(hc.CurrentGoal) + "\n\n" +
 		"## Constraints\nHooks write runtime-only artifacts and audit logs. They never promote durable knowledge or overwrite explicit session state.\n\n" +
 		"## Relevant Context\n" + valueOrUnknown(hc.RecentAssistant) + "\n\n" +
-		"## Evidence\n" + payloadSummary(payload) + "\n\n" +
+		"## Evidence\n" + payloadSummary(payload, hc.ValidationStatus) + "\n\n" +
 		"## Work Done\n" + valueOrUnknown(hc.WorkDone) + "\n\n" +
-		"## Validation\n" + valueOrUnknown(hc.Validation) + "\n\n" +
+		"## Validation\n" + validationSummary(hc) + "\n\n" +
 		"## Open Questions\nTreat this as degraded recovery unless a manual handoff or explicit session state exists.\n\n" +
 		"## Next Step\n" + valueOrDefault(hc.NextStep, "Run `worktrail resume` or `worktrail handoff` before continuing substantial work.") + "\n"
 }
@@ -212,7 +228,7 @@ func checkpointBody(title, tool, event string, payload map[string]any, sessionPa
 		"## Source Runtime Session\n" + sourceSessionSummary(sessionPath) + "\n\n" +
 		"## Recovery Summary\n" + recoverySummary(hc) + "\n\n" +
 		"## Event\n" + event + "\n\n" +
-		"## Payload Summary\n" + payloadSummary(payload) + "\n"
+		"## Payload Summary\n" + payloadSummary(payload, hc.ValidationStatus) + "\n"
 }
 
 func takeoverBody(title, tool, event string, payload map[string]any, sessionPath string, hc hookContext) string {
@@ -220,17 +236,18 @@ func takeoverBody(title, tool, event string, payload map[string]any, sessionPath
 		"## Source Runtime Session\n" + sourceSessionSummary(sessionPath) + "\n\n" +
 		"## Recovery Summary\n" + recoverySummary(hc) + "\n\n" +
 		"## Event\n" + event + "\n\n" +
-		"## Payload Summary\n" + payloadSummary(payload) + "\n"
+		"## Payload Summary\n" + payloadSummary(payload, hc.ValidationStatus) + "\n"
 }
 
 type hookContext struct {
-	HasSignal       bool
-	CurrentGoal     string
-	RecentDecision  string
-	RecentAssistant string
-	WorkDone        string
-	Validation      string
-	NextStep        string
+	HasSignal        bool
+	CurrentGoal      string
+	RecentDecision   string
+	RecentAssistant  string
+	WorkDone         string
+	Validation       string
+	ValidationStatus string
+	NextStep         string
 }
 
 func hookContextFromPayload(tool string, payload map[string]any) hookContext {
@@ -238,6 +255,7 @@ func hookContextFromPayload(tool string, payload map[string]any) hookContext {
 		CurrentGoal:     firstPayloadString(payload, "task", "prompt", "message"),
 		RecentAssistant: firstPayloadString(payload, "transcript_summary", "summary"),
 		Validation:      payloadStringList(payload, "commands"),
+		NextStep:        firstPayloadString(payload, "next_step"),
 	}
 	if hc.CurrentGoal != "" || hc.RecentAssistant != "" || hc.Validation != "" {
 		hc.HasSignal = true
@@ -262,6 +280,13 @@ func hookContextFromPayload(tool string, payload map[string]any) hookContext {
 			}
 		}
 	}
+	hc.CurrentGoal = safeSemanticText(hc.CurrentGoal, 300)
+	hc.RecentDecision = safeSemanticText(hc.RecentDecision, 300)
+	hc.RecentAssistant = safeSemanticText(hc.RecentAssistant, 300)
+	hc.WorkDone = safeSemanticText(hc.WorkDone, 300)
+	hc.Validation = safeSemanticText(hc.Validation, 500)
+	hc.NextStep = safeSemanticText(hc.NextStep, 300)
+	hc.ValidationStatus = validationStatus(payload, hc.Validation)
 	return hc
 }
 
@@ -288,17 +313,17 @@ func transcriptTailContext(tool, path string) (hookContext, error) {
 		switch msg.Role {
 		case "user":
 			if hc.CurrentGoal == "" {
-				hc.CurrentGoal = compactText(msg.Content, 300)
+				hc.CurrentGoal = safeSemanticText(msg.Content, 300)
 			}
 			if looksLikeDecision(msg.Content) {
-				hc.RecentDecision = compactText(msg.Content, 300)
+				hc.RecentDecision = safeSemanticText(msg.Content, 300)
 			}
 		case "assistant":
-			hc.RecentAssistant = compactText(msg.Content, 300)
+			hc.RecentAssistant = safeSemanticText(msg.Content, 300)
 			if looksLikeValidation(msg.Content) {
-				hc.Validation = compactText(msg.Content, 300)
+				hc.Validation = safeSemanticText(msg.Content, 300)
 			}
-			hc.WorkDone = compactText(msg.Content, 300)
+			hc.WorkDone = safeSemanticText(msg.Content, 300)
 		}
 	}
 	hc.HasSignal = hc.CurrentGoal != "" || hc.RecentAssistant != "" || hc.Validation != ""
@@ -319,7 +344,7 @@ func sourceSessionSummary(sessionPath string) string {
 	if strings.TrimSpace(sessionPath) == "" {
 		return "No runtime session was written because no meaningful task context was available."
 	}
-	return sessionPath
+	return filepath.Base(sessionPath)
 }
 
 func recoverySummary(hc hookContext) string {
@@ -334,7 +359,7 @@ func recoverySummary(hc hookContext) string {
 	b.WriteString("\n- Work completed: ")
 	b.WriteString(valueOrUnknown(hc.WorkDone))
 	b.WriteString("\n- Validation: ")
-	b.WriteString(valueOrUnknown(hc.Validation))
+	b.WriteString(validationSummary(hc))
 	b.WriteString("\n- Next safe action: ")
 	b.WriteString(valueOrDefault(hc.NextStep, "Review the latest handoff or explicit session state before continuing."))
 	return b.String()
@@ -363,6 +388,22 @@ func compactText(value string, limit int) string {
 	return strings.TrimSpace(value[:limit-3]) + "..."
 }
 
+var (
+	secretAssignmentPattern       = regexp.MustCompile(`(?i)\b(password|passwd|pwd|secret|api[_-]?key|aws_secret_access_key|aws_session_token|access[_-]?token|authorization)["']?\s*[:=]\s*["']?[^\s"',;]+`)
+	legacyShortGitHubTokenPattern = regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9_]{20,}\b`)
+)
+
+func safeSemanticText(value string, limit int) string {
+	result, err := textsafety.Process(value, textsafety.ProfileLocal)
+	if err != nil {
+		return compactText("[blocked-sensitive-content]", limit)
+	}
+	value = result.Text
+	value = legacyShortGitHubTokenPattern.ReplaceAllString(value, "[redacted-github-token]")
+	value = secretAssignmentPattern.ReplaceAllString(value, "$1=[redacted-secret]")
+	return compactText(value, limit)
+}
+
 func looksLikeDecision(value string) bool {
 	lower := strings.ToLower(value)
 	return strings.Contains(lower, "decided") || strings.Contains(lower, "decision") || strings.Contains(lower, "采纳") || strings.Contains(lower, "决定")
@@ -370,7 +411,7 @@ func looksLikeDecision(value string) bool {
 
 func looksLikeValidation(value string) bool {
 	lower := strings.ToLower(value)
-	return strings.Contains(lower, "go test") || strings.Contains(lower, "validation") || strings.Contains(lower, "passed") || strings.Contains(lower, "测试")
+	return strings.Contains(lower, "go test") || strings.Contains(lower, "validation") || strings.Contains(lower, "passed") || strings.Contains(lower, "failed") || strings.Contains(lower, "测试")
 }
 
 func payloadStringList(payload map[string]any, key string) string {
@@ -383,14 +424,18 @@ func payloadStringList(payload map[string]any, key string) string {
 		var values []string
 		for _, item := range v {
 			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
-				values = append(values, strings.TrimSpace(s))
+				values = append(values, safeSemanticText(s, 200))
 			}
 		}
 		return strings.Join(values, "\n")
 	case []string:
-		return strings.Join(v, "\n")
+		values := make([]string, 0, len(v))
+		for _, item := range v {
+			values = append(values, safeSemanticText(item, 200))
+		}
+		return strings.Join(values, "\n")
 	case string:
-		return strings.TrimSpace(v)
+		return safeSemanticText(v, 500)
 	default:
 		return ""
 	}
@@ -399,10 +444,7 @@ func payloadStringList(payload map[string]any, key string) string {
 func sessionFromPayload(tool string, payload map[string]any) string {
 	for _, key := range []string{"session_id", "conversation_id", "transcript_id"} {
 		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
-			if tool == "cursor" {
-				return "cursor:" + shortHash(value)
-			}
-			return strings.TrimSpace(value)
+			return sourceTool(tool) + ":" + shortHash(value)
 		}
 	}
 	return ""
@@ -419,15 +461,13 @@ func sourceTool(tool string) string {
 	}
 }
 
-func payloadSummary(payload map[string]any) string {
+func payloadSummary(payload map[string]any, validation string) string {
 	if len(payload) == 0 {
 		return "No hook payload was provided.\n"
 	}
-	data, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return fmt.Sprintf("%v\n", payload)
-	}
-	return "```json\n" + string(data) + "\n```\n"
+	fields := sortedPayloadKeys(payload)
+	return "- Allowlisted fields: " + strings.Join(fields, ", ") + "\n" +
+		"- Validation status: " + withDefaultValidation(validation) + "\n"
 }
 
 func Main(ctx context.Context, env paths.Env, args []string, in io.Reader, out io.Writer) error {
@@ -493,18 +533,13 @@ func normalizeEvent(tool, event string) (string, error) {
 	}
 }
 
-func durablePayload(tool string, payload map[string]any) map[string]any {
-	if tool != "cursor" {
-		return payload
-	}
+func durablePayload(payload map[string]any) map[string]any {
 	safe := map[string]any{}
 	for key, value := range payload {
 		switch key {
-		case "user_email":
-			continue
-		case "transcript_path":
+		case "transcript_path", "transcript_file", "session_path":
 			if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
-				safe[key] = filepath.Base(s)
+				safe[key] = safeSemanticText(filepath.Base(s), 100)
 			}
 		case "workspace_roots":
 			safe[key] = workspaceRootBasenames(value)
@@ -512,22 +547,116 @@ func durablePayload(tool string, payload map[string]any) map[string]any {
 			if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
 				safe[key] = shortHash(s)
 			}
-		default:
+		case "task", "prompt", "message", "summary", "transcript_summary", "next_step":
+			if s, ok := value.(string); ok {
+				safe[key] = safeSemanticText(s, 300)
+			}
+		case "commands":
+			safe[key] = payloadStringList(payload, key)
+		case "project_id":
+			if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
+				safe[key] = "project-" + shortHash(s)
+			}
+		case "task_id":
+			if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
+				safe[key] = "task-" + shortHash(s)
+			}
+		case "status", "validation_status", "result":
+			if s, ok := value.(string); ok {
+				safe[key] = safeSemanticText(s, 100)
+			}
+		}
+	}
+	return safe
+}
+
+func allowlistedPayload(payload map[string]any) map[string]any {
+	allowed := map[string]struct{}{
+		"session_id": {}, "conversation_id": {}, "generation_id": {}, "transcript_id": {},
+		"task": {}, "prompt": {}, "message": {}, "summary": {}, "transcript_summary": {},
+		"commands": {}, "transcript_path": {}, "transcript_file": {}, "session_path": {},
+		"workspace_roots": {}, "status": {}, "validation_status": {}, "result": {},
+		"next_step": {}, "project_id": {}, "task_id": {},
+	}
+	safe := make(map[string]any, len(allowed))
+	for key, value := range payload {
+		if _, ok := allowed[key]; ok {
 			safe[key] = value
 		}
 	}
 	return safe
 }
 
+func sortedPayloadKeys(payload map[string]any) []string {
+	keys := make([]string, 0, len(payload))
+	for key := range payload {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func taskIDFromPayload(payload map[string]any, title string, hasSignal bool) string {
+	if taskID := firstPayloadString(payload, "task_id"); taskID != "" {
+		return taskID
+	}
+	if !hasSignal {
+		return ""
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	return "task-" + util.Slug(title)
+}
+
+func validationStatus(payload map[string]any, evidence string) string {
+	for _, key := range []string{"validation_status", "result"} {
+		switch strings.ToLower(strings.TrimSpace(firstPayloadString(payload, key))) {
+		case "failed", "failure", "error":
+			return "failed"
+		case "passed", "pass", "success", "succeeded":
+			return "passed"
+		}
+	}
+	lower := strings.ToLower(evidence)
+	if strings.Contains(lower, "failed") || strings.Contains(lower, "failure") || strings.Contains(lower, "error:") {
+		return "failed"
+	}
+	if strings.Contains(lower, "passed") || strings.Contains(lower, "succeeded") {
+		return "passed"
+	}
+	return "unknown"
+}
+
+func validationSummary(hc hookContext) string {
+	status := withDefaultValidation(hc.ValidationStatus)
+	if strings.TrimSpace(hc.Validation) == "" {
+		return "Status: " + status + ".\nEvidence: none recorded."
+	}
+	return "Status: " + status + ".\nEvidence: " + hc.Validation
+}
+
+func withDefaultValidation(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "passed":
+		return "passed"
+	case "failed":
+		return "failed"
+	default:
+		return "unknown"
+	}
+}
+
 func workspaceRootBasenames(value any) any {
 	items, ok := value.([]any)
 	if !ok {
-		return value
+		return nil
 	}
 	roots := make([]string, 0, len(items))
 	for _, item := range items {
 		if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
-			roots = append(roots, filepath.Base(s))
+			roots = append(roots, safeSemanticText(filepath.Base(s), 100))
 		}
 	}
 	return roots
@@ -558,6 +687,9 @@ func writeCursorObservedTranscript(env paths.Env, payload map[string]any) (strin
 	}
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
+		return "", err
+	}
+	if _, err := runtime.EnsurePrivateDir(env.ProjectWT, filepath.Join("raw", "cursor")); err != nil {
 		return "", err
 	}
 	out := filepath.Join(env.ProjectWT, "raw", "cursor", id+".metadata.json")

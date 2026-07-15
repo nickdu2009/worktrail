@@ -1,6 +1,8 @@
 package index
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -223,6 +225,262 @@ func TestSearchEntriesUsesProvidedEntries(t *testing.T) {
 	if len(results) != 1 || results[0].Entry.ID != "rule" {
 		t.Fatalf("SearchEntries() = %+v, want rule", results)
 	}
+}
+
+func TestRebuildQuarantinesMalformedMarkdownWithoutMovingSource(t *testing.T) {
+	root := t.TempDir()
+	mustWriteJSON(t, filepath.Join(root, "config.json"), map[string]any{"scope": "project"})
+	mustWriteDoc(t, filepath.Join(root, "rules", "good.md"), map[string]any{
+		"id": "good", "title": "Good",
+	}, "good body")
+	badPath := filepath.Join(root, "rules", "bad.md")
+	if err := os.WriteFile(badPath, []byte("---worktrail\n{\"id\":\n---\n# Broken\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := Rebuild(root, RebuildOptions{})
+	if err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	if manifest.Entries != 1 || manifest.Ignored != 1 {
+		t.Fatalf("manifest = %+v, want one indexed and one ignored", manifest)
+	}
+	if _, err := os.Stat(badPath); err != nil {
+		t.Fatalf("bad source was moved or removed: %v", err)
+	}
+	sidecarData, err := os.ReadFile(filepath.Join(root, "index", "ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(sidecarData), `"path": "rules/bad.md"`) || !strings.Contains(string(sidecarData), "parse markdown") {
+		t.Fatalf("ignored sidecar missing diagnostic:\n%s", sidecarData)
+	}
+}
+
+func TestRebuildStillFailsForDuplicateExplicitIDs(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"first.md", "second.md"} {
+		mustWriteDoc(t, filepath.Join(root, "rules", name), map[string]any{
+			"id": "duplicate-id", "title": name,
+		}, "body")
+	}
+	if _, err := Rebuild(root, RebuildOptions{}); err == nil || !strings.Contains(err.Error(), "duplicate explicit Worktrail id") {
+		t.Fatalf("Rebuild() error = %v, want explicit ID conflict", err)
+	}
+}
+
+func TestTeamHandoffDAGDerivesCurrentAndSupportsFilters(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	base := map[string]any{
+		"schema":           "worktrail.handoff.v2",
+		"object_kind":      "runtime_record",
+		"scope":            "project",
+		"project_id":       "project-1",
+		"task_id":          "task-1",
+		"runtime_type":     "handoff",
+		"summary":          "handoff summary",
+		"visibility":       "team",
+		"storage_class":    "team",
+		"durability":       "durable",
+		"lifecycle_status": "current",
+		"resume_priority":  "manual_handoff",
+		"format_version":   2,
+		"created_at":       now,
+		"updated_at":       now,
+	}
+	oldMeta := cloneMap(base)
+	oldMeta["id"] = "handoff-old"
+	oldMeta["title"] = "Old handoff"
+	oldMeta["content_hash"] = testContentHash(t, oldMeta, "old body secret")
+	mustWriteDoc(t, filepath.Join(root, "handoffs", "team", "old.md"), oldMeta, "old body secret")
+	newMeta := cloneMap(base)
+	newMeta["id"] = "handoff-new"
+	newMeta["title"] = "New handoff"
+	newMeta["updated_at"] = now.Add(time.Minute)
+	newMeta["supersedes"] = []map[string]any{{"id": "handoff-old"}}
+	newMeta["content_hash"] = testContentHash(t, newMeta, "new body secret")
+	mustWriteDoc(t, filepath.Join(root, "handoffs", "team", "new.md"), newMeta, "new body secret")
+
+	if _, err := Rebuild(root, RebuildOptions{Now: now.Add(2 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := Search(root, Query{
+		Type: "handoff", TaskID: "task-1", Visibility: "team", Status: "current", Lifecycle: "current",
+		Content: "handoff summary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(current) != 1 || current[0].Entry.ID != "handoff-new" {
+		t.Fatalf("current team handoff = %+v", current)
+	}
+	superseded, err := Search(root, Query{
+		Type: "handoff", TaskID: "task-1", Visibility: "team", Lifecycle: "superseded",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(superseded) != 1 || superseded[0].Entry.ID != "handoff-old" || len(superseded[0].Entry.SupersededBy) != 1 {
+		t.Fatalf("superseded team handoff = %+v", superseded)
+	}
+}
+
+func TestRuntimeBodiesAreNotIndexedAndOnlyLatestFiveRemain(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	for i := 0; i < 7; i++ {
+		id := "runtime-" + string(rune('a'+i))
+		mustWriteDoc(t, filepath.Join(root, "runtime", "sessions", id+".md"), map[string]any{
+			"schema":           "worktrail.runtime.v2",
+			"id":               id,
+			"object_kind":      "runtime_record",
+			"scope":            "project",
+			"runtime_type":     "session_state",
+			"title":            "Runtime " + id,
+			"durability":       "ephemeral",
+			"lifecycle_status": "active",
+			"project_id":       "project-1",
+			"task_id":          "task-1",
+			"created_at":       now.Add(time.Duration(i) * time.Minute),
+			"updated_at":       now.Add(time.Duration(i) * time.Minute),
+			"expires_at":       now.Add(24 * time.Hour),
+		}, "runtime-body-secret-"+id)
+	}
+	manifest, err := Rebuild(root, RebuildOptions{Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Entries != 5 {
+		t.Fatalf("runtime entries = %d, want latest 5", manifest.Entries)
+	}
+	results, err := Search(root, Query{Content: "runtime-body-secret", IncludeContent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("runtime body unexpectedly searchable: %+v", results)
+	}
+}
+
+func TestUnboundRuntimeEntriesDoNotShareLatestFiveBucket(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	for i := 0; i < 6; i++ {
+		id := "unbound-" + string(rune('a'+i))
+		mustWriteDoc(t, filepath.Join(root, "runtime", "sessions", id+".md"), map[string]any{
+			"schema":           "worktrail.runtime.v2",
+			"id":               id,
+			"object_kind":      "runtime_record",
+			"scope":            "project",
+			"runtime_type":     "session_state",
+			"title":            id,
+			"durability":       "ephemeral",
+			"lifecycle_status": "active",
+			"binding_status":   "unbound",
+			"created_at":       now.Add(time.Duration(i) * time.Minute),
+			"updated_at":       now.Add(time.Duration(i) * time.Minute),
+			"expires_at":       now.Add(time.Hour),
+		}, "runtime body")
+	}
+	manifest, err := Rebuild(root, RebuildOptions{Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Entries != 6 {
+		t.Fatalf("unbound runtime entries = %d, want 6", manifest.Entries)
+	}
+}
+
+func TestRebuildIgnoresV2NormalizationAndContentHashErrors(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC()
+	mustWriteDoc(t, filepath.Join(root, "rules", "good.md"), map[string]any{
+		"id": "good", "title": "Good",
+	}, "good body")
+	mustWriteDoc(t, filepath.Join(root, "runtime", "sessions", "bad-meta.md"), map[string]any{
+		"schema":           "worktrail.runtime.v2",
+		"id":               "bad-meta",
+		"object_kind":      "runtime_record",
+		"scope":            "project",
+		"runtime_type":     "session_state",
+		"title":            "Bad metadata",
+		"created_at":       map[string]any{"invalid": true},
+		"updated_at":       now,
+		"expires_at":       now.Add(time.Hour),
+		"lifecycle_status": "active",
+	}, "bad metadata body")
+	badHashMeta := map[string]any{
+		"schema":           "worktrail.handoff.v2",
+		"id":               "bad-hash",
+		"object_kind":      "runtime_record",
+		"scope":            "project",
+		"runtime_type":     "handoff",
+		"title":            "Bad hash",
+		"project_id":       "project-1",
+		"task_id":          "task-1",
+		"visibility":       "team",
+		"storage_class":    "team",
+		"durability":       "durable",
+		"lifecycle_status": "current",
+		"resume_priority":  "manual_handoff",
+		"content_hash":     "definitely-wrong",
+		"format_version":   2,
+		"created_at":       now,
+		"updated_at":       now,
+	}
+	mustWriteDoc(t, filepath.Join(root, "handoffs", "team", "bad-hash.md"), badHashMeta, "tampered body")
+
+	manifest, err := Rebuild(root, RebuildOptions{Now: now})
+	if err != nil {
+		t.Fatalf("Rebuild() should fail-soft: %v", err)
+	}
+	if manifest.Entries != 1 || manifest.Ignored != 2 {
+		t.Fatalf("manifest = %+v, want one indexed and two ignored", manifest)
+	}
+	sidecar, err := os.ReadFile(filepath.Join(root, "index", "ignored.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(sidecar)
+	for _, want := range []string{"runtime/sessions/bad-meta.md", "normalize v2 metadata", "handoffs/team/bad-hash.md", "content hash mismatch"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ignored sidecar missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestActiveBoostIsAppliedOnceAndSupersededIsDownranked(t *testing.T) {
+	now := time.Now().UTC()
+	inactive := Entry{ID: "inactive", UpdatedAt: now}
+	active := Entry{ID: "active", Active: true, UpdatedAt: now}
+	if got := scoreEntry(active, "") - scoreEntry(inactive, ""); got != 5 {
+		t.Fatalf("active boost = %v, want 5", got)
+	}
+	current := Entry{ID: "current", UpdatedAt: now}
+	superseded := Entry{ID: "superseded", Lifecycle: "superseded", UpdatedAt: now}
+	if scoreEntry(superseded, "") >= scoreEntry(current, "") {
+		t.Fatalf("superseded entry was not downranked")
+	}
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
+func testContentHash(t *testing.T, meta map[string]any, body string) string {
+	t.Helper()
+	canonical := cloneMap(meta)
+	delete(canonical, "content_hash")
+	data, err := json.Marshal(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(append(append(data, '\n'), []byte(strings.TrimSpace(body))...))
+	return hex.EncodeToString(sum[:])
 }
 
 func mustWriteDoc(t *testing.T, path string, meta any, body string) {

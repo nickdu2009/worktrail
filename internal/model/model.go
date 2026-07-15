@@ -6,6 +6,7 @@ const (
 	SchemaKnowledge   = "worktrail.knowledge.v1"
 	SchemaCandidate   = "worktrail.candidate.v1"
 	SchemaHandoff     = "worktrail.handoff.v1"
+	SchemaHandoffV2   = "worktrail.handoff.v2"
 	SchemaState       = "worktrail.state.v1"
 	SchemaKnowledgeV2 = "worktrail.knowledge.v2"
 	SchemaDraftV2     = "worktrail.draft.v2"
@@ -21,6 +22,7 @@ const (
 const (
 	ResumePriorityManualHandoff      = "manual_handoff"
 	ResumePriorityExplicitSession    = "explicit_session"
+	ResumePriorityExplicitCheckpoint = "explicit_checkpoint"
 	ResumePriorityRuntimeCheckpoint  = "runtime_checkpoint"
 	ResumePriorityHookRuntimeState   = "hook_runtime_state"
 )

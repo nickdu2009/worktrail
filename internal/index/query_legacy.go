@@ -25,6 +25,18 @@ func SearchEntries(entries []Entry, query Query) []Result {
 		if query.Topic != "" && entry.Topic != query.Topic {
 			continue
 		}
+		if query.TaskID != "" && entry.TaskID != query.TaskID {
+			continue
+		}
+		if query.Visibility != "" && entry.Visibility != query.Visibility {
+			continue
+		}
+		if query.Status != "" && entry.Status != query.Status {
+			continue
+		}
+		if query.Lifecycle != "" && entry.Lifecycle != query.Lifecycle {
+			continue
+		}
 		if len(tags) > 0 && !hasAllTags(entry.Tags, tags) {
 			continue
 		}
@@ -83,13 +95,10 @@ func scoreEntry(entry Entry, needle string) float64 {
 	if entry.Active {
 		score += 5
 	}
-	if entry.Active {
-		score += 3
-	}
 	if entry.SourceOfTruth {
 		score += 5
 	}
-	if len(entry.SupersededBy) > 0 || knowledge.IsNonCurrentLifecycle(entry.Lifecycle) || entry.Stage == "historical" || entry.Stage == "retired" {
+	if len(entry.SupersededBy) > 0 || entry.Lifecycle == "superseded" || knowledge.IsNonCurrentLifecycle(entry.Lifecycle) || entry.Stage == "historical" || entry.Stage == "retired" {
 		score -= 5
 	}
 	age := time.Since(entry.UpdatedAt)

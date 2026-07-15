@@ -16,10 +16,12 @@ import (
 	"github.com/nickdu2009/worktrail/internal/knowledge"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
+	"github.com/nickdu2009/worktrail/internal/recovery"
 	"github.com/nickdu2009/worktrail/internal/transcript"
 )
 
 type Options struct {
+	Scope            string
 	Task             string
 	Topic            string
 	Stage            string
@@ -71,15 +73,16 @@ type IndexHealth struct {
 }
 
 type Pack struct {
-	Schema                   string        `json:"schema"`
-	Task                     string        `json:"task,omitempty"`
-	Topic                    string        `json:"topic,omitempty"`
-	CreatedAt                time.Time     `json:"created_at"`
-	HiddenEvidenceCandidates int           `json:"hidden_evidence_candidates"`
-	IndexHealth              []IndexHealth `json:"index_health,omitempty"`
-	Maintenance              Maintenance   `json:"maintenance"`
-	Sections                 []Section     `json:"sections"`
-	EvidenceIncluded         bool          `json:"-"`
+	Schema                   string                 `json:"schema"`
+	Task                     string                 `json:"task,omitempty"`
+	Topic                    string                 `json:"topic,omitempty"`
+	CreatedAt                time.Time              `json:"created_at"`
+	Tasks                    []recovery.TaskSummary `json:"tasks,omitempty"`
+	HiddenEvidenceCandidates int                    `json:"hidden_evidence_candidates"`
+	IndexHealth              []IndexHealth          `json:"index_health,omitempty"`
+	Maintenance              Maintenance            `json:"maintenance"`
+	Sections                 []Section              `json:"sections"`
+	EvidenceIncluded         bool                   `json:"-"`
 }
 
 func Build(env paths.Env, opts Options) (Pack, error) {
@@ -121,11 +124,20 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 		}
 	}
 	supersededBy := supersededByMap(entries)
+	scope := strings.TrimSpace(opts.Scope)
+	if scope == "" {
+		scope = "project"
+	}
+	taskSummaries, err := recovery.NewTaskScopedResolver(env).ListTasks(scope)
+	if err != nil {
+		return Pack{}, err
+	}
 	pack := Pack{
-		Schema:                   "worktrail.context_pack.v1",
+		Schema:                   "worktrail.context_pack.v2",
 		Task:                     opts.Task,
 		Topic:                    strings.TrimSpace(opts.Topic),
 		CreatedAt:                now,
+		Tasks:                    taskSummaries,
 		HiddenEvidenceCandidates: countPendingEvidence(entries),
 		IndexHealth:              append([]IndexHealth{}, indexHealths...),
 		Maintenance:              buildMaintenance(env),
@@ -135,6 +147,9 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 	for _, spec := range sectionSpecs {
 		var items []Item
 		for _, entry := range entries {
+			if isTaskRecoveryEntry(entry) {
+				continue
+			}
 			if pack.Topic != "" && entry.Topic != pack.Topic {
 				continue
 			}
@@ -177,6 +192,17 @@ func RenderMarkdown(pack Pack) string {
 		b.WriteString("## Topic\n\n")
 		b.WriteString(strings.TrimSpace(pack.Topic))
 		b.WriteString("\n\n")
+	}
+	if len(pack.Tasks) > 0 {
+		b.WriteString("## Task Recovery Summary\n\n")
+		for _, task := range pack.Tasks {
+			fmt.Fprintf(&b, "- `%s` — %s [source:%s] [priority:%d] [ref:%s:%s]\n",
+				task.TaskID, task.Title, task.SourceKind, task.Priority, task.SourceRef.Kind, task.SourceRef.ID)
+			if task.CodeAvailabilityHint != "" {
+				fmt.Fprintf(&b, "  Warning: %s\n", task.CodeAvailabilityHint)
+			}
+		}
+		b.WriteString("\n")
 	}
 	for _, section := range pack.Sections {
 		b.WriteString("## ")
@@ -415,6 +441,14 @@ func isKnowledge(typ string) bool {
 func isRecoveryEntry(e index.Entry) bool {
 	rel := filepath.ToSlash(e.Path)
 	return strings.HasPrefix(rel, "runtime/") || strings.HasPrefix(rel, "state/checkpoints/")
+}
+
+func isTaskRecoveryEntry(e index.Entry) bool {
+	if e.Type == "state" || e.Type == "handoff" {
+		return true
+	}
+	rel := filepath.ToSlash(e.Path)
+	return strings.HasPrefix(rel, "runtime/") || strings.HasPrefix(rel, "state/")
 }
 
 func isProjectKnowledge(typ string) bool {

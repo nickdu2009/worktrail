@@ -145,7 +145,13 @@ worktrail doctor zcode --user
 worktrail doctor knowledge
 ```
 
-这条命令主要检查正式知识的治理漂移，例如分类混放、`source_of_truth` 冲突、starter 文档仍引用 superseded 文档、索引过期，以及绕过 review 流的直接 formal knowledge 编辑。它不会把 `worktrail init` 生成的 starter docs 或 `worktrail handoff` 生成的 durable handoff 记录当成需要额外 candidate trail 的噪音。
+这条命令主要检查正式知识的治理漂移，例如分类混放、`source_of_truth` 冲突、starter 文档仍引用 superseded 文档、索引过期，以及绕过 review 流的直接 formal knowledge 编辑。Handoff V2 是独立的 runtime recovery surface，不属于 formal knowledge 或 candidate review；安装后可单独运行：
+
+```bash
+worktrail handoff doctor
+```
+
+Local handoff 默认保存在 `.worktrail/handoffs/local/`，仅供本机恢复。只有显式 `worktrail handoff publish <local-id>` 才写入可由 Git 分享的 `.worktrail/handoffs/team/`。Publish 本身不会 stage、commit 或 push，doctor 会报告尚未被 Git 跟踪的 team 文件。
 
 ## 卸载集成
 <div class="title-en">Uninstall Integrations</div>

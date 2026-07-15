@@ -19,7 +19,7 @@ func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 		"worktrail-draft":       {"worktrail draft create", "single-quoted heredoc", "frontmatter-bearing", "do not create `docs/`, `.plans/`"},
 		"worktrail-adr":         {"worktrail adr create", "pending decision candidate", "do not require agent-skills", "`.worktrail/decisions/`"},
 		"worktrail-review":      {"worktrail review plan --format json", "worktrail review apply-candidates", "promoted, merged, discarded, restored, or retired", "evidence or operational drafts"},
-		"worktrail-maintain":    {"worktrail context \"maintenance\"", "worktrail evidence plan --format json", "worktrail note add", "state-changing maintenance action"},
+		"worktrail-maintain":    {"worktrail context \"maintenance\"", "worktrail evidence plan --format json", "worktrail note add", "worktrail doctor recovery", "state-changing maintenance action"},
 	}
 	seen := map[string]bool{}
 	rendered := RenderSkillTriggerRouting()
@@ -144,6 +144,122 @@ func TestSkillTemplatesExposeTriggerIntent(t *testing.T) {
 				t.Fatalf("%s skill template missing %q:\n%s", skill, want, body)
 			}
 		}
+	}
+}
+
+func TestHandoffV2TriggerRoutingSemantics(t *testing.T) {
+	var handoffTrigger, resumeTrigger SkillTrigger
+	for _, trigger := range SkillTriggers() {
+		switch trigger.Skill {
+		case "worktrail-handoff":
+			handoffTrigger = trigger
+		case "worktrail-resume":
+			resumeTrigger = trigger
+		}
+	}
+	if handoffTrigger.Skill == "" || resumeTrigger.Skill == "" {
+		t.Fatalf("missing handoff or resume trigger: handoff=%+v resume=%+v", handoffTrigger, resumeTrigger)
+	}
+
+	handoffContract := strings.Join(append(append(
+		[]string{handoffTrigger.RootIntent, handoffTrigger.RootCommand, handoffTrigger.RootGuardrail},
+		handoffTrigger.RequiredActions...),
+		handoffTrigger.Never...), "\n")
+	for _, want := range []string{
+		"explicitly",
+		"worktrail state close --to handoff",
+		"--next-step",
+		"If no active explicit state exists",
+		"ordinary task progress",
+		"Do not only output a copyable text handoff",
+	} {
+		if !strings.Contains(handoffContract, want) {
+			t.Fatalf("handoff trigger contract missing %q:\n%s", want, handoffContract)
+		}
+	}
+
+	resumeContract := strings.Join(append(append(
+		[]string{resumeTrigger.RootIntent, resumeTrigger.RootCommand, resumeTrigger.RootGuardrail},
+		resumeTrigger.RequiredActions...),
+		resumeTrigger.Never...), "\n")
+	for _, want := range []string{
+		"new session",
+		"worktrail resume",
+		"worktrail context",
+		"worktrail state inject",
+	} {
+		if !strings.Contains(resumeContract, want) {
+			t.Fatalf("resume trigger contract missing %q:\n%s", want, resumeContract)
+		}
+	}
+
+	rendered := RenderRootShared()
+	for _, want := range []string{
+		"Prefer `worktrail state close --to handoff",
+		"--next-step",
+		"Continue prior Worktrail work in a new session",
+		"Create a durable handoff because the user explicitly wants to hand off",
+		"`worktrail state checkpoint` alone",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered root routing missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestHandoffTemplatesRequireNextStepOrComplete(t *testing.T) {
+	rendered := RenderRootShared()
+	stateSkill, err := Read("skills/worktrail-state/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoffSkill, err := Read("skills/worktrail-handoff/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	combined := strings.Join([]string{rendered, stateSkill, handoffSkill}, "\n")
+	for _, obsolete := range []string{
+		"worktrail state close --to handoff \"<summary>\"",
+		"worktrail handoff \"<summary>\"",
+		"bare `worktrail handoff",
+	} {
+		if strings.Contains(combined, obsolete) {
+			t.Fatalf("handoff templates retained obsolete incomplete entry %q:\n%s", obsolete, combined)
+		}
+	}
+	for _, want := range []string{
+		"worktrail state close --to handoff --next-step",
+		"worktrail handoff create --next-step",
+		"--complete",
+	} {
+		if !strings.Contains(combined, want) {
+			t.Fatalf("handoff templates missing %q:\n%s", want, combined)
+		}
+	}
+}
+
+func TestRecoveryQuarantineTemplatesUseApplyConfirm(t *testing.T) {
+	handoffSkill, err := Read("skills/worktrail-handoff/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	maintainSkill, err := Read("skills/worktrail-maintain/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	combined := handoffSkill + "\n" + maintainSkill
+	for _, want := range []string{
+		"worktrail doctor recovery",
+		"worktrail doctor recovery --apply --confirm",
+		"malformed state",
+		"malformed local handoff",
+	} {
+		if !strings.Contains(combined, want) {
+			t.Fatalf("recovery templates missing %q:\n%s", want, combined)
+		}
+	}
+	if strings.Contains(combined, "worktrail doctor recovery --repair") {
+		t.Fatalf("recovery templates contain obsolete repair command:\n%s", combined)
 	}
 }
 

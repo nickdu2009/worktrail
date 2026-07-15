@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/nickdu2009/worktrail/internal/hooks"
 	"github.com/nickdu2009/worktrail/internal/integrations"
@@ -54,6 +55,10 @@ func runDoctor(ctx context.Context, env paths.Env, ioctx IO, args []string) erro
 		fmt.Fprintf(ioctx.Out, "user: %s\nproject: %s\n", env.UserRoot, env.ProjectWT)
 		return nil
 	}
+	if isHelpArg(args[0]) {
+		printDoctorHelp(ioctx.Out)
+		return nil
+	}
 	if args[0] == "migration" {
 		return runDoctorMigration(ctx, env, ioctx, args[1:])
 	}
@@ -63,6 +68,12 @@ func runDoctor(ctx context.Context, env paths.Env, ioctx IO, args []string) erro
 	if args[0] == "delete" {
 		return runDoctorDelete(ctx, env, ioctx, args[1:])
 	}
+	if args[0] == "ops" {
+		return runDoctorOps(ctx, env, ioctx, args[1:])
+	}
+	if args[0] == "recovery" {
+		return runDoctorRecovery(ctx, env, ioctx, args[1:])
+	}
 	flags, _ := splitFlags(args[1:])
 	report, err := integrations.Doctor(env, integrations.Tool(args[0]), integrationOptions(flags))
 	if err != nil {
@@ -70,6 +81,12 @@ func runDoctor(ctx context.Context, env paths.Env, ioctx IO, args []string) erro
 	}
 	printIntegrationReport(ioctx, report, flagValue(flags, "format", "text"))
 	return nil
+}
+
+func printDoctorHelp(out io.Writer) {
+	fmt.Fprintln(out, "usage: worktrail doctor <knowledge|delete|migration|ops|recovery|codex|claude|cursor|zcode> [args]")
+	fmt.Fprintln(out, "       worktrail doctor ops [status|repair --confirm]")
+	fmt.Fprintln(out, "       worktrail doctor recovery [--apply --confirm]")
 }
 
 func runHook(ctx context.Context, env paths.Env, ioctx IO, args []string) error {

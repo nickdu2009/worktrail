@@ -76,19 +76,27 @@ worktrail note add \
 
 `note add` 只创建待评审候选知识，不会直接修改正式知识。
 
-### 5. 建立工作记录并写一次交接
+### 5. 建立工作记录并写一次本地交接
 <div class="title-en">Write a Work Log and Handoff</div>
 
-长任务开始后，先建 active state；显式交接时优先通过关闭 state 来写 durable handoff：
+长任务开始后，先建 active state；只有明确要跨 chat、切 Agent 或稍后继续时，才通过关闭 state 创建 task-scoped local handoff：
 
 ```bash
 worktrail state start "task title"
 worktrail state update "what changed, validation, and next step"
-worktrail state close --to handoff "summary of current state, validation, risks, and next step"
-worktrail resume "continue the same task"
+worktrail state close --to handoff --next-step "continue the task" "summary of current state, validation, risks, and next step"
+worktrail resume --task-id <task-id>
 ```
 
-`worktrail state close --to handoff` 会把 durable handoff 绑定到最新 explicit state，并归档该 state。裸 `worktrail handoff "<summary>"` 仍然可用，但应当只用于没有 active explicit state 的例外路径。`stop` / `session-end` hooks 默认把退出现场保存在 runtime records（`state/`、checkpoint 和审计日志）里，不再起草 pending handoff candidate。
+`worktrail state close --to handoff --next-step "<action>" "<summary>"` 会在同一事务中归档 explicit state，并把 local handoff 写到 `.worktrail/handoffs/local/`。没有 active explicit state 时使用 `worktrail handoff create --next-step "<action>" "<summary>"`；任务已完成则明确传 `--complete`。Local handoff 不是正式知识，也不是 pending candidate。
+
+需要团队共享时，再显式发布：
+
+```bash
+worktrail handoff publish <local-handoff-id>
+```
+
+这会创建新的 immutable team handoff，但不会运行 `git add`、`git commit` 或 `git push`。Dirty worktree 默认拒绝 publish；确实要发布时必须同时传 `--allow-dirty --confirm`，而且记录会标明代码不可用。
 
 ### 6. 评审并应用候选知识
 <div class="title-en">Review and Apply Candidate Knowledge</div>
@@ -126,7 +134,7 @@ worktrail state update "what changed and what remains"
 worktrail state checkpoint --reason "safe checkpoint before next step"
 ```
 
-只有在明确交接边界（例如切 Agent、切 chat、结束当天工作）时才运行 durable handoff；若存在 active explicit state，优先运行 `worktrail state close --to handoff`。新 session 开始时优先运行 `worktrail resume`。
+只有在明确交接边界（例如切 Agent、切 chat、结束当天工作）时才创建 handoff；普通进度只更新 state。若存在 active explicit state，优先运行 `worktrail state close --to handoff --next-step "<action>" "<summary>"`；任务完成时明确传 `--complete`。新 session 开始时优先运行 `worktrail resume`；如果存在多个可恢复 task，使用 `--task-id`、`--task-title` 或 `--ref` 明确选择。
 
 ## 两个常见误区
 <div class="title-en">Two Common Mistakes</div>

@@ -13,12 +13,16 @@ Use this skill when starting substantial project work, continuing work after exp
 - Run `worktrail context "$ARGUMENTS"` as the starting command for substantial Worktrail-enabled project work.
 - If the user wants to continue a previous session from the latest state or handoff, stop and use the installed `worktrail-resume` skill or `worktrail resume` instead of `worktrail context`.
 - If the task is long or risky after loading context, start or update state with the installed `worktrail-state` skill or the matching `worktrail state ...` command.
+- Treat the Task Recovery Summary as task-scoped. Never merge state, handoffs, checkpoints, or runtime records from different task ids.
+- Local/team handoffs are runtime recovery records, not formal knowledge or pending review candidates.
 
 ## Workflow
 
 1. Run `worktrail context "$ARGUMENTS"`.
 2. Read the Context Pack into the current conversation.
-3. Follow any active state, constraints, and next steps in the pack.
+3. Read each task recovery summary by `task_id`, source kind, priority, and structured ref. If more than one task could match the user's continuation intent, stop and use `worktrail resume --task-id <id>` or `--ref [scope:]kind:id` instead of choosing implicitly.
+4. Treat hook runtime session/checkpoint material as degraded fallback. Runtime records expire after 14 days and recovery reads expose at most the latest five valid records per task.
+5. Follow the selected task's constraints and next steps without importing another task's recovery records.
 
 ## Output
 

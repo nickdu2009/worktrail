@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,7 @@ type Config struct {
 	Schema    string    `json:"schema"`
 	Scope     string    `json:"scope"`
 	Version   string    `json:"version"`
+	ProjectID string    `json:"project_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -66,14 +69,21 @@ func InitUser(env paths.Env) error {
 
 func InitProject(env paths.Env) error {
 	dirs := []string{
-		"requirements", "architecture", "decisions", "handoffs", "rules", "prompts",
+		"requirements", "architecture", "decisions", "handoffs/local", "handoffs/team", "rules", "prompts",
 		"integrations", "validation", "glossary",
 		"state/active", "state/archived",
-		"runtime/sessions", "runtime/checkpoints", "runtime/recovery",
+		"runtime/sessions", "runtime/checkpoints", "runtime/recovery", "runtime/migrations",
+		"ops",
 		"candidates/project", "raw/codex", "raw/claude", "raw/cursor",
 		"exports", "index", "logs",
 	}
 	if err := makeTree(env.ProjectWT, dirs); err != nil {
+		return err
+	}
+	if err := ensurePrivateDirs(
+		filepath.Join(env.ProjectWT, "handoffs", "local"),
+		filepath.Join(env.ProjectWT, "ops"),
+	); err != nil {
 		return err
 	}
 	if err := writeConfig(env.ProjectWT, "project"); err != nil {
@@ -111,11 +121,14 @@ const ProjectGitignoreBody = `# Worktrail local integration installs. These are 
 .worktrail/logs/
 .worktrail/staging/
 .worktrail/runtime/
+.worktrail/handoffs/local/
+.worktrail/ops/
 .worktrail/derived/index/
 .worktrail/derived/cache/
 .worktrail/derived/exports/
 .worktrail/.cache/
-.worktrail/exports/`
+.worktrail/exports/
+/.worktrail-handoff-v2-backups/`
 
 const legacyProjectGitignoreBody = `# Worktrail local integration installs. These are generated per developer by
 # ` + "`" + `worktrail install codex` + "`" + ` / future local integrations.
@@ -162,17 +175,74 @@ func makeTree(root string, dirs []string) error {
 	return nil
 }
 
+func ensurePrivateDirs(dirs ...string) error {
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func writeConfig(root, scope string) error {
 	path := filepath.Join(root, "config.json")
-	if _, err := os.Stat(path); err == nil {
-		return nil
+	if data, err := os.ReadFile(path); err == nil {
+		if scope != "project" {
+			return nil
+		}
+		var existing map[string]any
+		if err := json.Unmarshal(data, &existing); err != nil {
+			return err
+		}
+		if projectID, _ := existing["project_id"].(string); strings.TrimSpace(projectID) != "" {
+			return nil
+		}
+		projectID, err := newProjectID()
+		if err != nil {
+			return err
+		}
+		existing["project_id"] = projectID
+		b, err := json.MarshalIndent(existing, "", "  ")
+		if err != nil {
+			return err
+		}
+		return util.AtomicWrite(path, append(b, '\n'), 0o644)
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	cfg := Config{Schema: "worktrail.config.v1", Scope: scope, Version: "0.1.0", CreatedAt: time.Now()}
+	if scope == "project" {
+		projectID, err := newProjectID()
+		if err != nil {
+			return err
+		}
+		cfg.ProjectID = projectID
+	}
 	b, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
 	return util.AtomicWrite(path, append(b, '\n'), 0o644)
+}
+
+func newProjectID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	value[6] = (value[6] & 0x0f) | 0x40
+	value[8] = (value[8] & 0x3f) | 0x80
+	return fmt.Sprintf(
+		"project_%x-%x-%x-%x-%x",
+		value[0:4],
+		value[4:6],
+		value[6:8],
+		value[8:10],
+		value[10:16],
+	), nil
 }
 
 func writeDefaults(root string, files map[string]string) error {

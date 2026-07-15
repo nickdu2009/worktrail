@@ -27,3 +27,11 @@ Do not automatically commit git changes.
 5. Execute `worktrail review apply-candidates --promote|--merge|--discard <id...> [--scope ...]` only after explicit user confirmation that identifies the action, exact candidate id list, and scope.
 6. Execute other state-changing commands only after explicit user confirmation that identifies the exact candidate id, evidence id, saved plan file, and scope.
 7. After any confirmed action, rerun the relevant read-only plan command and summarize the new counts.
+
+## Operational maintenance
+
+- Runtime cleanup: run `worktrail runtime prune` first; delete only after explicit confirmation with `worktrail runtime prune --apply --confirm`.
+- Malformed state/runtime recovery: run `worktrail doctor recovery` first; quarantine repairable malformed state and runtime records only with `worktrail doctor recovery --apply --confirm`. The obsolete `--repair` flag is not accepted.
+- Operation health: run `worktrail doctor ops status`; replay pending operations or remove a recoverable stale lock only after explicit confirmation with `worktrail doctor ops repair --confirm`.
+- Handoff health: run `worktrail handoff doctor`, then `worktrail handoff repair` for a dry-run plan; quarantine malformed local handoffs or apply other reviewed local repairs only with `worktrail handoff repair --apply --confirm`. Team handoffs remain immutable.
+- These commands do not replace handoff creation. An unfinished handoff must still use `--next-step "<action>"`; completed work must use `--complete`.

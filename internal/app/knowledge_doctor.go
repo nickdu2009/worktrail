@@ -240,7 +240,7 @@ func shouldSkipKnowledgeDoctorDir(path, root, name string) bool {
 		return false
 	}
 	switch name {
-	case "candidates", "state", "raw", "index", "logs", "exports", "staging", "runtime", "derived":
+	case "candidates", "state", "raw", "index", "logs", "exports", "staging", "runtime", "handoffs", "derived":
 		return true
 	default:
 		return false

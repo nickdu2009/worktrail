@@ -18,7 +18,8 @@ import (
 const (
 	SQLiteFile       = "index.sqlite"
 	schemaVersionKey = "schema_version"
-	currentSchema    = "worktrail.index.sqlite.v1"
+	currentSchema    = "worktrail.index.sqlite.v2"
+	brokenRetention  = 3
 )
 
 const sqliteSchema = `
@@ -27,6 +28,9 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS entries (
   id TEXT PRIMARY KEY,
   scope TEXT NOT NULL,
+  project_id TEXT NOT NULL DEFAULT '',
+  task_id TEXT NOT NULL DEFAULT '',
+  visibility TEXT NOT NULL DEFAULT '',
   path TEXT NOT NULL UNIQUE,
   object_kind TEXT,
   type TEXT NOT NULL,
@@ -38,6 +42,7 @@ CREATE TABLE IF NOT EXISTS entries (
   source_of_truth INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 0,
   candidate_type TEXT,
+  expires_at TEXT,
   updated_at TEXT NOT NULL,
   file_mtime TEXT NOT NULL,
   file_size INTEGER NOT NULL,
@@ -91,7 +96,10 @@ func openSQLite(root string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Join(root, "index"), 0o755); err != nil {
+	if _, err := ensureIndexOutputDir(root); err != nil {
+		return nil, err
+	}
+	if _, _, err := indexArtifactStatus(root, SQLiteFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 	db, err := sql.Open("sqlite", sqlitePath(root)+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
@@ -102,11 +110,59 @@ func openSQLite(root string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if exists, _, err := indexArtifactStatus(root, SQLiteFile); err != nil {
+		_ = db.Close()
+		return nil, err
+	} else if !exists {
+		_ = db.Close()
+		return nil, errors.New("sqlite index was not created as a regular file")
+	}
+	if err := ensureSQLiteColumns(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec(`INSERT INTO index_state(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, schemaVersionKey, currentSchema); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return db, nil
+}
+
+func ensureSQLiteColumns(db *sql.DB) error {
+	required := map[string]string{
+		"project_id": "TEXT NOT NULL DEFAULT ''",
+		"task_id":    "TEXT NOT NULL DEFAULT ''",
+		"visibility": "TEXT NOT NULL DEFAULT ''",
+		"expires_at": "TEXT",
+	}
+	rows, err := db.Query(`PRAGMA table_info(entries)`)
+	if err != nil {
+		return err
+	}
+	existing := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for name, typ := range required {
+		if existing[name] {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE entries ADD COLUMN ` + name + ` ` + typ); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func contentHash(content string) string {
@@ -130,7 +186,7 @@ func rebuildSQLite(root string, opts RebuildOptions, tokenizer Tokenizer) (Manif
 	if scope == "" {
 		scope = inferScope(root)
 	}
-	entries, err := scan(root, scope)
+	entries, ignored, err := scanAt(root, scope, now)
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -180,8 +236,11 @@ func rebuildSQLite(root string, opts RebuildOptions, tokenizer Tokenizer) (Manif
 		return Manifest{}, err
 	}
 
-	_ = os.Remove(filepath.Join(root, "index", "index.db"))
-	_ = os.Remove(filepath.Join(root, "index", "manifest.json"))
+	for _, legacy := range []string{"index.db", "manifest.json"} {
+		if err := removeIndexArtifact(root, legacy); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return Manifest{}, err
+		}
+	}
 
 	return Manifest{
 		Schema:      "worktrail.index.manifest.v1",
@@ -189,6 +248,7 @@ func rebuildSQLite(root string, opts RebuildOptions, tokenizer Tokenizer) (Manif
 		GeneratedAt: now,
 		IndexPath:   filepath.ToSlash(filepath.Join("index", SQLiteFile)),
 		Entries:     len(entries),
+		Ignored:     len(ignored),
 	}, nil
 }
 
@@ -197,9 +257,16 @@ func upsertSQLiteEntry(tx *sql.Tx, root string, entry Entry, tokenizer Tokenizer
 	if err != nil {
 		return err
 	}
-	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(entry.Path)))
+	path := filepath.Join(root, filepath.FromSlash(entry.Path))
+	if err := validateIndexPath(root, path); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("index source %q is not a regular file", path)
 	}
 	tokens := tokenizeEntry(entry, tokenizer)
 	rawMeta, _ := json.Marshal(map[string]any{
@@ -215,13 +282,15 @@ func upsertSQLiteEntry(tx *sql.Tx, root string, entry Entry, tokenizer Tokenizer
 	}
 	_, err = tx.Exec(`
 INSERT INTO entries(
-  id, scope, path, type, title, topic, status, stage, lifecycle,
-  source_of_truth, active, candidate_type, updated_at, file_mtime, file_size,
+  id, scope, project_id, task_id, visibility, path, type, title, topic, status, stage, lifecycle,
+  source_of_truth, active, candidate_type, expires_at, updated_at, file_mtime, file_size,
   content_hash, excerpt, content, raw_meta_json, source_sessions_json,
   supersedes_json, superseded_by_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.ID, entry.Scope, entry.Path, entry.Type, entry.Title, entry.Topic, entry.Status, entry.Stage, entry.Lifecycle,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.ID, entry.Scope, entry.ProjectID, entry.TaskID, entry.Visibility,
+		entry.Path, entry.Type, entry.Title, entry.Topic, entry.Status, entry.Stage, entry.Lifecycle,
 		boolToInt(entry.SourceOfTruth), boolToInt(entry.Active), entry.CandidateType,
+		formatOptionalTime(entry.ExpiresAt),
 		entry.UpdatedAt.UTC().Format(time.RFC3339Nano), modTime.Format(time.RFC3339Nano), info.Size(),
 		contentHash(entry.Content), excerpt, entry.Content, string(rawMeta), string(sourceSessions),
 		string(supersedes), string(supersededBy),
@@ -278,10 +347,12 @@ func loadSQLite(root string) (DB, error) {
 	if err != nil {
 		return DB{}, err
 	}
-	if _, err := os.Stat(sqlitePath(root)); errors.Is(err, os.ErrNotExist) {
-		return DB{}, os.ErrNotExist
-	} else if err != nil {
+	exists, _, err := indexArtifactStatus(root, SQLiteFile)
+	if err != nil {
 		return DB{}, err
+	}
+	if !exists {
+		return DB{}, os.ErrNotExist
 	}
 	db, err := openSQLite(root)
 	if err != nil {
@@ -295,7 +366,7 @@ func loadSQLite(root string) (DB, error) {
 	}
 	rows, err := db.Query(`
 SELECT id, scope, path, type, title, topic, status, stage, lifecycle,
-       source_of_truth, active, candidate_type, updated_at, excerpt, content,
+       project_id, task_id, visibility, source_of_truth, active, candidate_type, expires_at, updated_at, excerpt, content,
        source_sessions_json, supersedes_json, superseded_by_json
 FROM entries ORDER BY path`)
 	if err != nil {
@@ -336,6 +407,7 @@ func scanSQLiteEntry(rows *sql.Rows) (Entry, error) {
 		entry                    Entry
 		sourceOfTruth, activeInt int
 		updatedAt                string
+		expiresAt                sql.NullString
 		excerpt                  string
 		sourceSessionsJSON       string
 		supersedesJSON           string
@@ -344,7 +416,8 @@ func scanSQLiteEntry(rows *sql.Rows) (Entry, error) {
 	entry.Schema = "worktrail.index.entry.v1"
 	if err := rows.Scan(
 		&entry.ID, &entry.Scope, &entry.Path, &entry.Type, &entry.Title, &entry.Topic, &entry.Status, &entry.Stage, &entry.Lifecycle,
-		&sourceOfTruth, &activeInt, &entry.CandidateType, &updatedAt, &excerpt, &entry.Content,
+		&entry.ProjectID, &entry.TaskID, &entry.Visibility,
+		&sourceOfTruth, &activeInt, &entry.CandidateType, &expiresAt, &updatedAt, &excerpt, &entry.Content,
 		&sourceSessionsJSON, &supersedesJSON, &supersededByJSON,
 	); err != nil {
 		return Entry{}, err
@@ -353,6 +426,9 @@ func scanSQLiteEntry(rows *sql.Rows) (Entry, error) {
 	entry.Active = activeInt == 1
 	if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
 		entry.UpdatedAt = t
+	}
+	if expiresAt.Valid {
+		entry.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expiresAt.String)
 	}
 	_ = json.Unmarshal([]byte(sourceSessionsJSON), &entry.SourceSessions)
 	_ = json.Unmarshal([]byte(supersedesJSON), &entry.Supersedes)
@@ -377,9 +453,16 @@ func sqliteStateTime(db *sql.DB, key string) (time.Time, error) {
 	return t, nil
 }
 
-func sqliteExists(root string) bool {
-	_, err := os.Stat(sqlitePath(root))
-	return err == nil
+func formatOptionalTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func sqliteExists(root string) (bool, error) {
+	exists, _, err := indexArtifactStatus(root, SQLiteFile)
+	return exists, err
 }
 
 func pingSQLite(root string) error {
@@ -400,7 +483,11 @@ func pingSQLite(root string) error {
 }
 
 func ensureSQLiteHealthy(root string) error {
-	if !sqliteExists(root) {
+	exists, err := sqliteExists(root)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return nil
 	}
 	pingErr := pingSQLite(root)
@@ -427,7 +514,11 @@ func refreshSQLite(root string, tokenizer Tokenizer) error {
 	if err != nil {
 		return err
 	}
-	if !sqliteExists(root) {
+	exists, err := sqliteExists(root)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		_, err := rebuildSQLite(root, RebuildOptions{Scope: inferScope(root)}, tokenizer)
 		return err
 	}
@@ -435,7 +526,7 @@ func refreshSQLite(root string, tokenizer Tokenizer) error {
 		return err
 	}
 	scope := inferScope(root)
-	currentEntries, err := scan(root, scope)
+	currentEntries, _, err := scanAt(root, scope, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -448,26 +539,44 @@ func refreshSQLite(root string, tokenizer Tokenizer) error {
 	defer db.Close()
 
 	indexed := map[string]struct {
-		mtime string
-		size  int64
-		hash  string
+		mtime      string
+		size       int64
+		hash       string
+		projectID  string
+		taskID     string
+		visibility string
+		status     string
+		lifecycle  string
+		expiresAt  string
 	}{}
-	rows, err := db.Query(`SELECT path, file_mtime, file_size, content_hash FROM entries`)
+	rows, err := db.Query(`
+SELECT path, file_mtime, file_size, content_hash,
+       project_id, task_id, visibility, status, lifecycle, COALESCE(expires_at, '')
+FROM entries`)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var path, mtime, hash string
+		var path, mtime, hash, projectID, taskID, visibility, status, lifecycle, expiresAt string
 		var size int64
-		if err := rows.Scan(&path, &mtime, &size, &hash); err != nil {
+		if err := rows.Scan(&path, &mtime, &size, &hash, &projectID, &taskID, &visibility, &status, &lifecycle, &expiresAt); err != nil {
 			rows.Close()
 			return err
 		}
 		indexed[path] = struct {
-			mtime string
-			size  int64
-			hash  string
-		}{mtime: mtime, size: size, hash: hash}
+			mtime      string
+			size       int64
+			hash       string
+			projectID  string
+			taskID     string
+			visibility string
+			status     string
+			lifecycle  string
+			expiresAt  string
+		}{
+			mtime: mtime, size: size, hash: hash, projectID: projectID, taskID: taskID,
+			visibility: visibility, status: status, lifecycle: lifecycle, expiresAt: expiresAt,
+		}
 	}
 	rows.Close()
 
@@ -499,13 +608,33 @@ func refreshSQLite(root string, tokenizer Tokenizer) error {
 		if err != nil {
 			return err
 		}
-		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(entry.Path)))
+		path := filepath.Join(root, filepath.FromSlash(entry.Path))
+		if err := validateIndexPath(root, path); err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
 		if err != nil {
 			return err
 		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("index source %q is not a regular file", path)
+		}
 		hash := contentHash(entry.Content)
 		prev, ok := indexed[entry.Path]
-		needsUpdate := !ok || prev.hash != hash || prev.size != info.Size() || prev.mtime != modTime.Format(time.RFC3339Nano)
+		expiresAt := ""
+		if !entry.ExpiresAt.IsZero() {
+			expiresAt = entry.ExpiresAt.UTC().Format(time.RFC3339Nano)
+		}
+		needsUpdate := !ok ||
+			prev.hash != hash ||
+			prev.size != info.Size() ||
+			prev.mtime != modTime.Format(time.RFC3339Nano) ||
+			prev.projectID != entry.ProjectID ||
+			prev.taskID != entry.TaskID ||
+			prev.visibility != entry.Visibility ||
+			prev.status != entry.Status ||
+			prev.lifecycle != entry.Lifecycle ||
+			prev.expiresAt != expiresAt
 		if !needsUpdate {
 			continue
 		}
@@ -544,10 +673,55 @@ func refreshSQLite(root string, tokenizer Tokenizer) error {
 
 func recoverSQLite(root string) error {
 	path := sqlitePath(root)
-	if _, err := os.Stat(path); err != nil {
+	exists, _, err := indexArtifactStatus(root, SQLiteFile)
+	if err != nil {
 		return err
 	}
-	broken := path + ".broken-" + time.Now().UTC().Format("20060102T150405Z")
-	return os.Rename(path, broken)
+	if !exists {
+		return os.ErrNotExist
+	}
+	broken := path + ".broken-" + time.Now().UTC().Format("20060102T150405.000000000Z")
+	if err := os.Rename(path, broken); err != nil {
+		return err
+	}
+	return pruneBrokenSQLite(root, brokenRetention)
 }
 
+func pruneBrokenSQLite(root string, keep int) error {
+	if keep < 0 {
+		keep = 0
+	}
+	matches, err := filepath.Glob(sqlitePath(root) + ".broken-*")
+	if err != nil {
+		return err
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		left, leftErr := os.Lstat(matches[i])
+		right, rightErr := os.Lstat(matches[j])
+		if leftErr == nil && rightErr == nil && !left.ModTime().Equal(right.ModTime()) {
+			return left.ModTime().After(right.ModTime())
+		}
+		return matches[i] > matches[j]
+	})
+	for _, path := range matches {
+		if err := validateIndexPath(root, path); err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("broken index artifact %q is not a regular file", path)
+		}
+	}
+	if keep > len(matches) {
+		keep = len(matches)
+	}
+	for _, path := range matches[keep:] {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}

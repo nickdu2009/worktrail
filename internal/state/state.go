@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	wlog "github.com/nickdu2009/worktrail/internal/log"
 	"github.com/nickdu2009/worktrail/internal/model"
+	"github.com/nickdu2009/worktrail/internal/ops"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
 	"github.com/nickdu2009/worktrail/internal/util"
@@ -40,6 +40,13 @@ type StartOptions struct {
 	ResumedFromStateID   string
 	ResumedFromHandoffID string
 	Actor                string
+}
+
+type ResumeOptions struct {
+	StartOptions
+	SourceActiveID string
+	CloseSummary   string
+	CloseActor     string
 }
 
 type UpdateOptions struct {
@@ -90,6 +97,31 @@ type ListOptions struct {
 	Directory string
 }
 
+type Diagnostic struct {
+	Code       string `json:"code"`
+	Path       string `json:"path"`
+	Message    string `json:"message"`
+	Repairable bool   `json:"repairable,omitempty"`
+}
+
+type ListResult struct {
+	Capsules    []Capsule    `json:"capsules"`
+	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
+}
+
+type QuarantineRequest struct {
+	Scope   string `json:"scope,omitempty"`
+	Apply   bool   `json:"apply,omitempty"`
+	Confirm bool   `json:"confirm,omitempty"`
+	Actor   string `json:"actor,omitempty"`
+}
+
+type QuarantineReport struct {
+	Applied     bool         `json:"applied"`
+	Diagnostics []Diagnostic `json:"diagnostics"`
+	Actions     []string     `json:"actions,omitempty"`
+}
+
 type ShowOptions struct {
 	Scope     string
 	ID        string
@@ -104,6 +136,14 @@ type Capsule struct {
 	Checkpoint  string
 	Metadata    map[string]any
 	UpdatedTime time.Time
+}
+
+// Reference is a stable state identifier plus a scope-root-relative fallback
+// path. Callers that need a lightweight "latest" pointer should persist this
+// shape instead of copying a capsule or storing an absolute path.
+type Reference struct {
+	ID      string `json:"id"`
+	RelPath string `json:"rel_path"`
 }
 
 type CloseResult struct {
@@ -134,6 +174,7 @@ type metadata struct {
 }
 
 var now = time.Now
+var newCoordinator = ops.New
 
 func Start(env paths.Env, opts StartOptions) (Capsule, error) {
 	root, scope, err := scopeRoot(env, opts.Scope)
@@ -168,23 +209,155 @@ func Start(env paths.Env, opts StartOptions) (Capsule, error) {
 	if err != nil {
 		return Capsule{}, err
 	}
-	if _, err := os.Stat(path); err == nil {
-		return Capsule{}, fmt.Errorf("state %q already exists", id)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return Capsule{}, err
-	}
-	cap, err := writeCapsule(path, DirActive, meta, opts.Body)
+	aliasPath, err := latestAliasPath(root)
 	if err != nil {
 		return Capsule{}, err
 	}
-	if err := syncLatestAlias(root, cap); err != nil {
-		_ = os.Remove(path)
+	data, err := renderCapsuleData(meta, opts.Body)
+	if err != nil {
 		return Capsule{}, err
 	}
-	if err := appendEvent(root, "state.start", id, opts.Actor, map[string]any{"scope": scope, "path": relToRoot(root, path)}); err != nil {
+	operation, err := newCoordinator(root).BeginBuild(stateOperationID("start"), func() (ops.Spec, error) {
+		if _, statErr := os.Stat(path); statErr == nil {
+			return ops.Spec{}, fmt.Errorf("state %q already exists", id)
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return ops.Spec{}, statErr
+		}
+		writes := []ops.Write{
+			{Path: filepath.ToSlash(relToRoot(root, path)), Data: data, Mode: 0o644},
+			{Path: filepath.ToSlash(relToRoot(root, aliasPath)), Data: data, Mode: 0o644},
+		}
+		writes, buildErr := appendTransactionEvents(root, writes, []transactionEvent{{
+			Name:  "state.start",
+			ID:    id,
+			Actor: opts.Actor,
+			Data:  map[string]any{"scope": scope, "path": filepath.ToSlash(relToRoot(root, path))},
+			Time:  ts,
+		}})
+		return ops.Spec{Writes: writes}, buildErr
+	})
+	if err != nil {
 		return Capsule{}, err
 	}
-	return cap, nil
+	if err := operation.Commit(); err != nil {
+		return Capsule{}, fmt.Errorf("commit state start operation %s: %w", operation.Intent().ID, err)
+	}
+	return readCapsule(path, DirActive)
+}
+
+// Resume atomically creates the fresh active state, closes the selected source
+// state when present, refreshes latest.md, and appends both lifecycle events.
+func Resume(env paths.Env, opts ResumeOptions) (Capsule, error) {
+	root, scope, err := scopeRoot(env, opts.Scope)
+	if err != nil {
+		return Capsule{}, err
+	}
+	if strings.TrimSpace(opts.Title) == "" {
+		return Capsule{}, errors.New("state title is required")
+	}
+	ts := now().UTC()
+	id := strings.TrimSpace(opts.ID)
+	if id == "" {
+		id = newID("st", opts.Title, ts)
+	}
+	path, err := statePath(root, DirActive, id)
+	if err != nil {
+		return Capsule{}, err
+	}
+	aliasPath, err := latestAliasPath(root)
+	if err != nil {
+		return Capsule{}, err
+	}
+	meta := metadata{
+		Schema:               model.SchemaState,
+		ID:                   id,
+		Scope:                scope,
+		TaskID:               withDefault(opts.TaskID, "task-"+util.Slug(opts.Title)),
+		Type:                 withDefault(opts.Type, defaultType),
+		Title:                strings.TrimSpace(opts.Title),
+		Status:               "active",
+		SourceTool:           withDefault(opts.SourceTool, defaultSourceTool),
+		SourceSessions:       cleanList(opts.SourceSessions),
+		CreatedAt:            ts,
+		UpdatedAt:            ts,
+		Tags:                 cleanList(opts.Tags),
+		ResumedFromStateID:   strings.TrimSpace(opts.ResumedFromStateID),
+		ResumedFromHandoffID: strings.TrimSpace(opts.ResumedFromHandoffID),
+	}
+	newData, err := renderCapsuleData(meta, opts.Body)
+	if err != nil {
+		return Capsule{}, err
+	}
+	coordinator := newCoordinator(root)
+	operation, err := coordinator.BeginBuild(stateOperationID("resume"), func() (ops.Spec, error) {
+		if _, statErr := os.Stat(path); statErr == nil {
+			return ops.Spec{}, fmt.Errorf("state %q already exists", id)
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return ops.Spec{}, statErr
+		}
+		writes := []ops.Write{
+			{Path: filepath.ToSlash(relToRoot(root, path)), Data: newData, Mode: 0o644},
+			{Path: filepath.ToSlash(relToRoot(root, aliasPath)), Data: newData, Mode: 0o644},
+		}
+		var deletes []string
+		events := []transactionEvent{{
+			Name:  "state.start",
+			ID:    id,
+			Actor: opts.Actor,
+			Data:  map[string]any{"scope": scope, "path": filepath.ToSlash(relToRoot(root, path))},
+			Time:  ts,
+		}}
+		if sourceID := strings.TrimSpace(opts.SourceActiveID); sourceID != "" && sourceID != id {
+			source, sourceMeta, readErr := readByID(root, DirActive, sourceID)
+			if readErr != nil {
+				return ops.Spec{}, readErr
+			}
+			if sourceMeta.Scope != scope || sourceMeta.TaskID != meta.TaskID {
+				return ops.Spec{}, fmt.Errorf("resume source state %q does not belong to task %q in scope %q", sourceID, meta.TaskID, scope)
+			}
+			closeTime := ts
+			sourceMeta.Status = "closed"
+			sourceMeta.ClosedAt = &closeTime
+			sourceMeta.UpdatedAt = closeTime
+			sourceBody := source.Body
+			if summary := strings.TrimSpace(opts.CloseSummary); summary != "" {
+				sourceBody = appendMarkdown(sourceBody, "## Close Summary\n\n"+summary)
+			}
+			archivedPath, pathErr := statePath(root, DirArchived, sourceID)
+			if pathErr != nil {
+				return ops.Spec{}, pathErr
+			}
+			archivedData, renderErr := renderCapsuleData(sourceMeta, sourceBody)
+			if renderErr != nil {
+				return ops.Spec{}, renderErr
+			}
+			writes = append(writes, ops.Write{
+				Path: filepath.ToSlash(relToRoot(root, archivedPath)),
+				Data: archivedData,
+				Mode: 0o644,
+			})
+			deletes = append(deletes, filepath.ToSlash(relToRoot(root, source.Path)))
+			events = append(events, transactionEvent{
+				Name:  "state.close",
+				ID:    sourceID,
+				Actor: withDefault(opts.CloseActor, opts.Actor),
+				Data:  map[string]any{"handoff": false, "path": filepath.ToSlash(relToRoot(root, archivedPath))},
+				Time:  closeTime,
+			})
+		}
+		writes, writeErr := appendTransactionEvents(root, writes, events)
+		if writeErr != nil {
+			return ops.Spec{}, writeErr
+		}
+		return ops.Spec{Writes: writes, Deletes: deletes}, nil
+	})
+	if err != nil {
+		return Capsule{}, err
+	}
+	if err := operation.Commit(); err != nil {
+		return Capsule{}, fmt.Errorf("commit state resume operation %s: %w", operation.Intent().ID, err)
+	}
+	return readCapsule(path, DirActive)
 }
 
 func Update(env paths.Env, opts UpdateOptions) (Capsule, error) {
@@ -196,51 +369,68 @@ func updateActive(env paths.Env, opts UpdateOptions, event string, extraEventDat
 	if err != nil {
 		return Capsule{}, err
 	}
-	cap, meta, err := readByID(root, DirActive, opts.ID)
+	aliasPath, err := latestAliasPath(root)
 	if err != nil {
 		return Capsule{}, err
 	}
-	if opts.Type != "" {
-		meta.Type = strings.TrimSpace(opts.Type)
-	}
-	if opts.Title != "" {
-		meta.Title = strings.TrimSpace(opts.Title)
-	}
-	if opts.Status != "" {
-		meta.Status = strings.TrimSpace(opts.Status)
-	}
-	if opts.SourceTool != "" {
-		meta.SourceTool = strings.TrimSpace(opts.SourceTool)
-	}
-	if opts.SourceSessions != nil {
-		meta.SourceSessions = cleanList(opts.SourceSessions)
-	}
-	if opts.Tags != nil {
-		meta.Tags = cleanList(opts.Tags)
-	}
-	body := cap.Body
-	if opts.ReplaceBody != nil {
-		body = *opts.ReplaceBody
-	}
-	if strings.TrimSpace(opts.AppendBody) != "" {
-		body = appendMarkdown(body, opts.AppendBody)
-	}
-	meta.UpdatedAt = now().UTC()
-	updated, err := writeCapsule(cap.Path, DirActive, meta, body)
+	var path string
+	operation, err := newCoordinator(root).BeginBuild(stateOperationID("update"), func() (ops.Spec, error) {
+		cap, meta, readErr := readByID(root, DirActive, opts.ID)
+		if readErr != nil {
+			return ops.Spec{}, readErr
+		}
+		path = cap.Path
+		if opts.Type != "" {
+			meta.Type = strings.TrimSpace(opts.Type)
+		}
+		if opts.Title != "" {
+			meta.Title = strings.TrimSpace(opts.Title)
+		}
+		if opts.Status != "" {
+			meta.Status = strings.TrimSpace(opts.Status)
+		}
+		if opts.SourceTool != "" {
+			meta.SourceTool = strings.TrimSpace(opts.SourceTool)
+		}
+		if opts.SourceSessions != nil {
+			meta.SourceSessions = cleanList(opts.SourceSessions)
+		}
+		if opts.Tags != nil {
+			meta.Tags = cleanList(opts.Tags)
+		}
+		body := cap.Body
+		if opts.ReplaceBody != nil {
+			body = *opts.ReplaceBody
+		}
+		if strings.TrimSpace(opts.AppendBody) != "" {
+			body = appendMarkdown(body, opts.AppendBody)
+		}
+		ts := now().UTC()
+		meta.UpdatedAt = ts
+		data, renderErr := renderCapsuleData(meta, body)
+		if renderErr != nil {
+			return ops.Spec{}, renderErr
+		}
+		writes := []ops.Write{
+			{Path: filepath.ToSlash(relToRoot(root, cap.Path)), Data: data, Mode: 0o644},
+			{Path: filepath.ToSlash(relToRoot(root, aliasPath)), Data: data, Mode: 0o644},
+		}
+		eventData := map[string]any{"status": meta.Status, "path": filepath.ToSlash(relToRoot(root, cap.Path))}
+		for key, value := range extraEventData {
+			eventData[key] = value
+		}
+		writes, readErr = appendTransactionEvents(root, writes, []transactionEvent{{
+			Name: event, ID: meta.ID, Actor: opts.Actor, Data: eventData, Time: ts,
+		}})
+		return ops.Spec{Writes: writes}, readErr
+	})
 	if err != nil {
 		return Capsule{}, err
 	}
-	if err := syncLatestAlias(root, updated); err != nil {
-		return Capsule{}, err
+	if err := operation.Commit(); err != nil {
+		return Capsule{}, fmt.Errorf("commit state update operation %s: %w", operation.Intent().ID, err)
 	}
-	eventData := map[string]any{"status": meta.Status, "path": relToRoot(root, cap.Path)}
-	for key, value := range extraEventData {
-		eventData[key] = value
-	}
-	if err := appendEvent(root, event, meta.ID, opts.Actor, eventData); err != nil {
-		return Capsule{}, err
-	}
-	return updated, nil
+	return readCapsule(path, DirActive)
 }
 
 func Checkpoint(env paths.Env, opts CheckpointOptions) (Capsule, error) {
@@ -248,29 +438,55 @@ func Checkpoint(env paths.Env, opts CheckpointOptions) (Capsule, error) {
 	if err != nil {
 		return Capsule{}, err
 	}
-	cap, meta, err := readByID(root, DirActive, opts.ID)
+	var checkpointID, path string
+	coordinator := newCoordinator(root)
+	operation, err := coordinator.BeginBuild(stateOperationID("checkpoint"), func() (ops.Spec, error) {
+		cap, meta, readErr := readByID(root, DirActive, opts.ID)
+		if readErr != nil {
+			return ops.Spec{}, readErr
+		}
+		ts := now().UTC()
+		checkpointID = newID("cp", meta.Title, ts)
+		parentID := meta.ID
+		meta.ID = checkpointID
+		meta.CheckpointID = checkpointID
+		meta.CheckpointOf = parentID
+		meta.CheckpointNote = strings.TrimSpace(opts.Note)
+		meta.CheckpointAt = &ts
+		meta.CreatedAt = ts
+		meta.UpdatedAt = ts
+		path, readErr = statePath(root, DirCheckpoints, checkpointID)
+		if readErr != nil {
+			return ops.Spec{}, readErr
+		}
+		data, renderErr := renderCapsuleData(meta, cap.Body)
+		if renderErr != nil {
+			return ops.Spec{}, renderErr
+		}
+		writes := []ops.Write{{Path: filepath.ToSlash(relToRoot(root, path)), Data: data, Mode: 0o644}}
+		writes, readErr = appendTransactionEvents(root, writes, []transactionEvent{{
+			Name:  "state.checkpoint",
+			ID:    checkpointID,
+			Actor: opts.Actor,
+			Data: map[string]any{
+				"checkpoint_id": checkpointID,
+				"checkpoint_of": parentID,
+				"path":          filepath.ToSlash(relToRoot(root, path)),
+			},
+			Time: ts,
+		}})
+		if readErr != nil {
+			return ops.Spec{}, readErr
+		}
+		return ops.Spec{Writes: writes}, nil
+	})
 	if err != nil {
 		return Capsule{}, err
 	}
-	ts := now().UTC()
-	checkpointID := newID("cp", meta.Title, ts)
-	meta.CheckpointID = checkpointID
-	meta.CheckpointOf = meta.ID
-	meta.CheckpointNote = strings.TrimSpace(opts.Note)
-	meta.CheckpointAt = &ts
-	meta.UpdatedAt = ts
-	path, err := statePath(root, DirCheckpoints, checkpointID)
-	if err != nil {
-		return Capsule{}, err
+	if err := operation.Commit(); err != nil {
+		return Capsule{}, fmt.Errorf("commit state checkpoint operation %s: %w", operation.Intent().ID, err)
 	}
-	checkpoint, err := writeCapsule(path, DirCheckpoints, meta, cap.Body)
-	if err != nil {
-		return Capsule{}, err
-	}
-	if err := appendEvent(root, "state.checkpoint", meta.ID, opts.Actor, map[string]any{"checkpoint_id": checkpointID, "path": relToRoot(root, path)}); err != nil {
-		return Capsule{}, err
-	}
-	return checkpoint, nil
+	return readCapsule(path, DirCheckpoints)
 }
 
 func Inject(env paths.Env, opts InjectOptions) (Capsule, error) {
@@ -295,36 +511,75 @@ func Close(env paths.Env, opts CloseOptions) (CloseResult, error) {
 	if err != nil {
 		return CloseResult{}, err
 	}
-	cap, meta, err := readByID(root, DirActive, opts.ID)
+	aliasPath, err := latestAliasPath(root)
 	if err != nil {
 		return CloseResult{}, err
 	}
-	ts := now().UTC()
-	body := cap.Body
-	if strings.TrimSpace(opts.Summary) != "" {
-		body = appendMarkdown(body, "## Close Summary\n\n"+strings.TrimSpace(opts.Summary))
-	}
-	meta.Status = "closed"
-	meta.ClosedAt = &ts
-	meta.UpdatedAt = ts
-	closedPath, err := statePath(root, DirArchived, meta.ID)
+	var closedPath string
+	operation, err := newCoordinator(root).BeginBuild(stateOperationID("close"), func() (ops.Spec, error) {
+		cap, meta, readErr := readByID(root, DirActive, opts.ID)
+		if readErr != nil {
+			return ops.Spec{}, readErr
+		}
+		ts := now().UTC()
+		body := cap.Body
+		if strings.TrimSpace(opts.Summary) != "" {
+			body = appendMarkdown(body, "## Close Summary\n\n"+strings.TrimSpace(opts.Summary))
+		}
+		meta.Status = "closed"
+		meta.ClosedAt = &ts
+		meta.UpdatedAt = ts
+		closedPath, readErr = statePath(root, DirArchived, meta.ID)
+		if readErr != nil {
+			return ops.Spec{}, readErr
+		}
+		data, renderErr := renderCapsuleData(meta, body)
+		if renderErr != nil {
+			return ops.Spec{}, renderErr
+		}
+		writes := []ops.Write{{
+			Path: filepath.ToSlash(relToRoot(root, closedPath)), Data: data, Mode: 0o644,
+		}}
+		deletes := []string{filepath.ToSlash(relToRoot(root, cap.Path))}
+		active, listErr := List(env, ListOptions{Scope: opts.Scope, Directory: DirActive})
+		if listErr != nil {
+			return ops.Spec{}, listErr
+		}
+		var aliasData []byte
+		for _, candidate := range active {
+			if candidate.State.ID == meta.ID {
+				continue
+			}
+			aliasData, readErr = os.ReadFile(candidate.Path)
+			if readErr != nil {
+				return ops.Spec{}, readErr
+			}
+			break
+		}
+		if aliasData == nil {
+			deletes = append(deletes, filepath.ToSlash(relToRoot(root, aliasPath)))
+		} else {
+			writes = append(writes, ops.Write{
+				Path: filepath.ToSlash(relToRoot(root, aliasPath)), Data: aliasData, Mode: 0o644,
+			})
+		}
+		writes, readErr = appendTransactionEvents(root, writes, []transactionEvent{{
+			Name:  "state.close",
+			ID:    meta.ID,
+			Actor: opts.Actor,
+			Data:  map[string]any{"handoff": opts.Handoff, "path": filepath.ToSlash(relToRoot(root, closedPath))},
+			Time:  ts,
+		}})
+		return ops.Spec{Writes: writes, Deletes: deletes}, readErr
+	})
 	if err != nil {
 		return CloseResult{}, err
 	}
-	closed, err := writeCapsule(closedPath, DirArchived, meta, body)
-	if err != nil {
-		return CloseResult{}, err
+	if err := operation.Commit(); err != nil {
+		return CloseResult{}, fmt.Errorf("commit state close operation %s: %w", operation.Intent().ID, err)
 	}
-	if err := os.Remove(cap.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return CloseResult{}, err
-	}
-	if err := syncLatestAliasFromActive(root); err != nil {
-		return CloseResult{}, err
-	}
-	if err := appendEvent(root, "state.close", meta.ID, opts.Actor, map[string]any{"handoff": opts.Handoff, "path": relToRoot(root, closedPath)}); err != nil {
-		return CloseResult{}, err
-	}
-	return CloseResult{Capsule: closed}, nil
+	closed, err := readCapsule(closedPath, DirArchived)
+	return CloseResult{Capsule: closed}, err
 }
 
 func Archive(env paths.Env, opts ArchiveOptions) (Capsule, error) {
@@ -332,48 +587,68 @@ func Archive(env paths.Env, opts ArchiveOptions) (Capsule, error) {
 	if err != nil {
 		return Capsule{}, err
 	}
-	cap, meta, err := readByID(root, DirArchived, opts.ID)
+	var path string
+	operation, err := newCoordinator(root).BeginBuild(stateOperationID("archive"), func() (ops.Spec, error) {
+		cap, meta, readErr := readByID(root, DirArchived, opts.ID)
+		if readErr != nil {
+			return ops.Spec{}, readErr
+		}
+		path = cap.Path
+		ts := now().UTC()
+		meta.Status = "archived"
+		meta.ArchivedAt = &ts
+		meta.UpdatedAt = ts
+		data, renderErr := renderCapsuleData(meta, cap.Body)
+		if renderErr != nil {
+			return ops.Spec{}, renderErr
+		}
+		writes := []ops.Write{{
+			Path: filepath.ToSlash(relToRoot(root, cap.Path)), Data: data, Mode: 0o644,
+		}}
+		writes, readErr = appendTransactionEvents(root, writes, []transactionEvent{{
+			Name: "state.archive", ID: meta.ID, Actor: opts.Actor,
+			Data: map[string]any{"path": filepath.ToSlash(relToRoot(root, cap.Path))}, Time: ts,
+		}})
+		return ops.Spec{Writes: writes}, readErr
+	})
 	if err != nil {
 		return Capsule{}, err
 	}
-	ts := now().UTC()
-	meta.Status = "archived"
-	meta.ArchivedAt = &ts
-	meta.UpdatedAt = ts
-	archived, err := writeCapsule(cap.Path, DirArchived, meta, cap.Body)
-	if err != nil {
-		return Capsule{}, err
+	if err := operation.Commit(); err != nil {
+		return Capsule{}, fmt.Errorf("commit state archive operation %s: %w", operation.Intent().ID, err)
 	}
-	if err := appendEvent(root, "state.archive", meta.ID, opts.Actor, map[string]any{"path": relToRoot(root, cap.Path)}); err != nil {
-		return Capsule{}, err
-	}
-	return archived, nil
+	return readCapsule(path, DirArchived)
 }
 
 func List(env paths.Env, opts ListOptions) ([]Capsule, error) {
+	result, err := ListWithDiagnostics(env, opts)
+	return result.Capsules, err
+}
+
+func ListWithDiagnostics(env paths.Env, opts ListOptions) (ListResult, error) {
 	root, _, err := scopeRoot(env, opts.Scope)
 	if err != nil {
-		return nil, err
+		return ListResult{}, err
 	}
 	dirs := []string{withDefault(opts.Directory, DirActive)}
 	if opts.Directory == "all" {
 		dirs = []string{DirActive, DirCheckpoints, DirArchived}
 	}
-	var out []Capsule
+	var result ListResult
 	for _, dir := range dirs {
 		if err := validateDirectory(dir); err != nil {
-			return nil, err
+			return result, err
 		}
 		dirPath, err := stateDir(root, dir)
 		if err != nil {
-			return nil, err
+			return result, err
 		}
 		entries, err := os.ReadDir(dirPath)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return result, err
 		}
 		for _, entry := range entries {
 			if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" || (dir == DirActive && entry.Name() == latestAliasName) {
@@ -381,22 +656,127 @@ func List(env paths.Env, opts ListOptions) ([]Capsule, error) {
 			}
 			path, err := paths.SafeJoin(dirPath, entry.Name())
 			if err != nil {
-				return nil, err
+				return result, err
 			}
 			cap, err := readCapsule(path, dir)
 			if err != nil {
-				return nil, err
+				result.Diagnostics = append(result.Diagnostics, Diagnostic{
+					Code:       "invalid_state",
+					Path:       filepath.ToSlash(relToRoot(root, path)),
+					Message:    err.Error(),
+					Repairable: !errors.Is(err, errUnsafeStatePath),
+				})
+				continue
 			}
-			out = append(out, cap)
+			result.Capsules = append(result.Capsules, cap)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].UpdatedTime.Equal(out[j].UpdatedTime) {
-			return out[i].UpdatedTime.After(out[j].UpdatedTime)
+	sort.Slice(result.Capsules, func(i, j int) bool {
+		if !result.Capsules[i].UpdatedTime.Equal(result.Capsules[j].UpdatedTime) {
+			return result.Capsules[i].UpdatedTime.After(result.Capsules[j].UpdatedTime)
 		}
-		return out[i].Path < out[j].Path
+		return result.Capsules[i].Path < result.Capsules[j].Path
 	})
-	return out, nil
+	sort.Slice(result.Diagnostics, func(i, j int) bool {
+		return result.Diagnostics[i].Path < result.Diagnostics[j].Path
+	})
+	return result, nil
+}
+
+// QuarantineMalformed moves malformed state files into the ignored runtime
+// quarantine using replayable operations. It is dry-run unless Apply and
+// Confirm are both set.
+func QuarantineMalformed(env paths.Env, request QuarantineRequest) (QuarantineReport, error) {
+	if request.Apply && !request.Confirm {
+		return QuarantineReport{}, errors.New("state quarantine --apply requires --confirm")
+	}
+	root, scope, err := scopeRoot(env, request.Scope)
+	if err != nil {
+		return QuarantineReport{}, err
+	}
+	listed, err := ListWithDiagnostics(env, ListOptions{Scope: scope, Directory: "all"})
+	if err != nil {
+		return QuarantineReport{}, err
+	}
+	report := QuarantineReport{Diagnostics: listed.Diagnostics}
+	for _, diagnostic := range listed.Diagnostics {
+		if diagnostic.Repairable {
+			report.Actions = append(report.Actions, "quarantine malformed state: "+diagnostic.Path)
+		}
+	}
+	if !request.Apply {
+		return report, nil
+	}
+	for _, diagnostic := range listed.Diagnostics {
+		if !diagnostic.Repairable {
+			continue
+		}
+		if err := quarantineMalformedState(root, diagnostic, withDefault(request.Actor, defaultActor)); err != nil {
+			return QuarantineReport{}, err
+		}
+		report.Applied = true
+	}
+	return report, nil
+}
+
+func quarantineMalformedState(root string, diagnostic Diagnostic, actor string) error {
+	relPath := filepath.ToSlash(filepath.Clean(filepath.FromSlash(diagnostic.Path)))
+	parts := strings.Split(relPath, "/")
+	if len(parts) != 3 || parts[0] != "state" || filepath.Ext(parts[2]) != ".md" || parts[2] == latestAliasName {
+		return fmt.Errorf("refuse to quarantine invalid state path %q", diagnostic.Path)
+	}
+	if err := validateDirectory(parts[1]); err != nil {
+		return err
+	}
+	opID := stateOperationID("quarantine")
+	quarantineRel := filepath.ToSlash(filepath.Join(
+		"runtime", "quarantine", "state", opID+"-"+filepath.Base(relPath),
+	))
+	coordinator := newCoordinator(root)
+	operation, err := coordinator.BeginBuild(opID, func() (ops.Spec, error) {
+		source := filepath.Join(root, filepath.FromSlash(relPath))
+		info, statErr := os.Lstat(source)
+		if statErr != nil {
+			return ops.Spec{}, statErr
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return ops.Spec{}, fmt.Errorf("refuse to quarantine unsafe state path %q", relPath)
+		}
+		if _, readErr := readCapsule(source, parts[1]); readErr == nil {
+			return ops.Spec{}, fmt.Errorf("refuse to quarantine valid state %q", relPath)
+		}
+		data, readErr := os.ReadFile(source)
+		if readErr != nil {
+			return ops.Spec{}, readErr
+		}
+		target := filepath.Join(root, filepath.FromSlash(quarantineRel))
+		if _, statErr := os.Lstat(target); statErr == nil {
+			return ops.Spec{}, fmt.Errorf("state quarantine target already exists: %s", quarantineRel)
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return ops.Spec{}, statErr
+		}
+		writes, writeErr := appendTransactionEvents(root, []ops.Write{{
+			Path: quarantineRel,
+			Data: data,
+			Mode: 0o600,
+		}}, []transactionEvent{{
+			Name:  "state.quarantine",
+			Actor: actor,
+			Data:  map[string]any{"source": relPath, "quarantine": quarantineRel},
+			Time:  now().UTC(),
+		}})
+		if writeErr != nil {
+			return ops.Spec{}, writeErr
+		}
+		return ops.Spec{Writes: writes, Deletes: []string{relPath}}, nil
+	})
+	if err != nil {
+		return err
+	}
+	if err := operation.Commit(); err != nil {
+		return fmt.Errorf("commit state quarantine operation %s: %w", opID, err)
+	}
+	return nil
 }
 
 func LatestActive(env paths.Env, scope string) (Capsule, error) {
@@ -408,6 +788,18 @@ func LatestActive(env paths.Env, scope string) (Capsule, error) {
 		return Capsule{}, os.ErrNotExist
 	}
 	return items[0], nil
+}
+
+func LatestReference(env paths.Env, scope string) (Reference, error) {
+	root, _, err := scopeRoot(env, scope)
+	if err != nil {
+		return Reference{}, err
+	}
+	cap, err := LatestActive(env, scope)
+	if err != nil {
+		return Reference{}, err
+	}
+	return Reference{ID: cap.State.ID, RelPath: filepath.ToSlash(relToRoot(root, cap.Path))}, nil
 }
 
 func LatestExplicit(env paths.Env, scope string) (Capsule, error) {
@@ -536,6 +928,13 @@ func readByID(root, dir, id string) (Capsule, metadata, error) {
 }
 
 func readCapsule(path, dir string) (Capsule, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return Capsule{}, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return Capsule{}, fmt.Errorf("%w: state path %q is not a regular non-symlink file", errUnsafeStatePath, path)
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return Capsule{}, err
@@ -572,18 +971,17 @@ func readCapsule(path, dir string) (Capsule, error) {
 	}, nil
 }
 
-func writeCapsule(path, dir string, meta metadata, body string) (Capsule, error) {
+var errUnsafeStatePath = errors.New("unsafe state storage path")
+
+func renderCapsuleData(meta metadata, body string) ([]byte, error) {
 	if meta.Schema == "" {
 		meta.Schema = model.SchemaState
 	}
 	data, err := store.RenderMarkdown(meta, body)
 	if err != nil {
-		return Capsule{}, err
+		return nil, err
 	}
-	if err := util.AtomicWrite(path, data, 0o644); err != nil {
-		return Capsule{}, err
-	}
-	return readCapsule(path, dir)
+	return data, nil
 }
 
 func decodeMetadata(raw map[string]any) (metadata, error) {
@@ -604,12 +1002,53 @@ func decodeMetadata(raw map[string]any) (metadata, error) {
 	return meta, nil
 }
 
-func appendEvent(root, event, id, actor string, data map[string]any) error {
-	return wlog.Append(root, event, id, withDefault(actor, defaultActor), data)
+type transactionEvent struct {
+	Name  string
+	ID    string
+	Actor string
+	Data  map[string]any
+	Time  time.Time
+}
+
+func appendTransactionEvents(root string, writes []ops.Write, events []transactionEvent) ([]ops.Write, error) {
+	if len(events) == 0 {
+		return writes, nil
+	}
+	const relPath = "logs/events.jsonl"
+	existing, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		existing = append(existing, '\n')
+	}
+	for _, event := range events {
+		when := event.Time
+		if when.IsZero() {
+			when = now().UTC()
+		}
+		data, err := json.Marshal(model.Event{
+			Time:  when.UTC(),
+			Event: event.Name,
+			ID:    event.ID,
+			Actor: withDefault(event.Actor, defaultActor),
+			Data:  event.Data,
+		})
+		if err != nil {
+			return nil, err
+		}
+		existing = append(existing, data...)
+		existing = append(existing, '\n')
+	}
+	return append(writes, ops.Write{Path: relPath, Data: existing, Mode: 0o644}), nil
 }
 
 func newID(prefix, title string, ts time.Time) string {
 	return fmt.Sprintf("%s_%s_%s", prefix, util.Slug(title), ts.Format("20060102T150405.000000000Z"))
+}
+
+func stateOperationID(kind string) string {
+	return fmt.Sprintf("op_state_%s_%d_%d", kind, time.Now().UTC().UnixNano(), os.Getpid())
 }
 
 func withDefault(value, fallback string) string {
@@ -678,34 +1117,4 @@ const latestAliasName = "latest.md"
 
 func latestAliasPath(root string) (string, error) {
 	return paths.SafeJoin(root, "state", DirActive, latestAliasName)
-}
-
-func syncLatestAlias(root string, cap Capsule) error {
-	aliasPath, err := latestAliasPath(root)
-	if err != nil {
-		return err
-	}
-	data, err := os.ReadFile(cap.Path)
-	if err != nil {
-		return err
-	}
-	return util.AtomicWrite(aliasPath, data, 0o644)
-}
-
-func syncLatestAliasFromActive(root string) error {
-	caps, err := List(paths.Env{ProjectWT: root}, ListOptions{Directory: DirActive})
-	if err != nil {
-		return err
-	}
-	if len(caps) == 0 {
-		aliasPath, aliasErr := latestAliasPath(root)
-		if aliasErr != nil {
-			return aliasErr
-		}
-		if err := os.Remove(aliasPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return nil
-	}
-	return syncLatestAlias(root, caps[0])
 }

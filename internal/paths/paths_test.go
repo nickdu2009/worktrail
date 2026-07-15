@@ -38,3 +38,21 @@ func TestSafeJoinRejectsEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestHandoffDirsStayUnderScopeRoot(t *testing.T) {
+	root := t.TempDir()
+	local, err := HandoffLocalDir(root)
+	if err != nil {
+		t.Fatalf("HandoffLocalDir() error = %v", err)
+	}
+	team, err := HandoffTeamDir(root)
+	if err != nil {
+		t.Fatalf("HandoffTeamDir() error = %v", err)
+	}
+	if local != filepath.Join(root, "handoffs", "local") {
+		t.Fatalf("local dir = %q", local)
+	}
+	if team != filepath.Join(root, "handoffs", "team") {
+		t.Fatalf("team dir = %q", team)
+	}
+}

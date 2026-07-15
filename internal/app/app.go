@@ -71,6 +71,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 		return runRedact(ctx, env, ioctx, args[1:])
 	case "index":
 		return runIndex(ctx, env, ioctx, args[1:])
+	case "runtime":
+		return runRuntime(ctx, env, ioctx, args[1:])
 	case "search":
 		return runSearch(ctx, env, ioctx, args[1:])
 	case "context":
@@ -131,10 +133,14 @@ func usage(out io.Writer) {
 	fmt.Fprintln(out, "  worktrail state update <note>")
 	fmt.Fprintln(out, "  worktrail checkpoint <reason>")
 	fmt.Fprintln(out, "  worktrail takeover <note>")
-	fmt.Fprintln(out, "  worktrail handoff <summary>")
+	fmt.Fprintln(out, "  worktrail handoff --next-step <action> <summary>")
+	fmt.Fprintln(out, "  worktrail handoff create --complete <summary>")
 	fmt.Fprintln(out, "  worktrail resume [<task>]")
 	fmt.Fprintln(out, "  worktrail doctor knowledge")
 	fmt.Fprintln(out, "  worktrail doctor delete <path>")
+	fmt.Fprintln(out, "  worktrail doctor ops [status|repair --confirm]")
+	fmt.Fprintln(out, "  worktrail doctor recovery [--apply --confirm]")
+	fmt.Fprintln(out, "  worktrail runtime prune [--scope project|user] [--apply --confirm]")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "knowledge and maintenance:")
 	fmt.Fprintln(out, "  worktrail context --stage requirements <task>")

@@ -6,7 +6,7 @@
 ## Worktrail 是什么？
 <div class="title-en">What Is Worktrail?</div>
 
-Worktrail 是一个 local-first 的文档知识库、工作记录和交接工具。它帮助 Agent 在任务开始前读取项目知识和状态，在长任务中保留进度，在任务结束或切换工具前留下 durable handoff，并把确认过的经验沉淀成可 review 的知识候选。
+Worktrail 是一个 local-first 的文档知识库、工作记录和交接工具。它帮助 Agent 在任务开始前读取项目知识和状态，在长任务中保留进度，在显式跨 chat 或切换 Agent 时留下 task-scoped handoff，并把确认过的经验沉淀成可 review 的知识候选。
 
 它不是 TUI、Web UI、daemon、向量数据库或后台服务。
 
@@ -20,7 +20,7 @@ Worktrail 是一个 local-first 的文档知识库、工作记录和交接工具
 ## 为什么 pending candidate 不会直接进入正式知识？
 <div class="title-en">Why Pending Candidates Are Not Formal Knowledge</div>
 
-Worktrail 把“捕获”和“应用”分开。`note add`、`import`、`distill apply`、`handoff` 等命令会创建候选或操作记录；正式知识变更需要显式 review 后再 `promote` 或 `merge`。
+Worktrail 把“捕获”和“应用”分开。`note add`、`import`、`distill apply` 会创建候选或证据；正式知识变更需要显式 review 后再 `promote` 或 `merge`。Handoff 是独立的 task-scoped runtime record，不属于 formal knowledge 或 candidate review。
 
 这个设计可以避免未经确认的会话内容直接污染正式知识。
 
@@ -80,13 +80,24 @@ worktrail review --all
 ## 什么时候用 `handoff`？
 <div class="title-en">When Should I Use handoff?</div>
 
-在结束会话、切换 Agent、准备压缩上下文、跨工具交接或需要留下恢复入口时使用：
+只在用户明确要求跨 chat、切换 Agent、稍后继续或留下恢复入口时使用。普通进度、正常回复结束、context compact 和 hook 事件本身都不触发 handoff。
 
 ```bash
-worktrail handoff "summary, validation, risks, open questions, and next step"
+worktrail state close --to handoff --next-step "continue the task" "summary, validation, risks, open questions, and next step"
 ```
 
-`worktrail handoff` 会直接写入 `.worktrail/handoffs/` 下的真实交接记录；`stop` / `session-end` hooks 现在默认只保留 runtime records，不再自动起草 pending handoff candidate。
+默认创建 `.worktrail/handoffs/local/` 下的 private local handoff。没有 active state 时使用 `worktrail handoff create --next-step "<action>" "<summary>"`；任务已完成时明确传 `--complete`。`stop` / `session-end` hooks 只保留 runtime records，永远不创建 handoff。
+
+## 怎样把 Handoff 分享给团队？
+<div class="title-en">How Do I Share a Handoff With the Team?</div>
+
+显式发布一个 local handoff：
+
+```bash
+worktrail handoff publish <local-id>
+```
+
+Publish 会创建新的 `.worktrail/handoffs/team/` immutable DAG 节点，不会运行 `git add`、`git commit` 或 `git push`。Dirty worktree 默认被拒绝；例外必须同时使用 `--allow-dirty --confirm`，且 team 记录会标明代码不可用。多个 team head 必须通过 `--supersedes <id,...>` 显式 reconciliation。
 
 ## 什么时候用 `resume`？
 <div class="title-en">When Should I Use resume</div>
@@ -95,10 +106,27 @@ worktrail handoff "summary, validation, risks, open questions, and next step"
 
 ```bash
 worktrail resume
-worktrail resume "continue review follow-up"
+worktrail resume --task-id <task-id>
+worktrail resume --ref checkpoint:<checkpoint-id>
 ```
 
-`resume` 会基于最近 active state 和最近 durable handoff 创建一个新的 active state，作为新的恢复入口。
+`resume` 一次只恢复一个 task，优先 local handoff、team handoff、explicit state、explicit checkpoint、runtime checkpoint、runtime session。无 selector 时只能自动选择唯一 task；如果存在多个 task，会返回 ambiguity 并要求 `--task-id`、`--task-title` 或 `--ref`。Runtime fallback 会标为 degraded。
+
+## Runtime 恢复记录会永久保留吗？
+<div class="title-en">Are Runtime Recovery Records Kept Forever?</div>
+
+不会。Runtime session/checkpoint 的保留窗口是 14 天，恢复读取每个 task 最多取最新 5 条有效记录。Prune 使用显式 plan/apply 语义；hooks 不会自动删除，也不会把 runtime 记录升级成 handoff。
+
+## 旧 Handoff 和 `candidate_type=handoff` 怎么处理？
+<div class="title-en">How Do I Migrate Legacy Handoffs?</div>
+
+`candidate_type=handoff` 已退休，完全排除在 candidates list/show/diff、review（包括 `--all`）和 apply-candidates 之外；显式访问会返回 migration-required，promote/merge 会拒绝。先运行只读 dry-run：
+
+```bash
+worktrail migrate handoff-v2
+```
+
+确认报告后再运行 `worktrail migrate handoff-v2 --apply --confirm`。已 discarded/archived 的 handoff candidate 会先进入可审计备份，再迁移成带同名终态 lifecycle 的 V2 local 记录并从 candidate surface 删除；它们不会复活为 current handoff。Dry-run 会在任何写入前验证完整 V2 metadata、正文安全、content hash 和大小，非法旧 ID/source_tool 或不安全 source_state 会显示为 `invalid`。默认备份位于迁移 `.worktrail` 之外并由 `/.worktrail-handoff-v2-backups/` 精确忽略；manifest 带 inventory hash、文件数和逐文件 hash。冲突不会覆盖，恢复不会覆盖已变化的目标，成功后会强制重建项目 index。可用 `--backup-dir` 指定其他外置且不冲突的目录。
 
 ## Cursor 会自动使用 Worktrail 吗？
 <div class="title-en">Does Cursor Use Worktrail Automatically?</div>
@@ -112,7 +140,7 @@ worktrail resume "continue review follow-up"
 
 会，但最佳实践要理解成“语义自动化”而不是“hooks 自动触发”。
 
-安装 `worktrail install zcode --user` 后，ZCode Agent 会读取 `~/.zcode/AGENTS.md` 和 `~/.zcode/skills/`。当当前 workspace 或 repo root 已经存在 `.worktrail/` 时，Agent 应该根据这些规则主动选择 Worktrail skill 或直接运行对应 CLI，例如 `worktrail context`、`worktrail resume`、`worktrail search`、`worktrail state`、`worktrail handoff`。
+安装 `worktrail install zcode --user` 后，ZCode Agent 会读取 `~/.zcode/AGENTS.md` 和 `~/.zcode/skills/`。当当前 workspace 或 repo root 已经存在 `.worktrail/` 时，Agent 应该根据这些规则主动选择 Worktrail skill 或直接运行对应 CLI，例如 `worktrail context`、`worktrail resume`、`worktrail search`、`worktrail state`；交接时使用 `worktrail handoff create --next-step "<action>" "<summary>"`，完成任务则明确传 `--complete`。
 
 ZCode Agent 当前没有 Worktrail-managed 的项目级 hooks、runtime settings 或 transcript import 支持，所以不要把它理解成 Cursor / Claude Code 那种事件驱动自动化。
 
@@ -125,7 +153,26 @@ ZCode Agent 当前没有 Worktrail-managed 的项目级 hooks、runtime settings
 worktrail doctor knowledge
 ```
 
-它重点检查需要 review 管理的正式知识漂移，也会报告绕过 candidate/review 流的直接 formal edits。与此同时，`worktrail init` 生成的 starter docs、`worktrail handoff` 生成的 durable handoff 记录，以及没有 thread/topic 语义压力的全局规则、决策或日志，不会再被当成低信号噪音 warning。
+它重点检查需要 review 管理的正式知识漂移，也会报告绕过 candidate/review 流的直接 formal edits。Handoff runtime 和已退休 handoff candidate 不属于这条知识治理链，`doctor knowledge` 不扫描或暴露它们；旧 handoff candidate 只由 `worktrail migrate handoff-v2` 发现。用 `worktrail handoff doctor` 检查 malformed handoff、hash、权限、local current、team tracking 和 DAG heads，用默认 dry-run 的 `worktrail handoff repair` 规划 local 修复或 malformed local handoff 隔离。
+
+## Malformed handoff、state 和 runtime 怎样隔离？
+<div class="title-en">How Are Malformed Handoff, State, and Runtime Records Quarantined?</div>
+
+它们有两个明确入口，均先 dry-run：
+
+```bash
+worktrail handoff repair
+worktrail doctor recovery
+```
+
+确认后分别运行：
+
+```bash
+worktrail handoff repair --apply --confirm
+worktrail doctor recovery --apply --confirm
+```
+
+第一条只隔离 malformed local handoff，team handoff 保持 immutable；第二条同时隔离 repairable malformed state 和 runtime。目标都位于 `.worktrail/runtime/quarantine/` 下对应的 `handoff/`、`state/`、`sessions/`、`checkpoints/` 或 `recovery/` 子目录。Recovery 入口不接受 `--repair`。
 
 ## 我可以自动清理所有 pending evidence 吗？
 <div class="title-en">Can I Automatically Clean All Pending Evidence?</div>

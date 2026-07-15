@@ -13,7 +13,6 @@ func IsFormalKnowledgePath(path string) bool {
 	for _, prefix := range []string{
 		"architecture/",
 		"decisions/",
-		"handoffs/",
 		"requirements/",
 		"workflows/",
 		"validation/",
@@ -28,4 +27,13 @@ func IsFormalKnowledgePath(path string) bool {
 		}
 	}
 	return false
+}
+
+func IsLegacyHandoffPath(path string) bool {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	if !strings.HasPrefix(path, "handoffs/") {
+		return false
+	}
+	name := strings.TrimPrefix(path, "handoffs/")
+	return name != "" && !strings.Contains(name, "/") && strings.EqualFold(filepath.Ext(name), ".md")
 }

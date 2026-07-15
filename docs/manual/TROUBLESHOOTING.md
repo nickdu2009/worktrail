@@ -118,7 +118,7 @@ worktrail index rebuild --scope project
 ### 现象
 <div class="title-en">Symptom</div>
 
-你已经安装了 skills，但 Agent 没有在任务开始或结束时运行 Worktrail。
+你已经安装了 skills，但 Agent 没有在任务开始时读取 Worktrail，或在你明确要求跨 chat / 切 Agent 时创建 handoff。
 
 ### 处理
 <div class="title-en">Fix</div>
@@ -141,6 +141,8 @@ worktrail doctor zcode --user
 3. 重新打开或重启对应 Agent，让它重新发现用户级 rules 和 skills。
 
 用户级 Worktrail skills 默认只在存在 `.worktrail/` 的项目中自动运行常规工作流。没有这个标记时，Worktrail 只应响应显式 init、install、inspect 或 repair 请求。
+
+不要把“正常回复结束”当成 handoff 自动化验收条件。Handoff trigger 只匹配显式 handoff、跨 chat 继续或切 Agent；普通进度应更新 state，hooks 只写 runtime records。
 
 如果你使用的是 ZCode Agent，还要额外确认两点：
 
@@ -195,8 +197,100 @@ worktrail review plan --format json
 
 - 候选不是 pending 状态
 - 候选类型是 `transcript_notes` 或 `migration_source`，需要先 distill
+- 候选类型是已退休的 `handoff`，需要运行 `worktrail migrate handoff-v2`
 - `target_path` 和 candidate type 不匹配
 - 目标文档缺失、冲突或需要人工 review
+
+## Publish 被 Dirty Worktree 拒绝
+<div class="title-en">Publish Is Rejected for a Dirty Worktree</div>
+
+### 现象
+<div class="title-en">Symptom</div>
+
+`worktrail handoff publish <local-id>` 报告 worktree is dirty。
+
+### 处理
+<div class="title-en">Fix</div>
+
+默认拒绝是为了避免 team handoff 暗示尚未提交的代码可在其他机器恢复。优先先提交或清理现场。确实需要发布不含可恢复代码承诺的交接时，必须同时确认例外：
+
+```bash
+worktrail handoff publish <local-id> --allow-dirty --confirm
+```
+
+发布结果会记录 dirty snapshot，并把代码可用性标为 unavailable。命令不会替你运行 `git add`、`git commit` 或 `git push`。
+
+## Handoff Doctor 报告异常
+<div class="title-en">Handoff Doctor Reports Problems</div>
+
+先运行：
+
+```bash
+worktrail handoff doctor
+worktrail handoff repair
+```
+
+`repair` 默认只读。只有确认计划后才运行：
+
+```bash
+worktrail handoff repair --apply --confirm
+```
+
+Repair 只处理 local 记录：malformed local handoff 会被隔离到 `.worktrail/runtime/quarantine/handoff/`，可修复的 hash、权限或多个 current 记录按计划处理。Team handoff 是 immutable DAG 节点，不会原地修改或隔离；`team_untracked` 需要你自行决定是否加入 Git，多个 team head 需要发布带 `--supersedes` 的 reconciliation handoff。
+
+## State 或 Runtime 记录损坏
+<div class="title-en">State or Runtime Records Are Malformed</div>
+
+先查看同时覆盖 explicit state 与 hook runtime 的只读隔离计划：
+
+```bash
+worktrail doctor recovery
+worktrail doctor recovery --format json
+```
+
+确认计划后，必须同时提供两个 mutation gate：
+
+```bash
+worktrail doctor recovery --apply --confirm
+```
+
+Malformed state 会移入 `.worktrail/runtime/quarantine/state/`，malformed runtime 会移入 `.worktrail/runtime/quarantine/sessions/`、`checkpoints/` 或 `recovery/` 的对应目录。`worktrail doctor recovery --repair` 是无效命令；不要用 `handoff repair`、`runtime prune` 或手工删除替代这条 state/runtime 隔离入口。
+
+## Resume 报告 Task Ambiguity
+<div class="title-en">Resume Reports Task Ambiguity</div>
+
+### 现象
+<div class="title-en">Symptom</div>
+
+直接运行 `worktrail resume` 时列出多个 task 并拒绝继续。
+
+### 处理
+<div class="title-en">Fix</div>
+
+这是 task-scoped 隔离，不是“选最新文件”的失败。按错误列出的候选显式选择：
+
+```bash
+worktrail resume --task-id <task-id>
+worktrail resume --task-title "<exact title>"
+worktrail resume --ref handoff:<handoff-id>
+worktrail resume --ref checkpoint:<checkpoint-id>
+```
+
+不要通过复制另一个 task 的 state 或 runtime 文件来绕过消歧。`context` 的 Task Recovery Summary 也会按 task 分开呈现，不会合并多个 task 的恢复材料。
+
+## Handoff V2 迁移被阻止
+<div class="title-en">Handoff V2 Migration Is Blocked</div>
+
+先保留默认 dry-run 并检查 conflict、invalid 和 unresolved：
+
+```bash
+worktrail migrate handoff-v2
+worktrail migrate handoff-v2 --format json
+```
+
+只有 dry-run 可接受时才运行 `worktrail migrate handoff-v2 --apply --confirm`。备份目录必须位于迁移的 `.worktrail` 根目录之外，也不能通过 symlink 指回根目录；默认目录是项目根下由 `/.worktrail-handoff-v2-backups/` 精确忽略的外置目录。`manifest.json` 记录 inventory hash、文件数和逐文件 hash。Dry-run 在任何写入前验证生成的 V2 metadata/body/text safety/content hash/size；非法旧 ID/source_tool、越界 source_state、symlink source/reference 都会显示为 `invalid`。已存在且 hash 不同的 target、冲突 backup 或迁移期间变化的源/目标都会阻止清理；恢复时也不要覆盖变化后的目标。Discarded/archived handoff candidate 成功迁移后会保留对应终态 lifecycle，并从 candidate surface 删除。成功 apply 后项目 index 会被强制重建。
+
+不要用 `worktrail doctor knowledge` 寻找 handoff candidate；它只检查正式知识治理问题。旧 handoff candidate 的唯一发现入口是 `worktrail migrate handoff-v2`。
 
 ## 删除知识前不确定是否安全
 <div class="title-en">Unsure Whether Deleting Knowledge Is Safe</div>

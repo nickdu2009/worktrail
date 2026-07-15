@@ -23,19 +23,27 @@ const reviewApplyPlanReportSchema = "worktrail.review.apply_plan.report.v1"
 const reviewApplyCandidatesReportSchema = "worktrail.review.apply_candidates.report.v1"
 
 type reviewPlan struct {
-	Schema      string            `json:"schema"`
-	GeneratedAt string            `json:"generated_at"`
-	Scope       string            `json:"scope"`
-	Summary     reviewPlanSummary `json:"summary"`
-	Items       []reviewPlanItem  `json:"items"`
+	Schema      string                 `json:"schema"`
+	GeneratedAt string                 `json:"generated_at"`
+	Scope       string                 `json:"scope"`
+	Summary     reviewPlanSummary      `json:"summary"`
+	Items       []reviewPlanItem       `json:"items"`
+	Diagnostics []reviewPlanDiagnostic `json:"diagnostics,omitempty"`
 }
 
 type reviewPlanSummary struct {
 	Total            int `json:"total"`
+	Excluded         int `json:"excluded,omitempty"`
 	Promote          int `json:"promote"`
 	Merge            int `json:"merge"`
 	Discard          int `json:"discard"`
 	NeedsHumanReview int `json:"needs_human_review"`
+}
+
+type reviewPlanDiagnostic struct {
+	Code        string `json:"code"`
+	CandidateID string `json:"candidate_id"`
+	Message     string `json:"message"`
 }
 
 type reviewApplyPlanReport struct {
@@ -357,7 +365,7 @@ func applyReviewCandidate(manager candidate.Manager, scope, action, id string) r
 	item.TargetPath = rec.Meta.TargetPath
 	if reviewApplyCandidatesBlocked(rec) {
 		item.Result = "failed"
-		item.Error = "review apply-candidates blocks transcript_notes, migration_source, and KDD split-source lesson candidates; distill semantic candidates before applying"
+		item.Error = "review apply-candidates blocks transcript_notes, migration_source, KDD split-source lesson candidates, and retired handoff candidates; migrate legacy handoffs or distill semantic candidates before applying"
 		return item
 	}
 	status, err := applyReviewPlanAction(manager, scope, id, action)
@@ -374,6 +382,8 @@ func applyReviewCandidate(manager candidate.Manager, scope, action, id string) r
 
 func reviewApplyCandidatesBlocked(rec candidate.Record) bool {
 	switch {
+	case rec.Meta.CandidateType == model.CandidateTypeHandoff:
+		return true
 	case rec.Meta.CandidateType == model.CandidateTypeTranscriptNotes:
 		return true
 	case rec.Meta.CandidateType == model.CandidateTypeMigrationSource:
@@ -548,6 +558,15 @@ func buildReviewPlan(env wtpaths.Env, scope string, records []candidate.Record, 
 		if topic != "" && objectMeta.Topic != topic {
 			continue
 		}
+		if rec.Meta.Status == candidate.StatusPending && rec.Meta.CandidateType == model.CandidateTypeHandoff {
+			plan.Summary.Excluded++
+			plan.Diagnostics = append(plan.Diagnostics, reviewPlanDiagnostic{
+				Code:        "legacy_handoff_candidate_requires_migration",
+				CandidateID: rec.Meta.ID,
+				Message:     "handoff candidates are retired; migrate this legacy record with `worktrail migrate handoff-v2`",
+			})
+			continue
+		}
 		if objectMeta.LifecycleStatus != model.LifecyclePendingReview || !objectMeta.IsDraft() || objectMeta.DraftKind != model.DraftKindSemantic {
 			continue
 		}
@@ -629,6 +648,9 @@ func newReviewPlanAnalysis(records []candidate.Record, topic string) reviewPlanA
 			continue
 		}
 		if objectMeta.LifecycleStatus != model.LifecyclePendingReview || !objectMeta.IsDraft() || objectMeta.DraftKind != model.DraftKindSemantic {
+			continue
+		}
+		if rec.Meta.CandidateType == model.CandidateTypeHandoff {
 			continue
 		}
 		analysis.SameTargetCounts[rec.Meta.TargetPath]++
@@ -939,6 +961,9 @@ func renderReviewPlanText(out io.Writer, plan reviewPlan) error {
 	fmt.Fprintf(out, "Schema: %s\n", plan.Schema)
 	fmt.Fprintf(out, "Scope: %s\n", plan.Scope)
 	fmt.Fprintf(out, "Summary: total=%d promote=%d merge=%d discard=%d needs_human_review=%d\n", plan.Summary.Total, plan.Summary.Promote, plan.Summary.Merge, plan.Summary.Discard, plan.Summary.NeedsHumanReview)
+	for _, diagnostic := range plan.Diagnostics {
+		fmt.Fprintf(out, "diagnostic: %s\t%s\t%s\n", diagnostic.Code, diagnostic.CandidateID, diagnostic.Message)
+	}
 	for _, group := range []struct {
 		Action string
 		Title  string

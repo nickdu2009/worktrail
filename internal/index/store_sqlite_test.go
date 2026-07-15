@@ -120,6 +120,28 @@ func TestRecoverCorruptSQLite(t *testing.T) {
 	}
 }
 
+func TestBrokenSQLiteRetentionKeepsLatestThree(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "index"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if err := os.WriteFile(sqlitePath(root), []byte("broken"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := recoverSQLite(root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	broken, err := filepath.Glob(sqlitePath(root) + ".broken-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(broken) != brokenRetention {
+		t.Fatalf("broken sqlite files = %d, want %d: %v", len(broken), brokenRetention, broken)
+	}
+}
+
 func TestChineseFTSSearch(t *testing.T) {
 	root := t.TempDir()
 	mustWriteJSON(t, filepath.Join(root, "config.json"), map[string]any{"scope": "project"})

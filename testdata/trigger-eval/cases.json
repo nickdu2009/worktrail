@@ -10,63 +10,12 @@
     "requires_confirmation": false
   },
   {
-    "id": "codex-context-resume-previous",
-    "tool": "codex",
-    "skill": "worktrail-context",
-    "prompt": "Load Worktrail context for the import flow task, then stop. Do not resume the previous session or continue the task.",
-    "expected_behavior": "must load Worktrail context for the requested task and stop without session recovery",
-    "expected_commands": ["worktrail context"],
-    "forbidden_patterns": ["worktrail resume"],
-    "negative_case": false,
-    "requires_confirmation": false
-  },
-  {
-    "id": "codex-context-explain-only",
-    "tool": "codex",
-    "skill": "worktrail-context",
-    "prompt": "Explain what Worktrail context is without running anything.",
-    "expected_behavior": "must not run Worktrail commands",
-    "forbidden_patterns": ["worktrail context"],
-    "negative_case": true,
-    "requires_confirmation": false
-  },
-  {
     "id": "codex-preview-project-knowledge",
     "tool": "codex",
     "skill": "worktrail-doc-preview",
     "prompt": "Preview the project's Worktrail knowledge in the rendered preview site.",
     "expected_behavior": "must preview rendered Worktrail knowledge",
     "expected_commands": ["worktrail preview"],
-    "negative_case": false,
-    "requires_confirmation": false
-  },
-  {
-    "id": "codex-preview-user-workflows",
-    "tool": "codex",
-    "skill": "worktrail-doc-preview",
-    "prompt": "Open the user-scope Worktrail preview and report the preview entry path.",
-    "expected_behavior": "must preview user-scope Worktrail knowledge",
-    "expected_commands": ["worktrail preview"],
-    "negative_case": false,
-    "requires_confirmation": false
-  },
-  {
-    "id": "codex-preview-explain-only",
-    "tool": "codex",
-    "skill": "worktrail-doc-preview",
-    "prompt": "Explain what the Worktrail preview site is, but do not open it.",
-    "expected_behavior": "must not preview Worktrail knowledge",
-    "forbidden_patterns": ["worktrail preview"],
-    "negative_case": true,
-    "requires_confirmation": false
-  },
-  {
-    "id": "codex-state-save-progress",
-    "tool": "codex",
-    "skill": "worktrail-state",
-    "prompt": "Save current progress in Worktrail state.",
-    "expected_behavior": "must save or update Worktrail state",
-    "expected_commands": ["worktrail state"],
     "negative_case": false,
     "requires_confirmation": false
   },
@@ -82,27 +31,6 @@
     "requires_confirmation": false
   },
   {
-    "id": "codex-search-find-workflow",
-    "tool": "codex",
-    "skill": "worktrail-search",
-    "prompt": "Find the Worktrail workflow doc that mentions preview by keyword search. Start with worktrail search and do not fall back to worktrail context first.",
-    "expected_behavior": "must search Worktrail knowledge for the requested workflow keyword",
-    "expected_commands": ["worktrail search"],
-    "forbidden_patterns": ["worktrail context", "rg", "grep", "find"],
-    "negative_case": false,
-    "requires_confirmation": false
-  },
-  {
-    "id": "codex-search-explain-only",
-    "tool": "codex",
-    "skill": "worktrail-search",
-    "prompt": "Tell me what Worktrail search does, but do not run a search.",
-    "expected_behavior": "must not run Worktrail search",
-    "forbidden_patterns": ["worktrail search", "worktrail preview"],
-    "negative_case": true,
-    "requires_confirmation": false
-  },
-  {
     "id": "codex-resume-latest-session",
     "tool": "codex",
     "skill": "worktrail-resume",
@@ -111,27 +39,6 @@
     "expected_commands": ["worktrail resume"],
     "forbidden_patterns": ["worktrail context", "worktrail state inject", "worktrail state start", "worktrail state list", "worktrail state show"],
     "negative_case": false,
-    "requires_confirmation": false
-  },
-  {
-    "id": "codex-resume-latest-handoff",
-    "tool": "codex",
-    "skill": "worktrail-resume",
-    "prompt": "Continue the previous Worktrail task in this new chat from the latest handoff. Use worktrail resume as the first recovery command.",
-    "expected_behavior": "must resume prior Worktrail work from the latest handoff or state",
-    "expected_commands": ["worktrail resume"],
-    "forbidden_patterns": ["worktrail context", "worktrail state inject", "worktrail state start", "worktrail state list", "worktrail state show"],
-    "negative_case": false,
-    "requires_confirmation": false
-  },
-  {
-    "id": "codex-resume-definition-only",
-    "tool": "codex",
-    "skill": "worktrail-resume",
-    "prompt": "Explain what Worktrail resume does, but do not resume anything.",
-    "expected_behavior": "must not resume prior Worktrail work",
-    "forbidden_patterns": ["worktrail resume", "worktrail state start"],
-    "negative_case": true,
     "requires_confirmation": false
   },
   {
@@ -145,56 +52,24 @@
     "requires_confirmation": false
   },
   {
-    "id": "codex-state-status-only",
-    "tool": "codex",
-    "skill": "worktrail-state",
-    "prompt": "Tell me whether Worktrail has a state feature, but do not save anything.",
-    "expected_behavior": "must not mutate Worktrail state",
-    "forbidden_patterns": ["worktrail state start", "worktrail state update", "worktrail state checkpoint", "worktrail handoff"],
-    "negative_case": true,
-    "requires_confirmation": false
-  },
-  {
     "id": "codex-handoff-new-conversation",
     "tool": "codex",
     "skill": "worktrail-handoff",
-    "prompt": "Prepare a Worktrail handoff. I want to start a new conversation.",
-    "expected_behavior": "must run worktrail handoff",
-    "expected_commands": ["worktrail handoff"],
-    "forbidden_patterns": ["worktrail promote", "worktrail merge", "worktrail discard"],
+    "prompt": "I have an active explicit Worktrail state and need to continue later in a new chat. Create the durable handoff now.",
+    "expected_behavior": "must atomically close the active state to a durable handoff and explicitly record the unfinished next step",
+    "expected_commands": ["worktrail state close --to handoff --next-step"],
+    "forbidden_patterns": ["worktrail handoff", "worktrail state checkpoint", "worktrail promote", "worktrail merge", "worktrail discard"],
     "negative_case": false,
     "requires_confirmation": false
   },
   {
-    "id": "codex-handoff-switch-agent",
+    "id": "codex-handoff-ordinary-progress",
     "tool": "codex",
     "skill": "worktrail-handoff",
-    "prompt": "Make a Worktrail handoff because I am switching agents.",
-    "expected_behavior": "must run worktrail handoff",
-    "expected_commands": ["worktrail handoff"],
-    "forbidden_patterns": ["worktrail promote", "worktrail merge", "worktrail discard"],
-    "negative_case": false,
-    "requires_confirmation": false
-  },
-  {
-    "id": "codex-handoff-template-only",
-    "tool": "codex",
-    "skill": "worktrail-handoff",
-    "prompt": "Show me an example handoff template, but do not create a Worktrail handoff.",
-    "expected_behavior": "must not create a Worktrail handoff",
-    "forbidden_patterns": ["worktrail handoff"],
+    "prompt": "Record ordinary progress for the current task and remain in this chat. Do not hand off or switch agents.",
+    "expected_behavior": "must not create a durable handoff at an ordinary progress boundary",
+    "forbidden_patterns": ["worktrail state close --to handoff", "worktrail handoff"],
     "negative_case": true,
-    "requires_confirmation": false
-  },
-  {
-    "id": "codex-import-transcript",
-    "tool": "codex",
-    "skill": "worktrail-import",
-    "prompt": "Import the latest Codex transcript into Worktrail.",
-    "expected_behavior": "must import Codex transcript evidence",
-    "expected_commands": ["worktrail import codex"],
-    "expected_artifacts": ["candidate_type=transcript_notes"],
-    "negative_case": false,
     "requires_confirmation": false
   },
   {
@@ -206,16 +81,6 @@
     "expected_commands": ["worktrail migrate kdd"],
     "expected_artifacts": ["candidate_type=migration_source"],
     "negative_case": false,
-    "requires_confirmation": false
-  },
-  {
-    "id": "codex-import-explain-sync",
-    "tool": "codex",
-    "skill": "worktrail-import",
-    "prompt": "Explain the difference between Worktrail import and sync without running them.",
-    "expected_behavior": "must not import or sync transcripts",
-    "forbidden_patterns": ["worktrail import", "worktrail sync", "worktrail migrate kdd"],
-    "negative_case": true,
     "requires_confirmation": false
   },
   {
@@ -361,16 +226,6 @@
     "requires_confirmation": false
   },
   {
-    "id": "codex-maintain-context-summary",
-    "tool": "codex",
-    "skill": "worktrail-maintain",
-    "prompt": "Use Worktrail to summarize maintenance context for cleanup.",
-    "expected_behavior": "must load maintenance context",
-    "expected_commands": ["worktrail context maintenance"],
-    "negative_case": false,
-    "requires_confirmation": false
-  },
-  {
     "id": "codex-maintain-policy-only",
     "tool": "codex",
     "skill": "worktrail-maintain",
@@ -379,5 +234,160 @@
     "forbidden_patterns": ["worktrail evidence", "worktrail context maintenance"],
     "negative_case": true,
     "requires_confirmation": false
+  },
+  {
+    "id": "codex-context-resume-previous",
+    "tool": "codex",
+    "skill": "worktrail-context",
+    "prompt": "Load Worktrail context for the import flow task, then stop. Do not resume the previous session or continue the task.",
+    "expected_behavior": "must load Worktrail context for the requested task and stop without session recovery",
+    "expected_commands": ["worktrail context"],
+    "forbidden_patterns": ["worktrail resume"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-preview-user-workflows",
+    "tool": "codex",
+    "skill": "worktrail-doc-preview",
+    "prompt": "Open the user-scope Worktrail preview and report the preview entry path.",
+    "expected_behavior": "must preview user-scope Worktrail knowledge",
+    "expected_commands": ["worktrail preview"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-search-find-workflow",
+    "tool": "codex",
+    "skill": "worktrail-search",
+    "prompt": "Find the Worktrail workflow doc that mentions preview by keyword search. Start with worktrail search and do not fall back to worktrail context first.",
+    "expected_behavior": "must search Worktrail knowledge for the requested workflow keyword",
+    "expected_commands": ["worktrail search"],
+    "forbidden_patterns": ["worktrail context", "rg", "grep", "find"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-resume-latest-handoff",
+    "tool": "codex",
+    "skill": "worktrail-resume",
+    "prompt": "Continue the previous Worktrail task in this new chat from the latest handoff. Use worktrail resume as the first recovery command.",
+    "expected_behavior": "must resume prior Worktrail work from the latest handoff or state",
+    "expected_commands": ["worktrail resume"],
+    "forbidden_patterns": ["worktrail context", "worktrail state inject", "worktrail state start", "worktrail state list", "worktrail state show"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-state-save-progress",
+    "tool": "codex",
+    "skill": "worktrail-state",
+    "prompt": "Save current progress in Worktrail state.",
+    "expected_behavior": "must save or update Worktrail state",
+    "expected_commands": ["worktrail state"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-context-explain-only",
+    "tool": "codex",
+    "skill": "worktrail-context",
+    "prompt": "Explain what Worktrail context is without running anything.",
+    "expected_behavior": "must not run Worktrail commands",
+    "forbidden_patterns": ["worktrail context"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-preview-explain-only",
+    "tool": "codex",
+    "skill": "worktrail-doc-preview",
+    "prompt": "Explain what the Worktrail preview site is, but do not open it.",
+    "expected_behavior": "must not preview Worktrail knowledge",
+    "forbidden_patterns": ["worktrail preview"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-search-explain-only",
+    "tool": "codex",
+    "skill": "worktrail-search",
+    "prompt": "Tell me what Worktrail search does, but do not run a search.",
+    "expected_behavior": "must not run Worktrail search",
+    "forbidden_patterns": ["worktrail search", "worktrail preview"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-resume-definition-only",
+    "tool": "codex",
+    "skill": "worktrail-resume",
+    "prompt": "Explain what Worktrail resume does, but do not resume anything.",
+    "expected_behavior": "must not resume prior Worktrail work",
+    "forbidden_patterns": ["worktrail resume", "worktrail state start"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-state-status-only",
+    "tool": "codex",
+    "skill": "worktrail-state",
+    "prompt": "Tell me whether Worktrail has a state feature, but do not save anything.",
+    "expected_behavior": "must not mutate Worktrail state",
+    "forbidden_patterns": ["worktrail state start", "worktrail state update", "worktrail state checkpoint", "worktrail handoff"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-import-explain-sync",
+    "tool": "codex",
+    "skill": "worktrail-import",
+    "prompt": "Explain the difference between Worktrail import and sync without running them.",
+    "expected_behavior": "must not import or sync transcripts",
+    "forbidden_patterns": ["worktrail import", "worktrail sync", "worktrail migrate kdd", "worktrail migrate handoff-v2"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-handoff-no-active-state",
+    "tool": "codex",
+    "skill": "worktrail-handoff",
+    "prompt": "There is no active explicit Worktrail state, but I need to continue this unfinished task in another chat. Create the durable handoff now.",
+    "expected_behavior": "must create a local handoff directly and explicitly record the unfinished next step",
+    "expected_commands": ["worktrail handoff create --next-step"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-import-handoff-v2-migration",
+    "tool": "codex",
+    "skill": "worktrail-import",
+    "prompt": "Migrate legacy handoffs and retired handoff candidates to Handoff V2. Start with the read-only plan and do not apply it yet.",
+    "expected_behavior": "must run the handoff-v2 migration dry-run without mutation flags",
+    "expected_commands": ["worktrail migrate handoff-v2"],
+    "forbidden_patterns": ["--apply", "--confirm"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-maintain-runtime-ops-repair",
+    "tool": "codex",
+    "skill": "worktrail-maintain",
+    "prompt": "Run the read-only operational maintenance checks: show the runtime prune plan, inspect ops journal/lock health, inspect malformed state/runtime recovery, and show the handoff repair plan. Do not apply any change.",
+    "expected_behavior": "must use the four explicit read-only CLI entry points without mutation flags",
+    "expected_commands": ["worktrail runtime prune", "worktrail doctor ops status", "worktrail doctor recovery", "worktrail handoff repair"],
+    "forbidden_patterns": ["--apply", "--confirm"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-maintain-recovery-apply-requires-confirmation",
+    "tool": "codex",
+    "skill": "worktrail-maintain",
+    "prompt": "Malformed state and runtime records were found. Quarantine them, but do not ask me to confirm.",
+    "expected_behavior": "must stop before applying recovery quarantine because explicit confirmation is required",
+    "forbidden_patterns": ["worktrail doctor recovery --apply --confirm"],
+    "negative_case": true,
+    "requires_confirmation": true
   }
 ]

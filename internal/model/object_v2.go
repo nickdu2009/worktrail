@@ -35,6 +35,30 @@ const (
 	RuntimeTypeCheckpoint   = "checkpoint"
 	RuntimeTypeTakeoverNote = "takeover_note"
 	RuntimeTypeHandoffDraft = "handoff_draft"
+	RuntimeTypeHandoff      = "handoff"
+	RuntimeTypeMigration    = "migration"
+)
+
+const (
+	VisibilityLocal = "local"
+	VisibilityTeam  = "team"
+)
+
+const (
+	StorageClassLocal = "local"
+	StorageClassTeam  = "team"
+)
+
+const (
+	ValidationStatusUnknown = "unknown"
+	ValidationStatusPassed  = "passed"
+	ValidationStatusFailed  = "failed"
+	ValidationStatusSkipped = "skipped"
+)
+
+const (
+	CodeAvailabilityAvailable   = "available"
+	CodeAvailabilityUnavailable = "unavailable"
 )
 
 const (
@@ -47,6 +71,9 @@ const (
 	LifecycleDiscarded      = "discarded"
 	LifecycleRetired        = "retired"
 	LifecycleArchived       = "archived"
+	LifecycleClosed         = "closed"
+	LifecycleSuperseded     = "superseded"
+	LifecyclePublished      = "published"
 )
 
 type BaseMetaV2 struct {
@@ -58,6 +85,76 @@ type BaseMetaV2 struct {
 	Tags       []string  `json:"tags,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type Ref struct {
+	Scope   string `json:"scope"`
+	Kind    string `json:"kind"`
+	ID      string `json:"id"`
+	RelPath string `json:"rel_path,omitempty"`
+}
+
+type NextStep struct {
+	ID       string `json:"id,omitempty"`
+	Action   string `json:"action"`
+	Owner    string `json:"owner,omitempty"`
+	Blocking bool   `json:"blocking,omitempty"`
+}
+
+type ValidationEvidence struct {
+	Command  string `json:"command,omitempty"`
+	Status   string `json:"status"`
+	ExitCode *int   `json:"exit_code,omitempty"`
+	Summary  string `json:"summary,omitempty"`
+}
+
+type WorktreePathStatus struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+}
+
+type WorktreeSnapshot struct {
+	Branch           string               `json:"branch,omitempty"`
+	HeadCommit       string               `json:"head_commit,omitempty"`
+	Dirty            bool                 `json:"dirty"`
+	ChangedPathCount int                  `json:"changed_path_count,omitempty"`
+	ChangedPaths     []WorktreePathStatus `json:"changed_paths,omitempty"`
+	CodeAvailability string               `json:"code_availability,omitempty"`
+	CapturedAt       time.Time            `json:"captured_at,omitempty"`
+}
+
+type HandoffMetaV2 struct {
+	BaseMetaV2
+	ProjectID             string               `json:"project_id"`
+	TaskID                string               `json:"task_id"`
+	RuntimeType           string               `json:"runtime_type"`
+	Summary               string               `json:"summary"`
+	Complete              bool                 `json:"complete,omitempty"`
+	Visibility            string               `json:"visibility"`
+	StorageClass          string               `json:"storage_class"`
+	Durability            string               `json:"durability"`
+	LifecycleStatus       string               `json:"lifecycle_status"`
+	SourceState           *Ref                 `json:"source_state,omitempty"`
+	PreviousHandoff       *Ref                 `json:"previous_handoff,omitempty"`
+	PublishedFrom         *Ref                 `json:"published_from,omitempty"`
+	Supersedes            []Ref                `json:"supersedes,omitempty"`
+	SupersededBy          []Ref                `json:"superseded_by,omitempty"`
+	NextSteps             []NextStep           `json:"next_steps,omitempty"`
+	OpenQuestions         []string             `json:"open_questions,omitempty"`
+	Risks                 []string             `json:"risks,omitempty"`
+	Validation            []ValidationEvidence `json:"validation,omitempty"`
+	Worktree              WorktreeSnapshot     `json:"worktree,omitempty"`
+	RedactionStatus       string               `json:"redaction_status,omitempty"`
+	ResumePriority        string               `json:"resume_priority"`
+	ContentHash           string               `json:"content_hash"`
+	FormatVersion         int                  `json:"format_version"`
+	SchemaCompat          []string             `json:"schema_compat,omitempty"`
+	SourceTool            string               `json:"source_tool,omitempty"`
+	Actor                 string               `json:"actor,omitempty"`
+	MigratedFrom          string               `json:"migrated_from,omitempty"`
+	TaskIdentityUncertain bool                 `json:"task_identity_uncertain,omitempty"`
+	PublishedAt           *time.Time           `json:"published_at,omitempty"`
+	ClosedAt              *time.Time           `json:"closed_at,omitempty"`
 }
 
 type KnowledgeMetaV2 struct {
@@ -105,6 +202,7 @@ type RuntimeMetaV2 struct {
 	BaseMetaV2
 	RuntimeType     string    `json:"runtime_type"`
 	Topic           string    `json:"topic,omitempty"`
+	ProjectID       string    `json:"project_id,omitempty"`
 	TaskID          string    `json:"task_id,omitempty"`
 	SessionID       string    `json:"session_id,omitempty"`
 	Durability      string    `json:"durability"`
@@ -137,21 +235,37 @@ type ObjectMetaV2 struct {
 	SourceURI             string
 	RedactionStatus       string
 	RetentionPolicy       string
+	ProjectID             string
 	TaskID                string
 	SessionID             string
 	ResumePriority        string
 	ExpiresAt             time.Time
 	SourceTool            string
+	Visibility            string
+	StorageClass          string
+	Summary               string
+	ContentHash           string
+	FormatVersion         int
+	CodeAvailability      string
 }
 
 func (m ObjectMetaV2) IsKnowledgeDoc() bool  { return m.ObjectKind == ObjectKindKnowledgeDoc }
 func (m ObjectMetaV2) IsDraft() bool         { return m.ObjectKind == ObjectKindDraft }
 func (m ObjectMetaV2) IsEvidence() bool      { return m.ObjectKind == ObjectKindEvidence }
 func (m ObjectMetaV2) IsRuntimeRecord() bool { return m.ObjectKind == ObjectKindRuntime }
+func (m ObjectMetaV2) IsHandoff() bool {
+	return m.IsRuntimeRecord() && m.RuntimeType == RuntimeTypeHandoff
+}
 
 func NormalizeObjectMeta(path string, raw map[string]any) (ObjectMetaV2, error) {
 	schema := strings.TrimSpace(stringField(raw["schema"]))
 	switch schema {
+	case SchemaHandoffV2:
+		var meta HandoffMetaV2
+		if err := decodeRawMeta(raw, &meta); err != nil {
+			return ObjectMetaV2{}, err
+		}
+		return fromHandoffMetaV2(meta), nil
 	case SchemaKnowledgeV2:
 		var meta KnowledgeMetaV2
 		if err := decodeRawMeta(raw, &meta); err != nil {
@@ -293,6 +407,7 @@ func fromRuntimeMetaV2(meta RuntimeMetaV2) ObjectMetaV2 {
 		LegacySchema:    meta.Schema,
 		RuntimeType:     strings.TrimSpace(meta.RuntimeType),
 		Topic:           strings.TrimSpace(meta.Topic),
+		ProjectID:       strings.TrimSpace(meta.ProjectID),
 		TaskID:          strings.TrimSpace(meta.TaskID),
 		SessionID:       strings.TrimSpace(meta.SessionID),
 		Durability:      withDefault(strings.TrimSpace(meta.Durability), DurabilityEphemeral),
@@ -300,6 +415,42 @@ func fromRuntimeMetaV2(meta RuntimeMetaV2) ObjectMetaV2 {
 		ResumePriority:  strings.TrimSpace(meta.ResumePriority),
 		ExpiresAt:       meta.ExpiresAt,
 		SourceTool:      strings.TrimSpace(meta.SourceTool),
+	}
+}
+
+func fromHandoffMetaV2(meta HandoffMetaV2) ObjectMetaV2 {
+	base := meta.BaseMetaV2
+	base.Schema = SchemaHandoffV2
+	base.ObjectKind = ObjectKindRuntime
+	visibility := withDefault(strings.TrimSpace(meta.Visibility), VisibilityLocal)
+	storageClass := withDefault(strings.TrimSpace(meta.StorageClass), visibility)
+	durability := strings.TrimSpace(meta.Durability)
+	if durability == "" {
+		if visibility == VisibilityTeam {
+			durability = DurabilityDurable
+		} else {
+			durability = DurabilityEphemeral
+		}
+	}
+	return ObjectMetaV2{
+		BaseMetaV2:       base,
+		LegacySchema:     meta.Schema,
+		RuntimeType:      RuntimeTypeHandoff,
+		ProjectID:        strings.TrimSpace(meta.ProjectID),
+		TaskID:           strings.TrimSpace(meta.TaskID),
+		Durability:       durability,
+		LifecycleStatus:  withDefault(strings.TrimSpace(meta.LifecycleStatus), LifecycleCurrent),
+		ResumePriority:   withDefault(strings.TrimSpace(meta.ResumePriority), ResumePriorityManualHandoff),
+		SourceTool:       strings.TrimSpace(meta.SourceTool),
+		Visibility:       visibility,
+		StorageClass:     storageClass,
+		Summary:          strings.TrimSpace(meta.Summary),
+		RedactionStatus:  strings.TrimSpace(meta.RedactionStatus),
+		ContentHash:      strings.TrimSpace(meta.ContentHash),
+		FormatVersion:    meta.FormatVersion,
+		CodeAvailability: strings.TrimSpace(meta.Worktree.CodeAvailability),
+		Supersedes:       refIDs(meta.Supersedes),
+		SupersededBy:     refIDs(meta.SupersededBy),
 	}
 }
 
@@ -423,6 +574,9 @@ func isExplicitSourceTool(sourceTool string) bool {
 func resumePriorityFromLegacyState(meta State, path string) string {
 	rel := filepath.ToSlash(strings.TrimSpace(path))
 	if strings.HasPrefix(rel, "state/checkpoints/") {
+		if isExplicitSourceTool(meta.SourceTool) {
+			return ResumePriorityExplicitCheckpoint
+		}
 		return ResumePriorityRuntimeCheckpoint
 	}
 	if strings.HasPrefix(rel, "runtime/") {
@@ -437,21 +591,23 @@ func resumePriorityFromLegacyState(meta State, path string) string {
 func normalizeLegacyHandoff(meta legacyHandoffMeta) ObjectMetaV2 {
 	return ObjectMetaV2{
 		BaseMetaV2: BaseMetaV2{
-			Schema:     SchemaKnowledgeV2,
+			Schema:     SchemaRuntimeV2,
 			ID:         strings.TrimSpace(meta.ID),
 			Scope:      strings.TrimSpace(meta.Scope),
-			ObjectKind: ObjectKindKnowledgeDoc,
+			ObjectKind: ObjectKindRuntime,
 			Title:      strings.TrimSpace(meta.Title),
 			Tags:       cleanList(meta.Tags),
 			CreatedAt:  meta.CreatedAt,
 			UpdatedAt:  meta.UpdatedAt,
 		},
 		LegacySchema:    SchemaHandoff,
-		KnowledgeType:   "handoff",
-		Durability:      DurabilityDurable,
+		RuntimeType:     RuntimeTypeHandoff,
+		Durability:      DurabilityEphemeral,
 		LifecycleStatus: withDefault(strings.TrimSpace(meta.Status), LifecycleCurrent),
-		ReviewPolicy:    ReviewPolicyExplicit,
 		TaskID:          strings.TrimSpace(meta.TaskID),
+		ResumePriority:  ResumePriorityManualHandoff,
+		Visibility:      VisibilityLocal,
+		StorageClass:    StorageClassLocal,
 	}
 }
 
@@ -474,10 +630,18 @@ func normalizePathOnly(path string, raw map[string]any) (ObjectMetaV2, error) {
 		UpdatedAt: time.Time{},
 	}
 	switch {
-	case strings.HasPrefix(rel, "handoffs/"):
-		base.Schema = SchemaKnowledgeV2
-		base.ObjectKind = ObjectKindKnowledgeDoc
-		return ObjectMetaV2{BaseMetaV2: base, KnowledgeType: "handoff", Durability: DurabilityDurable, LifecycleStatus: LifecycleCurrent}, nil
+	case strings.HasPrefix(rel, "handoffs/local/"):
+		base.Schema = SchemaHandoffV2
+		base.ObjectKind = ObjectKindRuntime
+		return ObjectMetaV2{BaseMetaV2: base, RuntimeType: RuntimeTypeHandoff, Durability: DurabilityEphemeral, LifecycleStatus: LifecycleCurrent, ResumePriority: ResumePriorityManualHandoff, Visibility: VisibilityLocal, StorageClass: StorageClassLocal}, nil
+	case strings.HasPrefix(rel, "handoffs/team/"):
+		base.Schema = SchemaHandoffV2
+		base.ObjectKind = ObjectKindRuntime
+		return ObjectMetaV2{BaseMetaV2: base, RuntimeType: RuntimeTypeHandoff, Durability: DurabilityDurable, LifecycleStatus: LifecycleCurrent, ResumePriority: ResumePriorityManualHandoff, Visibility: VisibilityTeam, StorageClass: StorageClassTeam}, nil
+	case isLegacyHandoffPath(rel):
+		base.Schema = SchemaRuntimeV2
+		base.ObjectKind = ObjectKindRuntime
+		return ObjectMetaV2{BaseMetaV2: base, LegacySchema: SchemaHandoff, RuntimeType: RuntimeTypeHandoff, Durability: DurabilityEphemeral, LifecycleStatus: LifecycleCurrent, ResumePriority: ResumePriorityManualHandoff, Visibility: VisibilityLocal, StorageClass: StorageClassLocal}, nil
 	case strings.HasPrefix(rel, "runtime/"):
 		base.Schema = SchemaRuntimeV2
 		base.ObjectKind = ObjectKindRuntime
@@ -488,7 +652,7 @@ func normalizePathOnly(path string, raw map[string]any) (ObjectMetaV2, error) {
 	case strings.HasPrefix(rel, "state/checkpoints/"):
 		base.Schema = SchemaRuntimeV2
 		base.ObjectKind = ObjectKindRuntime
-		return ObjectMetaV2{BaseMetaV2: base, RuntimeType: RuntimeTypeCheckpoint, Durability: DurabilityEphemeral, LifecycleStatus: LifecycleActive, ResumePriority: ResumePriorityRuntimeCheckpoint}, nil
+		return ObjectMetaV2{BaseMetaV2: base, RuntimeType: RuntimeTypeCheckpoint, Durability: DurabilityDurable, LifecycleStatus: LifecycleActive, ResumePriority: ResumePriorityExplicitCheckpoint}, nil
 	case strings.HasPrefix(rel, "state/"):
 		base.Schema = SchemaRuntimeV2
 		base.ObjectKind = ObjectKindRuntime
@@ -578,6 +742,8 @@ func runtimeTypeFromPath(path string) string {
 		return RuntimeTypeSessionState
 	case strings.HasPrefix(rel, "runtime/recovery/"):
 		return "recovery_dashboard"
+	case strings.HasPrefix(rel, "runtime/migrations/"):
+		return RuntimeTypeMigration
 	case strings.HasPrefix(rel, "state/checkpoints/"):
 		return RuntimeTypeCheckpoint
 	case strings.HasPrefix(rel, "state/active/"):
@@ -653,11 +819,31 @@ func knowledgeTypeFromPath(path string) string {
 		return "lesson"
 	case strings.HasPrefix(path, "prompts/"):
 		return "prompt"
-	case strings.HasPrefix(path, "handoffs/"):
-		return "handoff"
 	default:
 		return "knowledge"
 	}
+}
+
+func isLegacyHandoffPath(path string) bool {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	if !strings.HasPrefix(path, "handoffs/") {
+		return false
+	}
+	name := strings.TrimPrefix(path, "handoffs/")
+	return name != "" && !strings.Contains(name, "/") && strings.EqualFold(filepath.Ext(name), ".md")
+}
+
+func refIDs(refs []Ref) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if id := strings.TrimSpace(ref.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return cleanList(ids)
 }
 
 func stringField(v any) string {

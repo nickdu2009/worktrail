@@ -127,6 +127,9 @@ func resolvePendingCandidates(env paths.Env, scope string) ([]Source, error) {
 	}
 	pending := make([]Source, 0, len(records))
 	for _, rec := range records {
+		if rec.Meta.CandidateType == model.CandidateTypeHandoff {
+			continue
+		}
 		objectMeta := rec.ObjectMeta()
 		if objectMeta.LifecycleStatus != model.LifecyclePendingReview && objectMeta.LifecycleStatus != model.LifecyclePendingDistill {
 			continue
@@ -217,7 +220,7 @@ func reviewSourceType(meta model.ObjectMetaV2, legacyType string) string {
 
 func shouldSkipPreviewDir(name string) bool {
 	switch name {
-	case "index", "logs", "raw", "exports", "candidates", "state", "imports", ".cache", "staging", "runtime", "derived":
+	case "index", "logs", "raw", "exports", "candidates", "state", "imports", "handoffs", ".cache", "staging", "runtime", "derived":
 		return true
 	default:
 		return false

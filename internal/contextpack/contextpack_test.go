@@ -1,14 +1,17 @@
 package contextpack
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/nickdu2009/worktrail/internal/handoff"
 	"github.com/nickdu2009/worktrail/internal/index"
 	"github.com/nickdu2009/worktrail/internal/knowledge"
+	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
 )
@@ -18,6 +21,12 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	env := paths.Env{
 		UserRoot:  filepath.Join(tmp, "user"),
 		ProjectWT: filepath.Join(tmp, "project", ".worktrail"),
+	}
+	if err := os.MkdirAll(env.ProjectWT, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.ProjectWT, "config.json"), []byte(`{"project_id":"project-context-test"}`), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	writePackDoc(t, filepath.Join(env.UserRoot, "profile", "preferences.md"), map[string]any{
 		"id":    "prefs",
@@ -38,11 +47,16 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 		"title": "Release Workflow",
 	}, "Build, test, then ship.")
 	writePackDoc(t, filepath.Join(env.ProjectWT, "state", "active", "current.md"), map[string]any{
-		"id":     "current",
-		"scope":  "project",
-		"type":   "state",
-		"title":  "Current Work",
-		"status": "active",
+		"schema":      model.SchemaState,
+		"id":          "current",
+		"scope":       "project",
+		"task_id":     "task-current",
+		"type":        "session",
+		"title":       "Current Work",
+		"status":      "active",
+		"source_tool": "worktrail",
+		"created_at":  time.Date(2026, 7, 15, 1, 0, 0, 0, time.UTC),
+		"updated_at":  time.Date(2026, 7, 15, 1, 0, 0, 0, time.UTC),
 	}, "Implement local packages.")
 	writePackDoc(t, filepath.Join(env.ProjectWT, "decisions", "index.md"), map[string]any{
 		"id":    "decision",
@@ -75,12 +89,6 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 		"supersedes":      []string{"requirements/old.md"},
 		"updated_at":      "2026-05-01T00:00:00Z",
 	}, "Current PRD.")
-	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "next.md"), map[string]any{
-		"id":    "handoff",
-		"scope": "project",
-		"type":  "handoff",
-		"title": "Next Handoff",
-	}, "Wire CLI later.")
 	writePackDoc(t, filepath.Join(env.ProjectWT, "candidates", "project", "rule.md"), map[string]any{
 		"id":             "candidate",
 		"scope":          "project",
@@ -123,13 +131,13 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	if !containsStep(pack.Maintenance.NextSteps, "worktrail distill --pending --summary") || !containsStep(pack.Maintenance.NextSteps, "worktrail review plan --format json") {
 		t.Fatalf("maintenance next steps unexpected: %+v", pack.Maintenance.NextSteps)
 	}
-	for _, title := range []string{"User Knowledge", "Requirements", "Architecture", "Workflows", "Active State", "Decisions", "Handoffs", "Rules", "Pending Candidates"} {
+	for _, title := range []string{"User Knowledge", "Requirements", "Architecture", "Workflows", "Decisions", "Rules", "Pending Candidates"} {
 		if !hasSection(pack, title) {
 			t.Fatalf("missing section %q in %+v", title, pack.Sections)
 		}
 	}
-	if sectionIndex(pack, "Active State") > sectionIndex(pack, "Handoffs") {
-		t.Fatalf("active state should render before handoffs: %+v", pack.Sections)
+	if len(pack.Tasks) != 1 || pack.Tasks[0].TaskID != "task-current" || pack.Tasks[0].SourceKind != "explicit_state" {
+		t.Fatalf("task recovery summary unexpected: %+v", pack.Tasks)
 	}
 	requirements := section(pack, "Requirements")
 	if len(requirements.Items) != 1 || requirements.Items[0].Title != "New Requirement" {
@@ -155,6 +163,12 @@ func TestBuildIncludesRequiredSectionsAndMarksCandidatesUnapproved(t *testing.T)
 	}
 	if strings.Contains(rendered, "Old Requirement") {
 		t.Fatalf("default rendered pack should hide historical requirements:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "## Task Recovery Summary") || !strings.Contains(rendered, "`task-current` — Current Work [source:explicit_state]") {
+		t.Fatalf("rendered pack missing task summary:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Implement local packages.") || strings.Contains(rendered, "Wire CLI later.") {
+		t.Fatalf("rendered pack leaked raw task recovery content:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "Hidden evidence candidates: 1") || !strings.Contains(rendered, "worktrail context --evidence <task>") {
 		t.Fatalf("rendered pack missing hidden evidence guidance:\n%s", rendered)
@@ -374,6 +388,12 @@ func TestBuildTopicFiltersStateAndHandoffs(t *testing.T) {
 		UserRoot:  filepath.Join(tmp, "user"),
 		ProjectWT: filepath.Join(tmp, "project", ".worktrail"),
 	}
+	if err := os.MkdirAll(env.ProjectWT, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.ProjectWT, "config.json"), []byte(`{"project_id":"project-context-test"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	writePackDoc(t, filepath.Join(env.ProjectWT, "rules", "delivery.md"), map[string]any{
 		"id":    "delivery-rule",
 		"scope": "project",
@@ -389,104 +409,94 @@ func TestBuildTopicFiltersStateAndHandoffs(t *testing.T) {
 		"topic": "billing",
 	}, "Billing guidance.")
 	writePackDoc(t, filepath.Join(env.ProjectWT, "state", "active", "delivery.md"), map[string]any{
-		"id":     "delivery-state",
-		"scope":  "project",
-		"type":   "state",
-		"title":  "Delivery State",
-		"status": "active",
-		"topic":  "delivery",
+		"schema":      model.SchemaState,
+		"id":          "delivery-state",
+		"scope":       "project",
+		"task_id":     "task-delivery",
+		"type":        "session",
+		"title":       "Delivery State",
+		"status":      "active",
+		"source_tool": "worktrail",
+		"topic":       "delivery",
+		"created_at":  time.Date(2026, 7, 15, 1, 0, 0, 0, time.UTC),
+		"updated_at":  time.Date(2026, 7, 15, 1, 0, 0, 0, time.UTC),
 	}, "Work on delivery thread.")
 	writePackDoc(t, filepath.Join(env.ProjectWT, "state", "active", "billing.md"), map[string]any{
-		"id":     "billing-state",
-		"scope":  "project",
-		"type":   "state",
-		"title":  "Billing State",
-		"status": "active",
-		"topic":  "billing",
+		"schema":      model.SchemaState,
+		"id":          "billing-state",
+		"scope":       "project",
+		"task_id":     "task-billing",
+		"type":        "session",
+		"title":       "Billing State",
+		"status":      "active",
+		"source_tool": "worktrail",
+		"topic":       "billing",
+		"created_at":  time.Date(2026, 7, 15, 2, 0, 0, 0, time.UTC),
+		"updated_at":  time.Date(2026, 7, 15, 2, 0, 0, 0, time.UTC),
 	}, "Work on billing thread.")
-	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "delivery.md"), map[string]any{
-		"id":    "delivery-handoff",
-		"scope": "project",
-		"type":  "handoff",
-		"title": "Delivery Handoff",
-		"topic": "delivery",
-	}, "Resume delivery flow.")
-	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "billing.md"), map[string]any{
-		"id":    "billing-handoff",
-		"scope": "project",
-		"type":  "handoff",
-		"title": "Billing Handoff",
-		"topic": "billing",
-	}, "Resume billing flow.")
-
 	pack, err := Build(env, Options{Task: "delivery task", Topic: "delivery"})
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
 	rendered := RenderMarkdown(pack)
-	for _, want := range []string{"Delivery Rule", "Delivery State", "Delivery Handoff"} {
+	for _, want := range []string{"Delivery Rule", "Delivery State", "Billing State"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("topic-scoped context missing %q:\n%s", want, rendered)
 		}
 	}
-	for _, absent := range []string{"Billing Rule", "Billing State", "Billing Handoff"} {
+	for _, absent := range []string{"Billing Rule", "Delivery Handoff", "Billing Handoff", "Work on delivery thread.", "Work on billing thread."} {
 		if strings.Contains(rendered, absent) {
 			t.Fatalf("topic-scoped context leaked %q:\n%s", absent, rendered)
 		}
 	}
+	if len(pack.Tasks) != 2 {
+		t.Fatalf("expected one summary per task, got %+v", pack.Tasks)
+	}
 }
 
-func TestBuildLimitsHandoffsAndPrefersCurrentEntries(t *testing.T) {
+func TestBuildReplacesRawStateAndHandoffsWithOneTaskSummary(t *testing.T) {
 	tmp := t.TempDir()
 	env := paths.Env{
 		UserRoot:  filepath.Join(tmp, "user"),
 		ProjectWT: filepath.Join(tmp, "project", ".worktrail"),
 	}
+	if err := os.MkdirAll(env.ProjectWT, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.ProjectWT, "config.json"), []byte(`{"project_id":"project-context-test"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	writePackDoc(t, filepath.Join(env.ProjectWT, "state", "active", "current.md"), map[string]any{
-		"id":     "current",
-		"scope":  "project",
-		"type":   "state",
-		"title":  "Current Work",
-		"status": "active",
+		"schema":      model.SchemaState,
+		"id":          "current",
+		"scope":       "project",
+		"task_id":     "task-current",
+		"type":        "session",
+		"title":       "Current Work",
+		"status":      "active",
+		"source_tool": "worktrail",
+		"created_at":  time.Date(2026, 7, 15, 1, 0, 0, 0, time.UTC),
+		"updated_at":  time.Date(2026, 7, 15, 1, 0, 0, 0, time.UTC),
 	}, "Continue current work.")
-	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "a.md"), map[string]any{
-		"id":         "handoff-a",
-		"scope":      "project",
-		"type":       "handoff",
-		"title":      "Current Handoff A",
-		"status":     "current",
-		"updated_at": time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
-	}, "A")
-	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "b.md"), map[string]any{
-		"id":         "handoff-b",
-		"scope":      "project",
-		"type":       "handoff",
-		"title":      "Current Handoff B",
-		"status":     "current",
-		"updated_at": time.Date(2026, 6, 15, 9, 0, 0, 0, time.UTC),
-	}, "B")
-	writePackDoc(t, filepath.Join(env.ProjectWT, "handoffs", "c.md"), map[string]any{
-		"id":         "handoff-c",
-		"scope":      "project",
-		"type":       "handoff",
-		"title":      "Superseded Handoff",
-		"status":     "superseded",
-		"updated_at": time.Date(2026, 6, 15, 11, 0, 0, 0, time.UTC),
-	}, "C")
+	createPackHandoff(t, env, "handoff-c", "Superseded Handoff", "C")
+	createPackHandoff(t, env, "handoff-b", "Current Handoff B", "B")
+	createPackHandoff(t, env, "handoff-a", "Current Handoff A", "A")
 
 	pack, err := Build(env, Options{Task: "limit handoffs"})
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	handoffs := section(pack, "Handoffs")
-	if len(handoffs.Items) != 2 {
-		t.Fatalf("expected handoff section to be limited to 2 items, got %+v", handoffs.Items)
+	if hasSection(pack, "Handoffs") || hasSection(pack, "Active State") {
+		t.Fatalf("raw task recovery sections should be omitted: %+v", pack.Sections)
 	}
-	if handoffs.Items[0].Title != "Current Handoff A" || handoffs.Items[1].Title != "Current Handoff B" {
-		t.Fatalf("expected current handoffs to win over superseded entries: %+v", handoffs.Items)
+	if len(pack.Tasks) != 1 || pack.Tasks[0].TaskID != "task-current" || pack.Tasks[0].Title != "Current Handoff A" || pack.Tasks[0].SourceKind != "local_handoff" {
+		t.Fatalf("task summaries = %+v", pack.Tasks)
 	}
-	if sectionIndex(pack, "Active State") > sectionIndex(pack, "Handoffs") {
-		t.Fatalf("active state should remain before handoffs: %+v", pack.Sections)
+	rendered := RenderMarkdown(pack)
+	for _, raw := range []string{"Continue current work.", "\nA\n", "\nB\n", "\nC\n"} {
+		if strings.Contains(rendered, raw) {
+			t.Fatalf("rendered context leaked raw task record %q:\n%s", raw, rendered)
+		}
 	}
 }
 
@@ -588,4 +598,25 @@ func containsStep(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func createPackHandoff(t *testing.T, env paths.Env, id, title, body string) {
+	t.Helper()
+	_, err := handoff.CreateLocal(context.Background(), env, handoff.CreateRequest{
+		ID:         id,
+		Scope:      "project",
+		Title:      title,
+		Summary:    title,
+		Complete:   true,
+		TaskID:     "task-current",
+		Body:       body,
+		SourceTool: "worktrail",
+		Worktree: model.WorktreeSnapshot{
+			CodeAvailability: model.CodeAvailabilityUnavailable,
+			CapturedAt:       time.Now().UTC(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateLocal(%s): %v", id, err)
+	}
 }

@@ -38,7 +38,7 @@ Use a matching semantic type and target:
 - `prompt` → `prompts/<name>.md`
 - `project` → `project.md`
 
-Do not use this skill for `decision`, `adr`, `index`, evidence, runtime state, or handoffs.
+Do not use this skill for `decision`, `adr`, `index`, evidence, runtime state, or handoffs. `candidate_type=handoff` is retired; explicit cross-chat or switch-agent recovery must use `worktrail-handoff`, which creates a local runtime record and optionally publishes an immutable team record.
 
 ## Formal-body metadata
 

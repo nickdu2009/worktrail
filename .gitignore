@@ -17,9 +17,12 @@ worktrail
 .worktrail/logs/
 .worktrail/staging/
 .worktrail/runtime/
+.worktrail/handoffs/local/
+.worktrail/ops/
 .worktrail/derived/index/
 .worktrail/derived/cache/
 .worktrail/derived/exports/
 .worktrail/.cache/
 .worktrail/exports/
+/.worktrail-handoff-v2-backups/
 # END WORKTRAIL MANAGED BLOCK

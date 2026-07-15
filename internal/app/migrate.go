@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/nickdu2009/worktrail/internal/handoffmigration"
 	kddmigration "github.com/nickdu2009/worktrail/internal/migration/kdd"
 	storagemigration "github.com/nickdu2009/worktrail/internal/migration/storage"
 	"github.com/nickdu2009/worktrail/internal/paths"
@@ -30,6 +31,8 @@ func runMigrate(_ context.Context, env paths.Env, ioctx IO, args []string) error
 		return runMigrateStoragePlan(env, ioctx, args[1:])
 	case "storage-apply":
 		return runMigrateStorageApply(env, ioctx, args[1:])
+	case "handoff-v2":
+		return runMigrateHandoffV2(env, ioctx, args[1:])
 	default:
 		return fmt.Errorf("unsupported migrate target %q", args[0])
 	}
@@ -40,9 +43,18 @@ func runMigrateKDD(env paths.Env, ioctx IO, args []string) error {
 		printMigrateKDDHelp(ioctx.Out)
 		return nil
 	}
-	flags, _ := splitFlags(args)
+	flags, err := parseMigrateFlags(args,
+		map[string]bool{"write-candidates": true, "update-gitignore": true, "cleanup-legacy": true, "confirm": true},
+		map[string]bool{"root": true, "format": true, "write-pack": true, "archive-path": true},
+	)
+	if err != nil {
+		return fmt.Errorf("worktrail migrate kdd: %w", err)
+	}
 	root := flagValue(flags, "root", "")
 	format := flagValue(flags, "format", "text")
+	if err := validateMigrateFormat(format); err != nil {
+		return fmt.Errorf("worktrail migrate kdd: %w", err)
+	}
 	if flags["update-gitignore"] == "true" {
 		if err := store.EnsureProjectGitignore(env); err != nil {
 			return err
@@ -164,6 +176,7 @@ func printMigrateHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail migrate kdd [--root path] [--write-candidates] [--format text|json]")
 	fmt.Fprintln(out, "       worktrail migrate storage-plan [--format text|json]")
 	fmt.Fprintln(out, "       worktrail migrate storage-apply --confirm [--format text|json]")
+	fmt.Fprintln(out, "       worktrail migrate handoff-v2 [--apply --confirm] [--backup-dir path] [--format text|json]")
 }
 
 func printMigrateKDDHelp(out io.Writer) {
@@ -174,7 +187,13 @@ func printMigrateKDDHelp(out io.Writer) {
 }
 
 func runMigrateStoragePlan(env paths.Env, ioctx IO, args []string) error {
-	flags, _ := splitFlags(args)
+	flags, err := parseMigrateFlags(args, nil, map[string]bool{"format": true})
+	if err != nil {
+		return fmt.Errorf("worktrail migrate storage-plan: %w", err)
+	}
+	if err := validateMigrateFormat(flagValue(flags, "format", "text")); err != nil {
+		return fmt.Errorf("worktrail migrate storage-plan: %w", err)
+	}
 	plan, err := storagemigration.PlanRoot(env.ProjectWT)
 	if err != nil {
 		return err
@@ -194,7 +213,13 @@ func runMigrateStoragePlan(env paths.Env, ioctx IO, args []string) error {
 }
 
 func runMigrateStorageApply(env paths.Env, ioctx IO, args []string) error {
-	flags, _ := splitFlags(args)
+	flags, err := parseMigrateFlags(args, map[string]bool{"confirm": true}, map[string]bool{"format": true})
+	if err != nil {
+		return fmt.Errorf("worktrail migrate storage-apply: %w", err)
+	}
+	if err := validateMigrateFormat(flagValue(flags, "format", "text")); err != nil {
+		return fmt.Errorf("worktrail migrate storage-apply: %w", err)
+	}
 	report, err := storagemigration.ApplyRoot(env.ProjectWT, flags["confirm"] == "true")
 	if err != nil {
 		if flagValue(flags, "format", "text") == "json" {
@@ -206,5 +231,111 @@ func runMigrateStorageApply(env paths.Env, ioctx IO, args []string) error {
 		return json.NewEncoder(ioctx.Out).Encode(report)
 	}
 	fmt.Fprintf(ioctx.Out, "schema: %s\nroot: %s\nmanifest: %s\ncreated: %d\nskipped: %d\nwarnings: %d\n", report.Schema, report.Root, report.Manifest, report.Created, report.Skipped, len(report.Warnings))
+	return nil
+}
+
+func runMigrateHandoffV2(env paths.Env, ioctx IO, args []string) error {
+	if wantsHelp(args) {
+		fmt.Fprintln(ioctx.Out, "usage: worktrail migrate handoff-v2 [--apply --confirm] [--backup-dir path] [--format text|json]")
+		fmt.Fprintln(ioctx.Out)
+		fmt.Fprintln(ioctx.Out, "Inventories root-level V1 handoffs and retired handoff candidates. Default mode is read-only.")
+		return nil
+	}
+	flags, err := parseMigrateFlags(args,
+		map[string]bool{"apply": true, "confirm": true},
+		map[string]bool{"backup-dir": true, "format": true},
+	)
+	if err != nil {
+		return fmt.Errorf("worktrail migrate handoff-v2: %w", err)
+	}
+	format := flagValue(flags, "format", "text")
+	if err := validateMigrateFormat(format); err != nil {
+		return fmt.Errorf("worktrail migrate handoff-v2: %w", err)
+	}
+	report, err := handoffmigration.Run(handoffmigration.Options{
+		Root:      env.ProjectWT,
+		BackupDir: flagValue(flags, "backup-dir", ""),
+		Apply:     flags["apply"] == "true",
+		Confirm:   flags["confirm"] == "true",
+	})
+	if err == nil && report.Applied {
+		indexResult := rebuildIndexForScope(env, "project")
+		report.IndexRebuild = &handoffmigration.IndexRebuild{
+			Scope: indexResult.Scope, Entries: indexResult.Entries,
+			IndexPath: indexResult.IndexPath, Error: indexResult.Error,
+		}
+		if indexResult.Error != "" {
+			report.OK = false
+			err = fmt.Errorf("handoff-v2 migration applied but required index rebuild failed: %s", indexResult.Error)
+		}
+	}
+	if format == "json" {
+		if encodeErr := json.NewEncoder(ioctx.Out).Encode(report); encodeErr != nil {
+			return encodeErr
+		}
+	} else {
+		fmt.Fprintf(ioctx.Out, "schema: %s\nroot: %s\ndry_run: %t\nok: %t\ninventory_hash: %s\nfiles: %d\nlegacy_handoffs: %d\nhandoff_candidates: %d\nplanned: %d\nmigrated: %d\nnoop: %d\nconflicts: %d\ninvalid: %d\nunresolved: %d\nbackup_dir: %s\n",
+			report.Schema, report.Root, report.DryRun, report.OK, report.InventoryHash, report.InventoryFileCount,
+			report.Summary.LegacyHandoffs, report.Summary.HandoffCandidates, report.Summary.Planned,
+			report.Summary.Migrated, report.Summary.Noop, report.Summary.Conflicts,
+			report.Summary.Invalid, report.Summary.Unresolved, report.BackupDir)
+		for _, item := range report.Items {
+			fmt.Fprintf(ioctx.Out, "%s\t%s\t%s\t%s\n", item.Status, item.SourcePath, item.TargetPath, item.SourceHash)
+		}
+		if report.IndexRebuild != nil {
+			fmt.Fprintf(ioctx.Out, "index_rebuilt: %s\t%d\t%s\n", report.IndexRebuild.Scope, report.IndexRebuild.Entries, report.IndexRebuild.IndexPath)
+		}
+	}
+	return err
+}
+
+func parseMigrateFlags(args []string, booleanFlags, valueFlags map[string]bool) (map[string]string, error) {
+	flags := map[string]string{}
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if !strings.HasPrefix(arg, "--") || arg == "--" {
+			return nil, fmt.Errorf("positional arguments are not accepted: %q", arg)
+		}
+		raw := strings.TrimPrefix(arg, "--")
+		key, value, hasValue := raw, "", false
+		if strings.Contains(raw, "=") {
+			key, value, hasValue = strings.Cut(raw, "=")
+		}
+		if key == "" || !booleanFlags[key] && !valueFlags[key] {
+			return nil, fmt.Errorf("unknown flag --%s", key)
+		}
+		if _, duplicate := flags[key]; duplicate {
+			return nil, fmt.Errorf("flag --%s was provided more than once", key)
+		}
+		if booleanFlags[key] {
+			if !hasValue {
+				flags[key] = "true"
+				continue
+			}
+			if value != "true" && value != "false" {
+				return nil, fmt.Errorf("flag --%s requires true or false", key)
+			}
+			flags[key] = value
+			continue
+		}
+		if !hasValue {
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return nil, fmt.Errorf("flag --%s requires a value", key)
+			}
+			index++
+			value = args[index]
+		}
+		if strings.TrimSpace(value) == "" {
+			return nil, fmt.Errorf("flag --%s requires a value", key)
+		}
+		flags[key] = value
+	}
+	return flags, nil
+}
+
+func validateMigrateFormat(format string) error {
+	if format != "text" && format != "json" {
+		return fmt.Errorf("--format must be text or json, got %q", format)
+	}
 	return nil
 }

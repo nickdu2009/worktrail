@@ -11,11 +11,13 @@ import (
 	"github.com/nickdu2009/worktrail/internal/paths"
 )
 
-
 type Entry struct {
 	Schema         string    `json:"schema"`
 	ID             string    `json:"id"`
 	Scope          string    `json:"scope"`
+	ProjectID      string    `json:"project_id,omitempty"`
+	TaskID         string    `json:"task_id,omitempty"`
+	Visibility     string    `json:"visibility,omitempty"`
 	Type           string    `json:"type"`
 	Path           string    `json:"path"`
 	Title          string    `json:"title"`
@@ -28,11 +30,13 @@ type Entry struct {
 	SupersededBy   []string  `json:"superseded_by,omitempty"`
 	Tags           []string  `json:"tags,omitempty"`
 	Content        string    `json:"content"`
+	ExpiresAt      time.Time `json:"expires_at,omitempty"`
+	CreatedAt      time.Time `json:"created_at,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Active         bool      `json:"active,omitempty"`
 	SourceSessions []string  `json:"source_sessions,omitempty"`
 	CandidateType  string    `json:"candidate_type,omitempty"`
-	generatedID    bool // synthesized from Path and safe to disambiguate during scans
+	generatedID    bool      // synthesized from Path and safe to disambiguate during scans
 }
 
 type DB struct {
@@ -47,6 +51,18 @@ type Manifest struct {
 	GeneratedAt time.Time `json:"generated_at"`
 	IndexPath   string    `json:"index_path"`
 	Entries     int       `json:"entries"`
+	Ignored     int       `json:"ignored,omitempty"`
+}
+
+type IgnoredEntry struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
+type IgnoredSidecar struct {
+	Schema      string         `json:"schema"`
+	GeneratedAt time.Time      `json:"generated_at"`
+	Entries     []IgnoredEntry `json:"entries,omitempty"`
 }
 
 type StatusInfo struct {
@@ -112,6 +128,10 @@ type Query struct {
 	Scope          string
 	Type           string
 	Topic          string
+	TaskID         string
+	Visibility     string
+	Status         string
+	Lifecycle      string
 	Tag            string
 	Tags           []string
 	Content        string
@@ -143,7 +163,11 @@ func Status(root string) (StatusInfo, error) {
 	info := StatusInfo{
 		IndexPath: filepath.Join(root, "index", SQLiteFile),
 	}
-	if !sqliteExists(root) {
+	exists, err := sqliteExists(root)
+	if err != nil {
+		return StatusInfo{}, err
+	}
+	if !exists {
 		return info, nil
 	}
 	if err := ensureSQLiteHealthy(root); err != nil {
@@ -171,7 +195,11 @@ func Search(root string, query Query) ([]Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !sqliteExists(root) {
+	exists, err := sqliteExists(root)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
 		if _, rebuildErr := rebuildSQLite(root, RebuildOptions{Scope: inferScope(root)}, defaultTokenizer); rebuildErr != nil {
 			return nil, rebuildErr
 		}
@@ -209,7 +237,11 @@ func loadFreshSearchEntries(root string) ([]Entry, error) {
 }
 
 func Load(root string) (DB, error) {
-	if !sqliteExists(root) {
+	exists, err := sqliteExists(root)
+	if err != nil {
+		return DB{}, err
+	}
+	if !exists {
 		return DB{}, os.ErrNotExist
 	}
 	if err := ensureSQLiteHealthy(root); err != nil {

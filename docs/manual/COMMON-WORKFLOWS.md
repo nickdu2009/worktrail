@@ -14,7 +14,7 @@
 ### 何时使用
 <div class="title-en">When to Use</div>
 
-适合开始一项新的代码任务、恢复旧任务、切换 Agent 或需要项目记忆时。
+适合开始一项新的代码任务或需要项目记忆时。恢复旧任务、切换 Agent 后继续已有工作应使用 `resume`。
 
 ### 如何运行
 <div class="title-en">How It Runs</div>
@@ -22,6 +22,7 @@
 1. 先用一句话描述当前任务。
 2. 运行 `context` 读取正式知识、状态、候选提示和维护提示。
 3. 如果任务处于明确阶段，用 `--stage` 帮助排序。
+4. 检查 Task Recovery Summary；不同 `task_id` 的 state、handoff、checkpoint 和 runtime 不会被拼成一条恢复链。
 
 ```bash
 worktrail context "fix failing import review"
@@ -50,7 +51,7 @@ worktrail context --stage implementation "implement cursor import limits"
 1. 开始时创建状态。
 2. 每个关键决策、验证结果或剩余风险发生变化时追加更新。
 3. 在进入高风险步骤前创建 checkpoint。
-4. 结束时关闭状态，必要时顺手写 durable handoff。
+4. 普通结束时关闭状态；只有显式跨 chat、切 Agent 或稍后继续时才创建 handoff。
 
 ```bash
 worktrail state start "review import workflow docs"
@@ -62,14 +63,22 @@ worktrail state close "manual created and linked from README"
 如果要把状态交给下一个 Agent：
 
 ```bash
-worktrail state close --to handoff "continue from validation and README link review"
+worktrail state close --to handoff --next-step "continue validation and README link review" "current state summary"
 ```
 
-如果当前没有 active explicit state，或者你明确需要保留 state 不关闭时，才单独写一份 handoff-only 交接记录：
+如果当前没有 active explicit state，或者你明确需要保留 state 不关闭时，才单独写一份 local handoff-only 交接记录：
 
 ```bash
-worktrail handoff "Goal, current diff intent, validation, risks, open questions, and next step."
+worktrail handoff create --next-step "continue the task" "Goal, current diff intent, validation, risks, open questions, and next step."
 ```
+
+Local handoff 是默认恢复记录，不是 formal knowledge 或默认 review 项。只有需要通过仓库共享时才显式发布：
+
+```bash
+worktrail handoff publish <local-handoff-id>
+```
+
+Publish 只创建 Worktrail team 文件，不会 stage、commit 或 push。工作树非 clean 时默认拒绝；例外必须同时使用 `--allow-dirty --confirm`，并把 `code_availability` 标为 unavailable。
 
 ## 工作流 3：沉淀一条人工确认的知识
 <div class="title-en">Workflow 3: Capture Confirmed Knowledge</div>
@@ -223,27 +232,73 @@ worktrail maintain knowledge --format json
 ### 何时使用
 <div class="title-en">When to Use</div>
 
-适合切换 Agent、打开新会话、结束当天工作，或者用户明确要求留下 durable 恢复入口时。
+适合切换 Agent、打开新会话、结束当天工作，或者用户明确要求留下恢复入口时。普通进度更新、正常回复结束和 hook 事件都不构成交接触发条件。
 
 ### 如何运行
 <div class="title-en">How It Runs</div>
 
-推荐主路径是 `worktrail state close --to handoff "<summary>"`：它会写一份真实的 `.worktrail/handoffs/*.md` durable 交接记录，并关闭对应 explicit state。裸 `worktrail handoff "<summary>"` 是例外路径，适合没有 active explicit state 或明确需要 handoff-only 记录时使用。`stop` / `session-end` hooks 现在默认只写 runtime records（`state/` 与 checkpoint/audit 路径），不再把 routine 退出噪音堆进 pending review inbox。对 ZCode Agent 来说，这条工作流仍然成立，只是触发方式来自 `AGENTS.md` 路由和已安装 skills，而不是 Worktrail-managed hooks。
+推荐主路径是 `worktrail state close --to handoff --next-step "<action>" "<summary>"`：它通过事务同时关闭 explicit state，并写入 `.worktrail/handoffs/local/`。没有 active explicit state 时使用 `worktrail handoff create --next-step "<action>" "<summary>"`；没有后续工作时明确传 `--complete`。Handoff 正文必须是结构化摘要，不能嵌入完整 state snapshot。
+
+需要团队交接时，对 local id 显式运行 `worktrail handoff publish <local-id>`。Team 记录是 immutable DAG 节点；单 head 会自动成为 `supersedes`，多个 head 必须通过显式 `--supersedes <team-id,...>` 发布 reconciliation 节点。Team 记录不能原地 close 或 repair。
+
+`stop` / `session-end` hooks 只写 runtime session、checkpoint、takeover note 和审计日志，永远不创建或发布 handoff。对 ZCode Agent 来说，这条工作流仍然成立，只是触发方式来自 `AGENTS.md` 路由和已安装 skills，而不是 Worktrail-managed hooks。
 
 新 session 开始时优先用：
 
 ```bash
 worktrail resume
-worktrail resume "continue from latest explicit state or current handoff"
+worktrail resume --task-id <task-id>
+worktrail resume --ref checkpoint:<checkpoint-id>
 ```
 
-## 工作流 7：预览 Worktrail 文档
-<div class="title-en">Workflow 7: Preview Worktrail Documents</div>
+`resume` 一次只恢复一个 task，优先级依次是 local handoff、team handoff、explicit state、explicit checkpoint、runtime checkpoint、runtime session。无 selector 且只有一个 task 时可自动选择；多个 task 会返回 ambiguity，并列出可选 task，必须用 `--task-id`、`--task-title` 或 `--ref [scope:]kind:id` 消歧。Runtime fallback 属于 degraded recovery。
+
+显式 checkpoint 必须由用户或 Agent 主动运行：
+
+```bash
+worktrail state checkpoint --reason "before risky migration"
+```
+
+Hooks 生成的 runtime checkpoint 不是 explicit checkpoint。Runtime 恢复材料有效期为 14 天，每个 task 读取最多最新 5 条；清理采用显式 plan/apply 语义，hooks 不会自动 prune。
+
+## 工作流 7：检查、修复与迁移 Handoff
+<div class="title-en">Workflow 7: Diagnose, Repair, and Migrate Handoffs</div>
+
+先运行只读检查和修复计划：
+
+```bash
+worktrail handoff doctor
+worktrail handoff repair
+```
+
+`doctor` 会检查 malformed handoff、内容 hash、local 文件权限、同一 task 的多个 current local 记录、未被 Git 跟踪的 team 文件和多个 team head。`repair` 默认只输出计划；只有 `worktrail handoff repair --apply --confirm` 才把 malformed local handoff 隔离到 `.worktrail/runtime/quarantine/handoff/` 并修复其它可修复的 local 问题，team 文件永不原地改写。Create、state close 与 publish 使用 ops journal 事务，未完成事务可安全重放。
+
+运行时和事务维护也先走只读命令：
+
+```bash
+worktrail runtime prune
+worktrail doctor recovery
+worktrail doctor ops status
+```
+
+`worktrail doctor recovery` 同时列出 malformed state 和 malformed runtime。确认计划后，使用 `worktrail doctor recovery --apply --confirm` 把它们分别隔离到 `.worktrail/runtime/quarantine/state/` 和对应 runtime 子目录；该命令不接受 `--repair`。Runtime 过期清理使用 `worktrail runtime prune --apply --confirm`，ops 重放或 stale-lock 修复使用 `worktrail doctor ops repair --confirm`。Hooks 不会隐式 prune、quarantine 或 repair。
+
+旧的根目录 handoff 和已退休的 `candidate_type=handoff` 使用专用迁移：
+
+```bash
+worktrail migrate handoff-v2
+worktrail migrate handoff-v2 --apply --confirm
+```
+
+默认是只读 dry-run。Apply 必须同时带 `--apply --confirm`，未知 flag 和多余位置参数会被拒绝。Dry-run 会完整验证即将生成的 V2 metadata、正文安全、content hash 和大小；非法旧 ID/source_tool、越界 source_state 和 symlink reference 会成为 `invalid` plan item，在此之前不会创建备份或目标。默认备份位于 `.worktrail` 根目录之外、并由项目 `.gitignore` 精确忽略的 `/.worktrail-handoff-v2-backups/`；manifest 记录 inventory hash、文件数和逐文件 hash。Discarded/archived handoff candidate 会先备份，再以对应终态 lifecycle 迁移到 V2 local，并从 candidate surface 删除。显式 `--backup-dir` 也必须外置且不能冲突。迁移只重放自己的 journal intent；目标/源 hash 的最终验证与源文件删除共用 cleanup transaction，任一 hash 变化都会停止清理。成功后 CLI 强制重建项目 index。`doctor knowledge` 不扫描 handoff candidate；发现职责只属于这条迁移命令。
+
+## 工作流 8：预览 Worktrail 文档
+<div class="title-en">Workflow 8: Preview Worktrail Documents</div>
 
 ### 何时使用
 <div class="title-en">When to Use</div>
 
-适合整体浏览当前 scope 下的正式知识、runtime 恢复入口和 pending drafts/evidence，而不是单独预览某一个文件。
+适合整体浏览当前 scope 下的正式知识、task-scoped runtime 恢复入口和 pending drafts/evidence，而不是单独预览某一个文件。Local/team handoff 会作为 runtime recovery 页面展示，不属于 formal knowledge 或默认 semantic review。
 
 ### 如何运行
 <div class="title-en">How It Runs</div>

@@ -146,53 +146,60 @@ func TestCreateRejectsUnsafeSemanticCandidateText(t *testing.T) {
 	}
 }
 
-func TestLegacyWorktrailPrefixedTargetPathRemainsUsable(t *testing.T) {
+func TestHandoffCandidateCreationIsRetired(t *testing.T) {
 	m := testManager(t)
-	target := filepath.Join(m.Env.ProjectWT, "handoffs", "legacy.md")
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(target, []byte("old handoff\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	rec, err := m.Create(CreateRequest{
+	_, err := m.Create(CreateRequest{
 		ID:            "legacy-handoff",
 		Scope:         "project",
-		CandidateType: "handoff",
+		CandidateType: model.CandidateTypeHandoff,
 		TargetPath:    "handoffs/legacy.md",
 		Title:         "Legacy Handoff",
 		Body:          "new handoff\n",
 	})
-	if err != nil {
+	if !errors.Is(err, ErrHandoffCandidateRetired) {
+		t.Fatalf("Create handoff candidate error = %v, want ErrHandoffCandidateRetired", err)
+	}
+}
+
+func TestLegacyHandoffCandidateActionsRequireMigration(t *testing.T) {
+	m := testManager(t)
+	path := filepath.Join(m.Env.ProjectWT, "candidates", "project", "legacy-handoff.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rec.Meta.TargetPath = ".worktrail/handoffs/legacy.md"
+	rec := Record{
+		Path: path,
+		Meta: model.Candidate{
+			Schema: model.SchemaCandidate, ID: "legacy-handoff", Scope: "project",
+			CandidateType: model.CandidateTypeHandoff, TargetPath: "handoffs/legacy.md",
+			Title: "Legacy Handoff", Operation: OperationReplace, Status: StatusPending,
+		},
+		Body: "legacy handoff",
+	}
 	if err := writeRecord(rec); err != nil {
 		t.Fatal(err)
 	}
-
-	diff, err := m.Diff("project", "legacy-handoff")
+	records, err := m.List("project")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(diff, "-old handoff") || !strings.Contains(diff, "+new handoff") {
-		t.Fatalf("legacy-target diff unexpected:\n%s", diff)
+	if len(records) != 0 {
+		t.Fatalf("legacy handoff candidate leaked into list: %+v", records)
 	}
-
-	result, err := m.Promote("project", "legacy-handoff")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := m.Show("project", rec.Meta.ID); !errors.Is(err, ErrHandoffCandidateMigrationRequired) {
+		t.Fatalf("Show error = %v, want migration required", err)
 	}
-	if result.Status != StatusPromoted {
-		t.Fatalf("status = %q", result.Status)
+	if _, err := m.Diff("project", rec.Meta.ID); !errors.Is(err, ErrHandoffCandidateMigrationRequired) {
+		t.Fatalf("Diff error = %v, want migration required", err)
 	}
-	body, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := m.Promote("project", rec.Meta.ID); !errors.Is(err, ErrHandoffCandidateMigrationRequired) {
+		t.Fatalf("Promote error = %v, want ErrHandoffCandidateMigrationRequired", err)
 	}
-	if string(body) != "new handoff\n" {
-		t.Fatalf("target body = %q", body)
+	if _, err := m.Merge("project", rec.Meta.ID); !errors.Is(err, ErrHandoffCandidateMigrationRequired) {
+		t.Fatalf("Merge error = %v, want ErrHandoffCandidateMigrationRequired", err)
+	}
+	if _, err := m.Discard("project", rec.Meta.ID); !errors.Is(err, ErrHandoffCandidateMigrationRequired) {
+		t.Fatalf("Discard error = %v, want ErrHandoffCandidateMigrationRequired", err)
 	}
 }
 

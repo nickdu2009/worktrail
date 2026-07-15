@@ -275,7 +275,7 @@ func TestTopLevelHelpIncludesCandidateApplyCommands(t *testing.T) {
 		"worktrail search <keyword>",
 		"worktrail state start <title>",
 		"worktrail state update <note>",
-		"worktrail handoff <summary>",
+		"worktrail handoff --next-step <action> <summary>",
 		"worktrail resume [<task>]",
 		"worktrail doctor knowledge",
 	} {
@@ -348,7 +348,7 @@ func TestCLIHelpSmokeDoesNotMutateState(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	if err := Run(context.Background(), []string{"handoff", "need", "help", "later"}, nil, &out, &errb); err != nil {
+	if err := Run(context.Background(), []string{"handoff", "--project-id", "project-help-test", "--new-task", "--complete", "need", "help", "later"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run handoff with help summary word: %v stderr=%s", err, errb.String())
 	}
 	if strings.Contains(out.String(), "usage: worktrail handoff") || !strings.Contains(out.String(), filepath.Join(".worktrail", "handoffs")) {
@@ -808,7 +808,7 @@ func TestHandoffWriteFailureReportsWorktrailWriteDirs(t *testing.T) {
 	}
 	writeTextFile(t, filepath.Join(project, ".worktrail", "handoffs"), "not a directory\n")
 
-	err := Run(context.Background(), []string{"handoff", "cannot write handoff"}, nil, &out, &errb)
+	err := Run(context.Background(), []string{"handoff", "--new-task", "--complete", "cannot write handoff"}, nil, &out, &errb)
 	if err == nil {
 		t.Fatalf("handoff unexpectedly succeeded")
 	}
@@ -837,7 +837,7 @@ func TestStateCloseToHandoffFailureKeepsActiveState(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	err := Run(context.Background(), []string{"state", "close", "--to", "handoff", "need durable handoff"}, nil, &out, &errb)
+	err := Run(context.Background(), []string{"state", "close", "--to", "handoff", "--next-step", "continue", "need durable handoff"}, nil, &out, &errb)
 	if err == nil {
 		t.Fatalf("state close unexpectedly succeeded")
 	}
@@ -1426,7 +1426,7 @@ func TestDoctorKnowledgeSkipsBootstrapAndHandoffEscapeNoise(t *testing.T) {
 	if err := exec.Command("git", "-C", project, "init").Run(); err != nil {
 		t.Skipf("git init failed: %v", err)
 	}
-	runApp(t, &out, &errb, "handoff", "bootstrap handoff")
+	runApp(t, &out, &errb, "handoff", "--new-task", "--complete", "bootstrap handoff")
 	runApp(t, &out, &errb, "index", "rebuild")
 
 	out.Reset()
@@ -1787,10 +1787,24 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"candidates", "create", "--id", "ordinary-lesson", "--type", "lesson", "--target", "lessons/ordinary.md", "--title", "Ordinary Lesson", "Ordinary lesson body."}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run candidates create ordinary lesson: %v stderr=%s", err, errb.String())
 	}
-	if err := Run(context.Background(), []string{"candidates", "create", "--id", "handoff-noise", "--type", "handoff", "--target", "handoffs/noise.md", "--title", "Handoff Noise", "Operational handoff body."}, nil, &out, &errb); err != nil {
-		t.Fatalf("Run candidates create handoff noise: %v stderr=%s", err, errb.String())
+	if err := Run(context.Background(), []string{"candidates", "create", "--id", "handoff-noise", "--type", "handoff", "--target", "handoffs/noise.md", "--title", "Handoff Noise", "Operational handoff body."}, nil, &out, &errb); err == nil || !strings.Contains(err.Error(), "handoff candidates are retired") {
+		t.Fatalf("Run candidates create handoff noise error = %v, want retired path", err)
 	}
+	writeTextFile(t, filepath.Join(project, ".worktrail", "candidates", "project", "handoff-noise.md"), `---worktrail
+{
+  "schema": "worktrail.candidate.v1",
+  "id": "handoff-noise",
+  "scope": "project",
+  "candidate_type": "handoff",
+  "target_path": "handoffs/noise.md",
+  "title": "Handoff Noise",
+  "operation": "replace",
+  "status": "pending"
+}
+---
 
+Operational handoff body.
+`)
 	out.Reset()
 	if err := Run(context.Background(), []string{"candidates", "list", "--type", model.CandidateTypeTranscriptNotes, "--status", candidate.StatusPending, "--format", "json"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run candidates list: %v stderr=%s", err, errb.String())
@@ -1819,7 +1833,9 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"review"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run review: %v stderr=%s", err, errb.String())
 	}
-	if strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "handoff-noise") || !strings.Contains(out.String(), "Hidden evidence candidates: 2") || !strings.Contains(out.String(), "Hidden non-semantic pending candidates: 1") {
+	if strings.Contains(out.String(), "note-1") || strings.Contains(out.String(), "handoff-noise") ||
+		!strings.Contains(out.String(), "Hidden evidence candidates: 2") ||
+		strings.Contains(out.String(), "Hidden non-semantic pending candidates") {
 		t.Fatalf("review did not hide evidence or non-semantic candidates:\n%s", out.String())
 	}
 
@@ -1835,7 +1851,9 @@ func TestCandidatesListFiltersAndDistillTranscriptNotes(t *testing.T) {
 	if err := Run(context.Background(), []string{"review", "--all"}, nil, &out, &errb); err != nil {
 		t.Fatalf("Run review all: %v stderr=%s", err, errb.String())
 	}
-	if !strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "rule-1") || !strings.Contains(out.String(), "handoff-noise") || strings.Contains(out.String(), "Hidden evidence candidates") || strings.Contains(out.String(), "Hidden non-semantic pending candidates") {
+	if !strings.Contains(out.String(), "note-1") || !strings.Contains(out.String(), "rule-1") ||
+		strings.Contains(out.String(), "handoff-noise") || strings.Contains(out.String(), "Hidden evidence candidates") ||
+		strings.Contains(out.String(), "Hidden non-semantic pending candidates") {
 		t.Fatalf("review all output unexpected:\n%s", out.String())
 	}
 

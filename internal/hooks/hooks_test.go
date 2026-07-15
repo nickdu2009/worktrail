@@ -316,3 +316,152 @@ func TestHookStopDoesNotOverwriteExplicitActiveState(t *testing.T) {
 		t.Fatalf("hook stop overwrote explicit active state:\n%s", after.Body)
 	}
 }
+
+func TestHookPayloadAllowlistKeepsSecretsOutOfRuntimeAndEventLog(t *testing.T) {
+	env := hookEnv(t)
+	secretPath := filepath.Join(t.TempDir(), "private", "transcript.jsonl")
+	if err := os.MkdirAll(filepath.Dir(secretPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secretPath, []byte(`{"role":"user","content":"Implement safe hook payloads."}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{
+  "task": "Inspect /Users/private/project for person@example.com with password=hunter2 and eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEyMyJ9.c2lnbmF0dXJlMTIz",
+  "summary": "Do not persist ghp_1234567890abcdefghijklmnop or /Users/private/project",
+  "next_step": "Rotate AKIA1234567890ABCDEF and aws_secret_access_key=forty-character-secret-value",
+  "transcript_path": "` + filepath.ToSlash(secretPath) + `",
+  "session_id": "session-super-secret",
+  "unknown_secret": "raw transcript and token-123"
+}`
+	var out bytes.Buffer
+	if err := Run(context.Background(), env, "cursor", "stop", strings.NewReader(payload), &out); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := filepath.Glob(filepath.Join(env.ProjectWT, "runtime", "sessions", "*.md"))
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("runtime sessions = %v, err=%v", sessions, err)
+	}
+	runtimeData, err := os.ReadFile(sessions[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := os.ReadFile(filepath.Join(env.ProjectWT, "logs", "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string][]byte{"runtime": runtimeData, "events": events} {
+		text := string(data)
+		for _, forbidden := range []string{
+			"person@example.com",
+			"/Users/private/project",
+			secretPath,
+			"raw transcript and token-123",
+			"session-super-secret",
+			"hunter2",
+			"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEyMyJ9.c2lnbmF0dXJlMTIz",
+			"ghp_1234567890abcdefghijklmnop",
+			"AKIA1234567890ABCDEF",
+			"forty-character-secret-value",
+		} {
+			if strings.Contains(text, forbidden) {
+				t.Fatalf("%s persisted forbidden payload %q:\n%s", name, forbidden, text)
+			}
+		}
+	}
+	for _, marker := range []string{"[REDACTED:email]", "[REDACTED_ABSOLUTE_PATH]", "[REDACTED:jwt]", "[redacted-github-token]", "[REDACTED:api-key]", "[redacted-secret]"} {
+		if !strings.Contains(string(runtimeData), marker) {
+			t.Fatalf("runtime payload missing redaction marker %q:\n%s", marker, runtimeData)
+		}
+	}
+	if strings.Contains(string(events), `"payload"`) {
+		t.Fatalf("event log must not contain original payload:\n%s", events)
+	}
+	if _, err := os.Stat(filepath.Join(env.ProjectWT, "handoffs")); !os.IsNotExist(err) {
+		t.Fatalf("hook created handoff directory, err=%v", err)
+	}
+}
+
+func TestHookSecretMatrixAndMetadataIDsNeverPersistRawValues(t *testing.T) {
+	env := hookEnv(t)
+	values := []string{
+		"sk-proj-1234567890abcdefghijklmnop",
+		"Bearer abcdefghijklmnopqrstuvwxyz1234",
+		"OAuth zyxwvutsrqponmlkjihgfedcba9876",
+		"postgres://dbuser:db-password-secret@db.example.test/worktrail",
+		"123-45-6789",
+		"customer-project-id-raw",
+		"customer-task-id-raw",
+	}
+	payload := `{
+  "task": "Use sk-proj-1234567890abcdefghijklmnop with Bearer abcdefghijklmnopqrstuvwxyz1234 and OAuth zyxwvutsrqponmlkjihgfedcba9876 against postgres://dbuser:db-password-secret@db.example.test/worktrail for SSN 123-45-6789",
+  "project_id": "customer-project-id-raw",
+  "task_id": "customer-task-id-raw"
+}`
+	if err := Run(context.Background(), env, "codex", "Stop", strings.NewReader(payload), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := filepath.Glob(filepath.Join(env.ProjectWT, "runtime", "sessions", "*.md"))
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("runtime sessions = %v, err=%v", sessions, err)
+	}
+	runtimeData, err := os.ReadFile(sessions[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := os.ReadFile(filepath.Join(env.ProjectWT, "logs", "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string][]byte{"runtime": runtimeData, "events": events} {
+		for _, forbidden := range values {
+			if strings.Contains(string(data), forbidden) {
+				t.Fatalf("%s persisted raw value %q:\n%s", name, forbidden, data)
+			}
+		}
+	}
+	for _, marker := range []string{
+		"[REDACTED:api-key]",
+		"[REDACTED:oauth-session-token]",
+		"[REDACTED:db-password]",
+		"[REDACTED:ssn]",
+	} {
+		if !strings.Contains(string(runtimeData), marker) {
+			t.Fatalf("runtime missing secret-matrix marker %q:\n%s", marker, runtimeData)
+		}
+	}
+	if !strings.Contains(string(runtimeData), `"project_id": "project-`) ||
+		!strings.Contains(string(runtimeData), `"task_id": "task-`) {
+		t.Fatalf("runtime metadata IDs were not pseudonymized:\n%s", runtimeData)
+	}
+}
+
+func TestHookValidationUnknownAndFailedRemainDistinct(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{name: "unknown", payload: `{"task":"Run checks","commands":["go test ./internal/hooks"]}`, want: "Status: unknown."},
+		{name: "failed", payload: `{"task":"Run checks","commands":["go test ./internal/hooks"],"validation_status":"failed"}`, want: "Status: failed."},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env := hookEnv(t)
+			if err := Run(context.Background(), env, "codex", "Stop", strings.NewReader(tc.payload), &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			sessions, err := filepath.Glob(filepath.Join(env.ProjectWT, "runtime", "sessions", "*.md"))
+			if err != nil || len(sessions) != 1 {
+				t.Fatalf("runtime sessions = %v, err=%v", sessions, err)
+			}
+			data, err := os.ReadFile(sessions[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), tc.want) {
+				t.Fatalf("runtime validation missing %q:\n%s", tc.want, data)
+			}
+		})
+	}
+}

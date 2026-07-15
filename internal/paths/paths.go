@@ -73,6 +73,14 @@ func SafeJoin(root string, parts ...string) (string, error) {
 	return targetAbs, nil
 }
 
+func HandoffLocalDir(root string) (string, error) {
+	return SafeJoin(root, "handoffs", "local")
+}
+
+func HandoffTeamDir(root string) (string, error) {
+	return SafeJoin(root, "handoffs", "team")
+}
+
 func EnsureDirs(dirs ...string) error {
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

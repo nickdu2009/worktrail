@@ -52,7 +52,8 @@ func searchSQLite(root string, query Query, tokenizer Tokenizer) ([]Result, erro
 
 	sqlQuery := `
 SELECT e.id, e.scope, e.path, e.type, e.title, e.topic, e.status, e.stage, e.lifecycle,
-       e.source_of_truth, e.active, e.candidate_type, e.updated_at, e.excerpt, e.content,
+       e.project_id, e.task_id, e.visibility,
+       e.source_of_truth, e.active, e.candidate_type, e.expires_at, e.updated_at, e.excerpt, e.content,
        e.source_sessions_json, e.supersedes_json, e.superseded_by_json,
        bm25(entry_fts, 8.0, 1.0, 2.0, 2.0, 3.0) AS fts_score
 FROM entry_fts
@@ -71,6 +72,22 @@ WHERE entry_fts MATCH ?
 	if query.Topic != "" {
 		sqlQuery += ` AND e.topic = ?`
 		args = append(args, query.Topic)
+	}
+	if query.TaskID != "" {
+		sqlQuery += ` AND e.task_id = ?`
+		args = append(args, query.TaskID)
+	}
+	if query.Visibility != "" {
+		sqlQuery += ` AND e.visibility = ?`
+		args = append(args, query.Visibility)
+	}
+	if query.Status != "" {
+		sqlQuery += ` AND e.status = ?`
+		args = append(args, query.Status)
+	}
+	if query.Lifecycle != "" {
+		sqlQuery += ` AND e.lifecycle = ?`
+		args = append(args, query.Lifecycle)
 	}
 	rows, err := db.Query(sqlQuery, args...)
 	if err != nil {
@@ -125,6 +142,7 @@ func scanSQLiteSearchRow(rows *sql.Rows) (Entry, float64, error) {
 		entry                    Entry
 		sourceOfTruth, activeInt int
 		updatedAt                string
+		expiresAt                sql.NullString
 		excerpt                  string
 		sourceSessionsJSON       string
 		supersedesJSON           string
@@ -134,7 +152,8 @@ func scanSQLiteSearchRow(rows *sql.Rows) (Entry, float64, error) {
 	entry.Schema = "worktrail.index.entry.v1"
 	if err := rows.Scan(
 		&entry.ID, &entry.Scope, &entry.Path, &entry.Type, &entry.Title, &entry.Topic, &entry.Status, &entry.Stage, &entry.Lifecycle,
-		&sourceOfTruth, &activeInt, &entry.CandidateType, &updatedAt, &excerpt, &entry.Content,
+		&entry.ProjectID, &entry.TaskID, &entry.Visibility,
+		&sourceOfTruth, &activeInt, &entry.CandidateType, &expiresAt, &updatedAt, &excerpt, &entry.Content,
 		&sourceSessionsJSON, &supersedesJSON, &supersededByJSON, &ftsScore,
 	); err != nil {
 		return Entry{}, 0, err
@@ -143,6 +162,9 @@ func scanSQLiteSearchRow(rows *sql.Rows) (Entry, float64, error) {
 	entry.Active = activeInt == 1
 	if t, err := time.Parse(time.RFC3339Nano, updatedAt); err == nil {
 		entry.UpdatedAt = t
+	}
+	if expiresAt.Valid {
+		entry.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expiresAt.String)
 	}
 	_ = json.Unmarshal([]byte(sourceSessionsJSON), &entry.SourceSessions)
 	_ = json.Unmarshal([]byte(supersedesJSON), &entry.Supersedes)
@@ -172,7 +194,7 @@ func businessScore(entry Entry) float64 {
 	if entry.SourceOfTruth {
 		score += 5
 	}
-	if len(entry.SupersededBy) > 0 || knowledge.IsNonCurrentLifecycle(entry.Lifecycle) || entry.Stage == "historical" || entry.Stage == "retired" {
+	if len(entry.SupersededBy) > 0 || entry.Lifecycle == "superseded" || knowledge.IsNonCurrentLifecycle(entry.Lifecycle) || entry.Stage == "historical" || entry.Stage == "retired" {
 		score -= 5
 	}
 	age := time.Since(entry.UpdatedAt)

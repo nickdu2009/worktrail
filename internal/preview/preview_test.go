@@ -87,6 +87,35 @@ func TestResolveSkipsRuntimeArtifactsAndCollectsPendingCandidates(t *testing.T) 
 	}
 }
 
+func TestResolveExcludesHandoffRuntimeAndRetiredCandidates(t *testing.T) {
+	env := previewTestEnv(t)
+	writePreviewFile(t, filepath.Join(env.ProjectWT, "handoffs", "local", "local.md"), "# Local Handoff\n\nRuntime.")
+	writePreviewFile(t, filepath.Join(env.ProjectWT, "handoffs", "team", "team.md"), "# Team Handoff\n\nRuntime.")
+	legacyCandidate := model.Candidate{
+		Schema: model.SchemaCandidate, ID: "legacy-handoff", Scope: "project",
+		CandidateType: model.CandidateTypeHandoff, TargetPath: "handoffs/legacy.md",
+		Title: "Legacy Handoff", Operation: candidate.OperationReplace, Status: candidate.StatusPending,
+	}
+	data, err := store.RenderMarkdown(legacyCandidate, "# Legacy Handoff\n\nOperational candidate.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePreviewFile(t, filepath.Join(env.ProjectWT, "candidates", "project", "legacy-handoff.md"), string(data))
+
+	source, err := Resolve(ResolveRequest{Env: env, Scope: "project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasSourcePath(source.Children, "handoffs/local/local.md") || hasSourcePath(source.Children, "handoffs/team/team.md") {
+		t.Fatalf("handoff runtime leaked into formal preview: %+v", source.Children)
+	}
+	for _, pending := range source.PendingCandidates {
+		if pending.ID == "legacy-handoff" {
+			t.Fatalf("retired handoff candidate leaked into preview: %+v", pending)
+		}
+	}
+}
+
 func TestResolveCollectionHidesWorktrailFrontmatter(t *testing.T) {
 	env := previewTestEnv(t)
 	path := filepath.Join(env.ProjectWT, "decisions", "frontmatter.md")
@@ -144,16 +173,6 @@ func TestRenderBuildsStableKnowledgePage(t *testing.T) {
 	}
 	if _, err := (candidate.Manager{Env: env, Actor: "test"}).Create(candidate.CreateRequest{
 		Scope:         "project",
-		ID:            "handoff-note",
-		CandidateType: "handoff",
-		TargetPath:    "handoffs/handoff-note.md",
-		Title:         "Handoff Note",
-		Body:          "# Handoff Note\n\nOperational candidate body.",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := (candidate.Manager{Env: env, Actor: "test"}).Create(candidate.CreateRequest{
-		Scope:         "project",
 		ID:            "split-source",
 		CandidateType: "lesson",
 		TargetPath:    "lessons/kdd-active-knowledge-log.md",
@@ -192,7 +211,7 @@ func TestRenderBuildsStableKnowledgePage(t *testing.T) {
 	}
 
 	indexBody := string(first.HTML)
-	for _, want := range []string{"Worktrail Preview", "Decisions", "Workflows", "Pending Candidates", "Semantic Candidates", "Evidence Candidates", "Operational Candidates", "sections/decisions.html", "candidates/index.html", "candidates/semantic-rule.html"} {
+	for _, want := range []string{"Worktrail Preview", "Decisions", "Workflows", "Pending Candidates", "Semantic Candidates", "Evidence Candidates", "sections/decisions.html", "candidates/index.html", "candidates/semantic-rule.html"} {
 		if !strings.Contains(indexBody, want) {
 			t.Fatalf("index preview missing %q:\n%s", want, indexBody)
 		}
@@ -235,7 +254,7 @@ func TestRenderBuildsStableKnowledgePage(t *testing.T) {
 	}
 
 	candidatesBody := mustReadPreviewFile(t, filepath.Join(cacheDir, "candidates", "index.html"))
-	for _, want := range []string{"Semantic Candidates", "Evidence Candidates", "Operational Candidates", "Semantic Rule", "Evidence Note", "Handoff Note", "Split Source"} {
+	for _, want := range []string{"Semantic Candidates", "Evidence Candidates", "Semantic Rule", "Evidence Note", "Split Source"} {
 		if !strings.Contains(candidatesBody, want) {
 			t.Fatalf("candidates page missing %q:\n%s", want, candidatesBody)
 		}

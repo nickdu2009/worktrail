@@ -13,12 +13,12 @@ import (
 const cliErrorSchema = "worktrail.cli.error.v1"
 
 type CLIErrorReport struct {
-	Schema     string              `json:"schema"`
-	OK         bool                `json:"ok"`
-	Command    string              `json:"command"`
-	Message    string              `json:"message"`
-	ErrorCodes []string            `json:"error_codes,omitempty"`
-	Issues     []textsafety.Issue  `json:"issues,omitempty"`
+	Schema     string             `json:"schema"`
+	OK         bool               `json:"ok"`
+	Command    string             `json:"command"`
+	Message    string             `json:"message"`
+	ErrorCodes []string           `json:"error_codes,omitempty"`
+	Issues     []textsafety.Issue `json:"issues,omitempty"`
 }
 
 func inferJSONMode(args []string) bool {

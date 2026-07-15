@@ -54,6 +54,60 @@ func TestFieldCodeAndRequiredFieldIssue(t *testing.T) {
 	}
 }
 
+func TestProcessRejectsBlockedSecretsForBothProfiles(t *testing.T) {
+	for _, profile := range []Profile{ProfileLocal, ProfileTeam} {
+		if _, err := Process("-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----", profile); !errors.Is(err, ErrBlockedContent) {
+			t.Fatalf("profile %s: expected blocked content, got %v", profile, err)
+		}
+	}
+}
+
+func TestProcessRedactsLocalButRejectsTeamContent(t *testing.T) {
+	input := "Contact nick@example.com from /Users/nick/private.txt"
+	local, err := Process(input, ProfileLocal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !local.Redacted || strings.Contains(local.Text, "nick@example.com") || strings.Contains(local.Text, "/Users/") {
+		t.Fatalf("local result = %+v", local)
+	}
+	if _, err := Process(input, ProfileTeam); !errors.Is(err, ErrTeamUnsafeContent) {
+		t.Fatalf("expected team rejection, got %v", err)
+	}
+}
+
+func TestProcessRejectsDiffAndRawTranscriptForTeam(t *testing.T) {
+	for _, input := range []string{
+		"diff --git a/a.go b/a.go\n@@ -1 +1 @@",
+		`{"role":"user","message":"raw"}`,
+		`{"role":"assistant","content":"raw"}`,
+	} {
+		if _, err := Process(input, ProfileTeam); !errors.Is(err, ErrTeamUnsafeContent) {
+			t.Fatalf("expected team rejection for %q, got %v", input, err)
+		}
+	}
+}
+
+func TestProcessCoversPortableLocalPathVariants(t *testing.T) {
+	for _, input := range []string{
+		"/private/var/tmp/secret",
+		"/Volumes/External/private",
+		`C:\Users\alice\private`,
+		"C:/Users/alice/private",
+	} {
+		local, err := Process(input, ProfileLocal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !local.Redacted || strings.Contains(local.Text, input) {
+			t.Fatalf("path %q was not redacted: %+v", input, local)
+		}
+		if _, err := Process(input, ProfileTeam); !errors.Is(err, ErrTeamUnsafeContent) {
+			t.Fatalf("team path %q error = %v", input, err)
+		}
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

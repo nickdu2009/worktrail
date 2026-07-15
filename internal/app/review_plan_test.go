@@ -13,6 +13,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/candidate"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
+	"github.com/nickdu2009/worktrail/internal/store"
 )
 
 func TestReviewPlanRecommendsConservativeActions(t *testing.T) {
@@ -155,6 +156,38 @@ func TestReviewPlanRecommendsConservativeActions(t *testing.T) {
 	}
 	if !strings.HasPrefix(items["clean-promote"].Snapshot.CandidateBodyHash, "sha256:") || !strings.HasPrefix(items["clean-promote"].Snapshot.CandidateMetadataHash, "sha256:") {
 		t.Fatalf("snapshot hashes missing: %+v", items["clean-promote"].Snapshot)
+	}
+}
+
+func TestReviewPlanCompletelyExcludesLegacyHandoffCandidate(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	project := filepath.Join(t.TempDir(), "project")
+	t.Setenv("WORKTRAIL_HOME", home)
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	var out, errb bytes.Buffer
+	runApp(t, &out, &errb, "init")
+
+	meta := model.Candidate{
+		Schema: model.SchemaCandidate, ID: "legacy-handoff", Scope: "project",
+		CandidateType: model.CandidateTypeHandoff, TargetPath: "handoffs/legacy.md",
+		Title: "Legacy Handoff", Operation: candidate.OperationReplace, Status: candidate.StatusPending,
+	}
+	data, err := store.RenderMarkdown(meta, "# Legacy Handoff\n\nMigrate me.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTextFile(t, filepath.Join(project, ".worktrail", "candidates", "project", "legacy-handoff.md"), string(data))
+
+	out.Reset()
+	if err := Run(context.Background(), []string{"review", "plan", "--format", "json"}, nil, &out, &errb); err != nil {
+		t.Fatal(err)
+	}
+	var plan reviewPlan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Summary.Total != 0 || plan.Summary.Excluded != 0 || len(plan.Diagnostics) != 0 {
+		t.Fatalf("review plan did not exclude legacy handoff candidate: %+v", plan)
 	}
 }
 

@@ -22,7 +22,7 @@ Worktrail 的自动化目标很克制：
 1. agent 集成安装后的运行时文件，例如 hooks、settings 配置和用户级 skills
 2. 对话内 skills，例如 `worktrail-context`、`worktrail-review`、`worktrail-distill`、`worktrail-maintain`、`worktrail-handoff`
 3. `context` 暴露的 maintenance hints 和只读计划命令
-4. hooks 在特定事件点生成 state、checkpoint、runtime records 或其他操作记录的能力
+4. hooks 在特定事件点生成 runtime session、runtime checkpoint、takeover note 或审计日志的能力
 
 Worktrail 的自动化不是“后台一直运行的系统”，而是围绕当前 Agent 会话按事件点显式触发。
 
@@ -55,10 +55,10 @@ hooks 的职责是把会话事件转换成 Worktrail 可用的运行材料。
 
 它们适合做的事情包括：
 
-- 在会话开始或恢复时帮助载入上下文
-- 在 compact、stop 或 session end 之类的事件点更新 active state 或写入 checkpoint
-- 生成工作记录、checkpoint、takeover/runtime 记录或其他操作记录
-- 把某些事件转化为后续 review/maintenance 可见的输入
+- 记录 allowlist 内的会话事件元数据和审计信息
+- 在 compact、stop 或 session end 之类的事件点写入有界的 runtime session 或 runtime checkpoint
+- 生成 checkpoint、takeover note、runtime record 或审计日志
+- 把有信号的事件转化为后续 degraded recovery 可用的 runtime 材料
 
 它们不适合做的事情包括：
 
@@ -66,8 +66,11 @@ hooks 的职责是把会话事件转换成 Worktrail 可用的运行材料。
 - 自动 merge
 - 自动 discard
 - 自动修改正式知识
+- 创建 local handoff
+- 发布 team handoff
+- 自动 prune runtime 记录
 
-也就是说，hooks 可以“自动采集和准备”，但不能“自动采纳”。
+也就是说，hooks 可以“自动采集和准备”，但不能“自动采纳”或“自动交接”。Handoff 只在用户明确要求跨 chat、切 Agent 或稍后继续时由 skill/CLI 创建。
 
 ## ZCode Agent 的自动化边界
 <div class="title-en">ZCode Agent Automation Boundary</div>
@@ -91,13 +94,13 @@ skills 是 Worktrail 的对话内工作流入口。它们把多步命令链包�
 
 常见分工是：
 
-- `worktrail-context`：任务开始、恢复旧任务、继续长任务时先生成 Context Pack
+- `worktrail-context`：新任务开始或需要项目知识时生成 Context Pack；恢复旧任务使用 `worktrail-resume`
 - `worktrail-review`：把 pending semantic candidates 按推荐动作分组，并在确认后执行安全的 CLI 写操作
 - `worktrail-distill`：从 evidence 生成 distill pack、proposal、validate/apply 链路
 - `worktrail-draft`：在显式持久化请求后，把 requirement、architecture、workflow 等非 ADR 语义产物直接写成 pending candidate；当 Worktrail 是唯一目标时不创建额外 `docs/` 或 `.plans/` 副本
 - `worktrail-adr`：在显式持久化请求和中立内容就绪门禁之后，把标准 ADR 写成 pending `decision` candidate，再进入 review
 - `worktrail-maintain`：串起 `context "maintenance"`、`distill --summary`、`review plan`、`evidence plan`
-- `worktrail-handoff`：只在显式交接边界创建 durable handoff，例如用户明确要求 handoff、切 Agent、切 chat 或结束当天工作
+- `worktrail-handoff`：只在显式交接边界创建 local handoff，例如用户明确要求 handoff、切 Agent、切 chat 或结束当天工作；需要共享时再显式 publish 为 immutable team handoff
 
 skills 自动化的是流程编排，不是绕过边界。
 
@@ -110,9 +113,17 @@ skills 自动化的是流程编排，不是绕过边界。
 
 Worktrail 只保留 CLI、hooks 和 skills 这三类自动化入口。
 
-- hooks 负责在明确事件点自动写工作记录、checkpoint、runtime records 和日志
+- hooks 负责在明确事件点自动写 runtime session、runtime checkpoint、takeover note 和日志；hooks 永不创建 handoff
 - skills 负责在对话里编排 `context`、`review`、`distill`、`handoff`、`resume` 等流程
 - 高风险写动作仍然通过显式 CLI 执行，并保留人工确认边界
+
+Handoff 自动化还有额外边界：
+
+- `worktrail handoff create --next-step "<action>" "<summary>"` 创建未完成的 local runtime record；无后续工作时明确使用 `--complete`
+- `worktrail handoff publish <local-id>` 才创建 team record
+- publish 不执行 `git add`、`git commit` 或 `git push`
+- dirty worktree 默认拒绝；例外必须同时使用 `--allow-dirty --confirm`
+- team record 只追加新 DAG 节点，不原地编辑旧节点
 
 ## 低干预维护如何自动发现工作
 <div class="title-en">How Low-Intervention Maintenance Works</div>
@@ -148,7 +159,9 @@ Worktrail 明确不做这些自动化：
 - 不做 Web dashboard 或 TUI
 - 不做自动 promote / merge / discard / archive
 - 不做 hooks 自动采纳知识
+- 不做 hooks 自动 handoff 或 team publish
 - 不做隐式后台 transcript 扫描和后台同步
+- 不做隐式 runtime prune
 
 这些边界不是缺点，而是为了避免自动化越过 review、权限和可解释性边界。
 
@@ -187,10 +200,10 @@ Agent 可以提前完成这些准备工作：
 1. `worktrail init` 创建 `.worktrail/`
 2. `worktrail install <tool> --user --project` 安装工具集成
 3. 任务开始时，通过已安装的 `worktrail-context` skill 或等价 CLI 命令载入上下文
-4. 长任务中，通过 state、checkpoint、hooks 或 handoff 保留进度
+4. 长任务中，通过 state 和显式 checkpoint 保留可控进度，hooks 只补充 14 天、每 task 最多读取 5 条的 degraded runtime 恢复材料
 5. evidence 和 semantic candidates 通过 review/distill/maintain 被自动发现
 6. Agent 总结建议动作并等待确认
-7. 只有确认后，CLI 才执行正式写入
+7. 只有确认后，CLI 才执行正式知识写入；只有显式交接意图才创建 handoff
 
 这就是 Worktrail 的自动化风格：自动发现、自动汇总、自动编排，但不自动越过人审。
 

@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/nickdu2009/worktrail/internal/handoff"
+	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	wtstate "github.com/nickdu2009/worktrail/internal/state"
+	"github.com/nickdu2009/worktrail/internal/store"
 )
 
 func runState(_ context.Context, env paths.Env, ioctx IO, args []string) error {
@@ -22,7 +26,7 @@ func runState(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 		return nil
 	}
 	cmd, rest := args[0], args[1:]
-	flags, positional := splitFlags(rest)
+	flags, positional := splitFlagsWithBooleans(rest, map[string]bool{"complete": true, "stdin": true})
 	scope := flagValue(flags, "scope", "project")
 	switch cmd {
 	case "start":
@@ -104,6 +108,19 @@ func runState(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 		}
 		return printState(ioctx, cap, flagValue(flags, "format", "text"))
 	case "close":
+		toHandoff := flagValue(flags, "to", "") == "handoff"
+		if err := validateStateCloseFlags(flags, toHandoff); err != nil {
+			return err
+		}
+		closeArgs, err := parseHandoffArgs(rest)
+		if err != nil {
+			return err
+		}
+		if toHandoff {
+			if err := validateHandoffStdinArgs("state close --to handoff", closeArgs, "id", "scope", "to"); err != nil {
+				return err
+			}
+		}
 		id := flagValue(flags, "id", "latest")
 		if id == "latest" {
 			var err error
@@ -112,51 +129,81 @@ func runState(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 				return err
 			}
 		}
-		toHandoff := flagValue(flags, "to", "") == "handoff"
 		var handoffRecord *handoff.Record
+		var closeResult wtstate.CloseResult
 		if toHandoff {
 			cap, err := wtstate.Show(env, wtstate.ShowOptions{Scope: scope, ID: id, Directory: wtstate.DirActive})
 			if err != nil {
 				return err
 			}
-			latestHandoff, err := latestHandoffIfAny(env, scope)
+			taskID := wtstate.TaskID(cap)
+			if explicitTaskID := strings.TrimSpace(flagValue(flags, "task-id", "")); explicitTaskID != "" && explicitTaskID != taskID {
+				return fmt.Errorf("--task-id %q does not match active state task %q", explicitTaskID, taskID)
+			}
+			var request handoff.CreateRequest
+			if closeArgs.boolean("stdin") {
+				if ioctx.In == nil {
+					return errors.New("--stdin requires JSON input")
+				}
+				decoder := json.NewDecoder(ioctx.In)
+				decoder.DisallowUnknownFields()
+				if err := decoder.Decode(&request); err != nil {
+					return fmt.Errorf("decode handoff CreateRequest JSON: %w", err)
+				}
+			} else {
+				validation, err := validationFromFlags(closeArgs)
+				if err != nil {
+					return err
+				}
+				request = handoff.CreateRequest{
+					Summary:       strings.TrimSpace(joinArgs(closeArgs.Positional)),
+					Complete:      closeArgs.boolean("complete"),
+					ProjectID:     closeArgs.first("project-id", ""),
+					NextSteps:     nextStepsFromFlags(closeArgs.values("next-step")),
+					OpenQuestions: closeArgs.values("question"),
+					Risks:         closeArgs.values("risk"),
+					Validation:    validation,
+				}
+			}
+			request.Scope = scope
+			request.Title = cap.State.Title
+			request.TaskID = taskID
+			request.SourceState = &model.Ref{Scope: scope, Kind: "state", ID: cap.State.ID, RelPath: filepath.ToSlash(filepath.Join("state", wtstate.DirArchived, cap.State.ID+".md"))}
+			request.Tags = append(request.Tags, "handoff", "state-close")
+			request.SourceTool = withDefaultString(request.SourceTool, "worktrail")
+			request.Actor = "cli:state-close"
+			rec, err := createAndMaybeCloseState(context.Background(), env, request, &cap, true)
 			if err != nil {
 				return handoffWriteError(env, scope, err)
 			}
-			rec, err := createHandoffRecord(env, createHandoffRecordOptions{
-				Scope:           scope,
-				Title:           cap.State.Title,
-				Summary:         strings.TrimSpace(joinArgs(positional)),
-				SourceState:     &cap,
-				SourceStatePath: projectedArchivedStatePath(env, scope, cap.State.ID),
-				Previous:        latestHandoff,
-				Tags:            []string{"handoff", "state-close"},
-				Actor:           "cli:state-close",
-			})
+			closed, err := wtstate.Show(env, wtstate.ShowOptions{Scope: scope, ID: cap.State.ID, Directory: wtstate.DirArchived})
 			if err != nil {
-				return handoffWriteError(env, scope, err)
+				return err
 			}
 			handoffRecord = &rec
-		}
-		result, err := wtstate.Close(env, wtstate.CloseOptions{
-			Scope:   scope,
-			ID:      id,
-			Summary: joinArgs(positional),
-			Handoff: toHandoff,
-			Actor:   "cli:state-close",
-		})
-		if err != nil {
-			return err
+			closeResult = wtstate.CloseResult{Capsule: closed}
+		} else {
+			result, err := wtstate.Close(env, wtstate.CloseOptions{
+				Scope:   scope,
+				ID:      id,
+				Summary: joinArgs(positional),
+				Handoff: false,
+				Actor:   "cli:state-close",
+			})
+			if err != nil {
+				return err
+			}
+			closeResult = result
 		}
 		if toHandoff {
 			if handoffRecord == nil {
 				return handoffWriteError(env, scope, fmt.Errorf("handoff was not created"))
 			}
-			fmt.Fprintf(ioctx.Out, "%s\t%s\n", result.Capsule.State.ID, result.Capsule.Path)
-			fmt.Fprintf(ioctx.Out, "%s\t%s\n", handoffRecord.Meta.ID, handoffRecord.Path)
+			fmt.Fprintf(ioctx.Out, "%s\t%s\n", closeResult.Capsule.State.ID, closeResult.Capsule.Path)
+			fmt.Fprintf(ioctx.Out, "%s\t%s\n", handoffRecord.Meta.ID, handoffRecord.RelPath)
 			return nil
 		}
-		return printState(ioctx, result.Capsule, flagValue(flags, "format", "text"))
+		return printState(ioctx, closeResult.Capsule, flagValue(flags, "format", "text"))
 	case "archive":
 		id := firstArg(positional, flagValue(flags, "id", ""))
 		cap, err := wtstate.Archive(env, wtstate.ArchiveOptions{Scope: scope, ID: id, Actor: "cli:state-archive"})
@@ -169,15 +216,18 @@ func runState(_ context.Context, env paths.Env, ioctx IO, args []string) error {
 		if _, ok := flags["active"]; ok {
 			dir = wtstate.DirActive
 		}
-		items, err := wtstate.List(env, wtstate.ListOptions{Scope: scope, Directory: dir})
+		result, err := wtstate.ListWithDiagnostics(env, wtstate.ListOptions{Scope: scope, Directory: dir})
 		if err != nil {
 			return err
 		}
 		if flagValue(flags, "format", "text") == "json" {
-			return json.NewEncoder(ioctx.Out).Encode(items)
+			return json.NewEncoder(ioctx.Out).Encode(result)
 		}
-		for _, item := range items {
+		for _, item := range result.Capsules {
 			fmt.Fprintf(ioctx.Out, "%s\t%s\t%s\t%s\n", item.State.ID, item.State.Status, item.State.Type, item.State.Title)
+		}
+		for _, diagnostic := range result.Diagnostics {
+			fmt.Fprintf(ioctx.Err, "diagnostic\tinvalid_state\t%s\t%s\n", diagnostic.Path, diagnostic.Message)
 		}
 		return nil
 	case "show":
@@ -223,10 +273,111 @@ func printStateHelp(out interface{ Write([]byte) (int, error) }) {
 	fmt.Fprintln(out, "  update [--id latest] <note>    append progress to the active work log")
 	fmt.Fprintln(out, "  checkpoint [--id latest]       write a recovery checkpoint")
 	fmt.Fprintln(out, "  inject [--id latest] <task>    inject task instructions into state")
-	fmt.Fprintln(out, "  close [--id latest] [--to handoff] <summary>  close the active work log")
+	fmt.Fprintln(out, "  close [--id latest] <summary>  close the active work log")
+	fmt.Fprintln(out, "  close [--id latest] --to handoff (--next-step <action>|--complete) <summary>")
 	fmt.Fprintln(out, "  archive <id>                   mark a closed state as archived")
 	fmt.Fprintln(out, "  list [--active]                list active and historical state records")
 	fmt.Fprintln(out, "  show <id>                      print a state record")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, `handoff examples:`)
+	fmt.Fprintln(out, `  worktrail state close --to handoff --next-step "continue" "ready for handoff"`)
+	fmt.Fprintln(out, `  worktrail state close --to handoff --complete "task complete"`)
+}
+
+func validateStateCloseFlags(flags map[string]string, toHandoff bool) error {
+	allowed := map[string]bool{
+		"id": true, "scope": true, "to": true,
+	}
+	if toHandoff {
+		for _, flag := range []string{
+			"stdin", "complete", "project-id", "task-id", "next-step", "question", "risk",
+			"validation-status", "validation-command", "validation-note", "validation-exit-code",
+		} {
+			allowed[flag] = true
+		}
+	} else {
+		allowed["format"] = true
+		if value := strings.TrimSpace(flagValue(flags, "to", "")); value != "" {
+			return fmt.Errorf("state close --to only supports %q", "handoff")
+		}
+	}
+	for flag := range flags {
+		if !allowed[flag] {
+			return fmt.Errorf("--%s is not valid for state close", flag)
+		}
+	}
+	return nil
+}
+
+func createAndMaybeCloseState(ctx context.Context, env paths.Env, request handoff.CreateRequest, sourceState *wtstate.Capsule, closeState bool) (handoff.Record, error) {
+	if sourceState == nil || !closeState {
+		return handoff.CreateLocal(ctx, env, request)
+	}
+	mutation := handoff.Mutation{Build: func() (handoff.Mutation, error) {
+		return buildStateCloseMutation(env, request.Scope, *sourceState, request.Summary)
+	}}
+	return handoff.CreateLocalWithMutation(ctx, env, request, mutation)
+}
+
+func buildStateCloseMutation(env paths.Env, scope string, cap wtstate.Capsule, summary string) (handoff.Mutation, error) {
+	_, err := env.ScopeRoot(scope)
+	if err != nil {
+		return handoff.Mutation{}, err
+	}
+	cap, err = wtstate.Show(env, wtstate.ShowOptions{Scope: scope, ID: cap.State.ID, Directory: wtstate.DirActive})
+	if err != nil {
+		return handoff.Mutation{}, err
+	}
+	now := time.Now().UTC()
+	meta := make(map[string]any, len(cap.Metadata)+3)
+	for key, value := range cap.Metadata {
+		meta[key] = value
+	}
+	meta["status"] = "closed"
+	meta["closed_at"] = now
+	meta["updated_at"] = now
+	body := strings.TrimSpace(cap.Body)
+	if summary = strings.TrimSpace(summary); summary != "" {
+		if body != "" {
+			body += "\n\n"
+		}
+		body += "## Close Summary\n\n" + summary
+	}
+	archivedData, err := store.RenderMarkdown(meta, body)
+	if err != nil {
+		return handoff.Mutation{}, err
+	}
+	activeRel := filepath.ToSlash(filepath.Join("state", wtstate.DirActive, cap.State.ID+".md"))
+	archivedRel := filepath.ToSlash(filepath.Join("state", wtstate.DirArchived, cap.State.ID+".md"))
+	aliasRel := filepath.ToSlash(filepath.Join("state", wtstate.DirActive, "latest.md"))
+	mutation := handoff.Mutation{
+		Writes:  []handoff.FileWrite{{Path: archivedRel, Data: archivedData, Mode: 0o644}},
+		Deletes: []string{activeRel},
+		Events: []handoff.Event{{
+			Name:  "state.close",
+			ID:    cap.State.ID,
+			Actor: "cli:state-close",
+			Data:  map[string]any{"handoff": true, "path": archivedRel},
+			Time:  now,
+		}},
+	}
+	active, err := wtstate.List(env, wtstate.ListOptions{Scope: scope, Directory: wtstate.DirActive})
+	if err != nil {
+		return handoff.Mutation{}, err
+	}
+	for _, candidate := range active {
+		if candidate.State.ID == cap.State.ID {
+			continue
+		}
+		data, err := os.ReadFile(candidate.Path)
+		if err != nil {
+			return handoff.Mutation{}, err
+		}
+		mutation.Writes = append(mutation.Writes, handoff.FileWrite{Path: aliasRel, Data: data, Mode: 0o644})
+		return mutation, nil
+	}
+	mutation.Deletes = append(mutation.Deletes, aliasRel)
+	return mutation, nil
 }
 
 func defaultStateBody(title string) string {

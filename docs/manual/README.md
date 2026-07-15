@@ -60,6 +60,7 @@ make docs-manual-serve PORT=3001
 - 我想知道 Worktrail 的自动化做了什么、没做什么： [自动化](AUTOMATION.md) -> [安装说明](INSTALLATION.md) -> [常见工作流](COMMON-WORKFLOWS.md)
 - 我想把 Worktrail 接入 Codex、Claude Code、Cursor 或 ZCode Agent： [安装说明](INSTALLATION.md) -> [常见工作流](COMMON-WORKFLOWS.md) -> [常见问题](FAQ.md)
 - 我想在任务开始前给 Agent 上下文： [快速开始](QUICK-START.md) -> [常见工作流](COMMON-WORKFLOWS.md)
+- 我想跨 chat 或切 Agent，并决定是否发布给团队： [常见工作流](COMMON-WORKFLOWS.md) -> [自动化](AUTOMATION.md) -> [故障排查](TROUBLESHOOTING.md)
 - 我想把会话里的结论沉淀成知识： [常见工作流](COMMON-WORKFLOWS.md) -> [故障排查](TROUBLESHOOTING.md)
 - 我已经有 pending candidates，需要 review 或维护： [常见工作流](COMMON-WORKFLOWS.md) -> [常见问题](FAQ.md)
 
@@ -73,7 +74,7 @@ make docs-manual-serve PORT=3001
 - [自动化](AUTOMATION.md): 解释 hooks、skills、maintenance hints，以及 ZCode Agent 的语义自动化边界
 - [安装说明](INSTALLATION.md): 说明 CLI、用户级/项目级 scope 和 Agent 集成
 - [常见工作流](COMMON-WORKFLOWS.md): 给出任务前、任务中、任务后、知识维护的典型流程
-- [故障排查](TROUBLESHOOTING.md): 汇总安装、scope、候选知识、预览和导入问题
+- [故障排查](TROUBLESHOOTING.md): 汇总安装、scope、候选知识、Handoff V2、预览和迁移问题
 - [常见问题](FAQ.md): 汇总高频使用问题和快速答案
 
 ## 范围说明

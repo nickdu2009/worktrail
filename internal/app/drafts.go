@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,92 +23,131 @@ import (
 	"github.com/nickdu2009/worktrail/internal/util"
 )
 
-func runHandoff(_ context.Context, env paths.Env, ioctx IO, args []string) error {
+func runHandoff(ctx context.Context, env paths.Env, ioctx IO, args []string) error {
 	if wantsFlagHelpOrLeadingHelp(args) {
 		printHandoffHelp(ioctx.Out)
 		return nil
 	}
-	flags, positional := splitFlagsWithBooleans(args, map[string]bool{"handoff-only": true})
-	scope := flagValue(flags, "scope", "project")
-	title := flagValue(flags, "title", "Handoff")
-	summary := strings.TrimSpace(joinArgs(positional))
-	if summary == "" {
+	if len(args) == 0 {
 		return errors.New("handoff summary is required")
 	}
-	handoffOnly := flagValue(flags, "handoff-only", "") == "true"
-	sourceState, err := latestStateIfAny(env, scope)
+	switch args[0] {
+	case "create":
+		return runHandoffCreate(ctx, env, ioctx, args[1:])
+	case "list":
+		return runHandoffList(env, ioctx, args[1:])
+	case "show":
+		return runHandoffShow(env, ioctx, args[1:])
+	case "close":
+		return runHandoffClose(env, ioctx, args[1:])
+	case "publish":
+		return runHandoffPublish(ctx, env, ioctx, args[1:])
+	case "doctor":
+		return runHandoffDoctor(env, ioctx, args[1:])
+	case "repair":
+		return runHandoffRepair(env, ioctx, args[1:])
+	default:
+		return runHandoffCreate(ctx, env, ioctx, args)
+	}
+}
+
+type parsedHandoffArgs struct {
+	Flags      map[string][]string
+	Positional []string
+}
+
+func runHandoffCreate(ctx context.Context, env paths.Env, ioctx IO, args []string) error {
+	parsed, err := parseHandoffArgs(args)
 	if err != nil {
-		return handoffWriteError(env, scope, err)
+		return err
 	}
-	if title == "Handoff" && sourceState != nil {
-		title = sourceState.State.Title
+	if err := validateHandoffFlags("create", parsed); err != nil {
+		return err
 	}
-	latestHandoff, err := latestHandoffIfAny(env, scope)
-	if err != nil {
-		return handoffWriteError(env, scope, err)
+	if err := validateHandoffStdinArgs("handoff create", parsed, "scope", "format", "handoff-only", "new-task"); err != nil {
+		return err
 	}
-	sourceStatePath := ""
-	if sourceState != nil && !handoffOnly {
-		sourceStatePath = projectedArchivedStatePath(env, scope, sourceState.State.ID)
-	}
-	rec, err := createHandoffRecord(env, createHandoffRecordOptions{
-		Scope:           scope,
-		Title:           title,
-		Summary:         summary,
-		SourceState:     sourceState,
-		SourceStatePath: sourceStatePath,
-		Previous:        latestHandoff,
-		Tags:            []string{"handoff", "manual"},
-		Actor:           "cli:handoff",
-	})
-	if err != nil {
-		return handoffWriteError(env, scope, err)
-	}
-	if sourceState != nil && !handoffOnly {
-		if _, err := wtstate.Close(env, wtstate.CloseOptions{
-			Scope:   scope,
-			ID:      sourceState.State.ID,
-			Summary: summary,
-			Handoff: true,
-			Actor:   "cli:handoff",
-		}); err != nil {
+	scope := parsed.first("scope", "project")
+	format := parsed.first("format", "text")
+	var request handoff.CreateRequest
+	if parsed.boolean("stdin") {
+		if ioctx.In == nil {
+			return errors.New("--stdin requires JSON input")
+		}
+		decoder := json.NewDecoder(ioctx.In)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			return fmt.Errorf("decode handoff CreateRequest JSON: %w", err)
+		}
+	} else {
+		request = handoff.CreateRequest{
+			Scope:         scope,
+			Title:         parsed.first("title", ""),
+			Summary:       strings.TrimSpace(strings.Join(parsed.Positional, " ")),
+			Complete:      parsed.boolean("complete"),
+			ProjectID:     parsed.first("project-id", ""),
+			TaskID:        parsed.first("task-id", ""),
+			NextSteps:     nextStepsFromFlags(parsed.values("next-step")),
+			OpenQuestions: parsed.values("question"),
+			Risks:         parsed.values("risk"),
+			Tags:          splitCSV(strings.Join(parsed.values("tags"), ",")),
+			Body:          parsed.first("body", ""),
+			SourceTool:    parsed.first("source-tool", "worktrail"),
+			Actor:         "cli:handoff-create",
+		}
+		validation, err := validationFromFlags(parsed)
+		if err != nil {
 			return err
 		}
+		request.Validation = validation
 	}
-	return printHandoffRecord(ioctx, rec, flagValue(flags, "format", "text"))
-}
-
-type createHandoffRecordOptions struct {
-	Scope           string
-	Title           string
-	Summary         string
-	SourceState     *wtstate.Capsule
-	SourceStatePath string
-	Previous        *handoff.Record
-	Tags            []string
-	Actor           string
-}
-
-func createHandoffRecord(env paths.Env, opts createHandoffRecordOptions) (handoff.Record, error) {
-	summary := strings.TrimSpace(opts.Summary)
-	if summary == "" {
-		return handoff.Record{}, errors.New("handoff summary is required")
+	request.Scope = withDefaultString(request.Scope, scope)
+	request.Actor = "cli:handoff-create"
+	newTask := parsed.boolean("new-task")
+	if newTask && strings.TrimSpace(request.TaskID) != "" {
+		return errors.New("--new-task and --task-id are mutually exclusive")
 	}
-	title := strings.TrimSpace(opts.Title)
-	if title == "" {
-		title = "Handoff"
+	var sourceState *wtstate.Capsule
+	if newTask {
+		request.TaskID, err = handoff.NewTaskID()
+		if err != nil {
+			return err
+		}
+	} else {
+		sourceState, err = latestStateIfAny(env, request.Scope, request.TaskID)
+		if err != nil {
+			return handoffWriteError(env, request.Scope, err)
+		}
 	}
-	return handoff.Create(env, handoff.CreateOptions{
-		Scope:             opts.Scope,
-		Title:             title,
-		Summary:           summary,
-		TaskID:            taskIDForHandoff(opts.SourceState, opts.Previous, title),
-		SourceStateID:     sourceStateID(opts.SourceState),
-		PreviousHandoffID: previousHandoffID(opts.Previous),
-		Tags:              opts.Tags,
-		Body:              renderHandoffRecordBody(title, summary, opts.SourceState, opts.SourceStatePath, opts.Previous),
-		Actor:             opts.Actor,
-	})
+	if sourceState != nil {
+		stateTaskID := wtstate.TaskID(*sourceState)
+		if request.TaskID != "" && request.TaskID != stateTaskID {
+			return fmt.Errorf("--task-id %q does not match active state task %q", request.TaskID, stateTaskID)
+		}
+		request.TaskID = stateTaskID
+		if request.Title == "" {
+			request.Title = sourceState.State.Title
+		}
+	}
+	if strings.TrimSpace(request.TaskID) == "" {
+		return errors.New("no active state supplies task_id; use --task-id or --new-task")
+	}
+	if request.Title == "" {
+		request.Title = "Handoff"
+	}
+	handoffOnly := parsed.boolean("handoff-only")
+	if sourceState != nil {
+		relPath := filepath.ToSlash(filepath.Join("state", wtstate.DirActive, sourceState.State.ID+".md"))
+		if !handoffOnly {
+			relPath = filepath.ToSlash(filepath.Join("state", wtstate.DirArchived, sourceState.State.ID+".md"))
+		}
+		request.SourceState = &model.Ref{Scope: request.Scope, Kind: "state", ID: sourceState.State.ID, RelPath: relPath}
+	}
+	record, err := createAndMaybeCloseState(ctx, env, request, sourceState, !handoffOnly)
+	if err != nil {
+		return handoffWriteError(env, request.Scope, err)
+	}
+	return printHandoffRecord(ioctx, record, format)
 }
 
 func handoffWriteError(env paths.Env, scope string, err error) error {
@@ -119,110 +160,413 @@ func handoffWriteError(env paths.Env, scope string, err error) error {
 
 func requiredWorktrailWriteDirs(root string) []string {
 	return []string{
-		filepath.Join(root, "handoffs"),
+		filepath.Join(root, "handoffs", "local"),
+		filepath.Join(root, "handoffs", "team"),
 		filepath.Join(root, "logs"),
+		filepath.Join(root, "ops"),
 	}
 }
 
 func printHandoffHelp(out io.Writer) {
-	fmt.Fprintln(out, "usage: worktrail handoff [--scope project|user] [--title <title>] [--format text|json] [--handoff-only] <summary>")
+	fmt.Fprintln(out, "usage: worktrail handoff <create|list|show|close|publish|doctor|repair> [options]")
+	fmt.Fprintln(out, "       worktrail handoff [create options] <summary>")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Writes a durable handoff record under `.worktrail/handoffs/`. By default, an active explicit state is closed after the handoff is created; use `--handoff-only` to keep the active state open.")
+	fmt.Fprintln(out, "create: [--scope project|user] [--task-id <id>|--new-task] [--title <title>] [--project-id <id>]")
+	fmt.Fprintln(out, "        [--next-step <action>]... [--complete] [--question <text>]... [--risk <text>]...")
+	fmt.Fprintln(out, "        [--tags <csv>] [--body <markdown>] [--source-tool <tool>] [--handoff-only]")
+	fmt.Fprintln(out, "        [--validation-status <status>] [--validation-command <command>]")
+	fmt.Fprintln(out, "        [--validation-note <text>] [--validation-exit-code <code>] [--stdin] [--format text|json]")
+	fmt.Fprintln(out, "list:   [--scope project|user] [--visibility local|team] [--task-id <id>] [--format text|json]")
+	fmt.Fprintln(out, "show:   <id>|--id <id> [--scope project|user] [--visibility local|team] [--format markdown|json]")
+	fmt.Fprintln(out, "close:  <local-id>|--id <id> [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "publish:<local-id>|--id <id> [--supersedes <team-id,...>] [--allow-dirty --confirm] [--format text|json]")
+	fmt.Fprintln(out, "doctor: [--scope project|user] [--format text|json]")
+	fmt.Fprintln(out, "repair: [--scope project|user] [--apply --confirm] [--format text|json]")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Repair is dry-run by default. Team records are immutable.")
 }
 
 func printHandoffRecord(ioctx IO, rec handoff.Record, format string) error {
 	if format == "json" {
 		return json.NewEncoder(ioctx.Out).Encode(rec)
 	}
-	fmt.Fprintf(ioctx.Out, "%s\t%s\n", rec.Meta.ID, rec.Path)
+	path := rec.RelPath
+	if rec.Meta.Scope == "project" {
+		path = filepath.ToSlash(filepath.Join(".worktrail", filepath.FromSlash(path)))
+	}
+	fmt.Fprintf(ioctx.Out, "%s\t%s\n", rec.Meta.ID, path)
 	return nil
 }
 
-func latestStateIfAny(env paths.Env, scope string) (*wtstate.Capsule, error) {
-	cap, err := wtstate.LatestExplicit(env, scope)
-	if err == nil {
+func latestStateIfAny(env paths.Env, scope, taskID string) (*wtstate.Capsule, error) {
+	states, err := wtstate.List(env, wtstate.ListOptions{Scope: scope, Directory: wtstate.DirActive})
+	if err != nil {
+		return nil, err
+	}
+	taskID = strings.TrimSpace(taskID)
+	byTask := map[string][]wtstate.Capsule{}
+	for _, cap := range states {
+		tool := strings.TrimSpace(cap.State.SourceTool)
+		if tool != "" && tool != "worktrail" {
+			continue
+		}
+		candidateTaskID := wtstate.TaskID(cap)
+		if candidateTaskID == "" || (taskID != "" && candidateTaskID != taskID) {
+			continue
+		}
+		byTask[candidateTaskID] = append(byTask[candidateTaskID], cap)
+	}
+	if taskID != "" {
+		if candidates := byTask[taskID]; len(candidates) > 0 {
+			cap := candidates[0]
+			return &cap, nil
+		}
+		return nil, nil
+	}
+	if len(byTask) == 0 {
+		return nil, nil
+	}
+	if len(byTask) > 1 {
+		var ids []string
+		for id := range byTask {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		return nil, fmt.Errorf("multiple active tasks are available (%s); choose --task-id or --new-task", strings.Join(ids, ", "))
+	}
+	for _, candidates := range byTask {
+		cap := candidates[0]
 		return &cap, nil
 	}
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	return nil, err
+	return nil, nil
 }
 
-func latestHandoffIfAny(env paths.Env, scope string) (*handoff.Record, error) {
-	rec, err := handoff.Latest(env, scope)
-	if err == nil {
-		return &rec, nil
+func runHandoffList(env paths.Env, ioctx IO, args []string) error {
+	parsed, err := parseHandoffArgs(args)
+	if err != nil {
+		return err
 	}
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+	if err := validateHandoffFlags("list", parsed); err != nil {
+		return err
 	}
-	return nil, err
+	result, err := handoff.ListWithDiagnostics(env, handoff.ListOptions{
+		Scope:      parsed.first("scope", "project"),
+		Visibility: parsed.first("visibility", ""),
+		TaskID:     parsed.first("task-id", ""),
+	})
+	if err != nil {
+		return err
+	}
+	if parsed.first("format", "text") == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(result)
+	}
+	for _, record := range result.Records {
+		fmt.Fprintf(ioctx.Out, "%s\t%s\t%s\t%s\t%s\n", record.Meta.ID, record.Meta.Visibility, record.Meta.LifecycleStatus, record.Meta.TaskID, record.Meta.Summary)
+	}
+	for _, diagnostic := range result.Diagnostics {
+		fmt.Fprintf(ioctx.Err, "diagnostic\t%s\t%s\t%s\n", diagnostic.Code, diagnostic.Path, diagnostic.Message)
+	}
+	return nil
 }
 
-func taskIDForHandoff(sourceState *wtstate.Capsule, previous *handoff.Record, title string) string {
-	if sourceState != nil {
-		if taskID := wtstate.TaskID(*sourceState); taskID != "" {
-			return taskID
+func runHandoffShow(env paths.Env, ioctx IO, args []string) error {
+	parsed, err := parseHandoffArgs(args)
+	if err != nil {
+		return err
+	}
+	if err := validateHandoffFlags("show", parsed); err != nil {
+		return err
+	}
+	id := firstArg(parsed.Positional, parsed.first("id", ""))
+	record, err := handoff.Show(env, handoff.ShowRequest{
+		Scope:      parsed.first("scope", "project"),
+		ID:         id,
+		Visibility: parsed.first("visibility", ""),
+	})
+	if err != nil {
+		return err
+	}
+	if parsed.first("format", "markdown") == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(record)
+	}
+	fmt.Fprint(ioctx.Out, record.Body)
+	return nil
+}
+
+func runHandoffClose(env paths.Env, ioctx IO, args []string) error {
+	parsed, err := parseHandoffArgs(args)
+	if err != nil {
+		return err
+	}
+	if err := validateHandoffFlags("close", parsed); err != nil {
+		return err
+	}
+	record, err := handoff.Close(env, handoff.CloseRequest{
+		Scope: parsed.first("scope", "project"),
+		ID:    firstArg(parsed.Positional, parsed.first("id", "")),
+		Actor: "cli:handoff-close",
+	})
+	if err != nil {
+		return err
+	}
+	return printHandoffRecord(ioctx, record, parsed.first("format", "text"))
+}
+
+func runHandoffPublish(ctx context.Context, env paths.Env, ioctx IO, args []string) error {
+	parsed, err := parseHandoffArgs(args)
+	if err != nil {
+		return err
+	}
+	if err := validateHandoffFlags("publish", parsed); err != nil {
+		return err
+	}
+	record, err := handoff.Publish(ctx, env, handoff.PublishRequest{
+		Scope:      parsed.first("scope", "project"),
+		ID:         firstArg(parsed.Positional, parsed.first("id", "")),
+		AllowDirty: parsed.boolean("allow-dirty"),
+		Confirm:    parsed.boolean("confirm"),
+		Supersedes: splitCSV(strings.Join(parsed.values("supersedes"), ",")),
+		Actor:      "cli:handoff-publish",
+	})
+	if err != nil {
+		return err
+	}
+	return printHandoffRecord(ioctx, record, parsed.first("format", "text"))
+}
+
+func runHandoffDoctor(env paths.Env, ioctx IO, args []string) error {
+	parsed, err := parseHandoffArgs(args)
+	if err != nil {
+		return err
+	}
+	if err := validateHandoffFlags("doctor", parsed); err != nil {
+		return err
+	}
+	report, err := handoff.Doctor(env, handoff.DoctorRequest{Scope: parsed.first("scope", "project")})
+	if err != nil {
+		return err
+	}
+	if parsed.first("format", "text") == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(report)
+	}
+	for _, diagnostic := range report.Diagnostics {
+		fmt.Fprintf(ioctx.Out, "%s\t%s\t%s\n", diagnostic.Code, diagnostic.Path, diagnostic.Message)
+	}
+	return nil
+}
+
+func runHandoffRepair(env paths.Env, ioctx IO, args []string) error {
+	parsed, err := parseHandoffArgs(args)
+	if err != nil {
+		return err
+	}
+	if err := validateHandoffFlags("repair", parsed); err != nil {
+		return err
+	}
+	report, err := handoff.Repair(env, handoff.RepairRequest{
+		Scope:   parsed.first("scope", "project"),
+		Apply:   parsed.boolean("apply"),
+		Confirm: parsed.boolean("confirm"),
+		Actor:   "cli:handoff-repair",
+	})
+	if err != nil {
+		return err
+	}
+	if parsed.first("format", "text") == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(report)
+	}
+	fmt.Fprintf(ioctx.Out, "applied\t%t\n", report.Applied)
+	for _, action := range report.Actions {
+		fmt.Fprintf(ioctx.Out, "action\t%s\n", action)
+	}
+	for _, diagnostic := range report.Diagnostics {
+		fmt.Fprintf(ioctx.Out, "diagnostic\t%s\t%s\t%s\n", diagnostic.Code, diagnostic.Path, diagnostic.Message)
+	}
+	return nil
+}
+
+func parseHandoffArgs(args []string) (parsedHandoffArgs, error) {
+	result := parsedHandoffArgs{Flags: map[string][]string{}}
+	boolean := map[string]bool{
+		"stdin": true, "complete": true, "handoff-only": true, "new-task": true,
+		"allow-dirty": true, "confirm": true, "apply": true,
+	}
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if !strings.HasPrefix(arg, "--") {
+			result.Positional = append(result.Positional, arg)
+			continue
+		}
+		keyValue := strings.TrimPrefix(arg, "--")
+		if keyValue == "" {
+			return result, errors.New("invalid empty flag")
+		}
+		if strings.Contains(keyValue, "=") {
+			parts := strings.SplitN(keyValue, "=", 2)
+			if !handoffKnownFlags[parts[0]] {
+				return result, fmt.Errorf("unknown handoff flag --%s", parts[0])
+			}
+			if len(result.Flags[parts[0]]) > 0 && !handoffRepeatableFlags[parts[0]] {
+				return result, fmt.Errorf("--%s may not be repeated", parts[0])
+			}
+			result.Flags[parts[0]] = append(result.Flags[parts[0]], parts[1])
+			continue
+		}
+		if !handoffKnownFlags[keyValue] {
+			return result, fmt.Errorf("unknown handoff flag --%s", keyValue)
+		}
+		if len(result.Flags[keyValue]) > 0 && !handoffRepeatableFlags[keyValue] {
+			return result, fmt.Errorf("--%s may not be repeated", keyValue)
+		}
+		if boolean[keyValue] {
+			result.Flags[keyValue] = append(result.Flags[keyValue], "true")
+			continue
+		}
+		if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+			return result, fmt.Errorf("--%s requires a value", keyValue)
+		}
+		index++
+		result.Flags[keyValue] = append(result.Flags[keyValue], args[index])
+	}
+	return result, nil
+}
+
+var handoffKnownFlags = map[string]bool{
+	"stdin": true, "complete": true, "handoff-only": true, "new-task": true,
+	"allow-dirty": true, "confirm": true, "apply": true,
+	"scope": true, "format": true, "title": true, "project-id": true, "task-id": true,
+	"next-step": true, "question": true, "risk": true, "tags": true, "body": true,
+	"source-tool": true, "validation-status": true, "validation-command": true,
+	"validation-note": true, "validation-exit-code": true, "visibility": true,
+	"id": true, "supersedes": true,
+	// State close --to handoff reuses this parser before dispatching the
+	// handoff-specific subset.
+	"to": true, "reason": true, "session": true, "type": true, "active": true,
+	"directory": true,
+}
+
+var handoffRepeatableFlags = map[string]bool{
+	"next-step": true,
+	"question":  true,
+	"risk":      true,
+	"tags":      true,
+}
+
+func validateHandoffStdinArgs(command string, parsed parsedHandoffArgs, controlFlags ...string) error {
+	if !parsed.boolean("stdin") {
+		return nil
+	}
+	if len(parsed.Positional) != 0 {
+		return fmt.Errorf("%s --stdin cannot be combined with a positional summary", command)
+	}
+	allowed := map[string]bool{"stdin": true}
+	for _, flag := range controlFlags {
+		allowed[flag] = true
+	}
+	for flag := range parsed.Flags {
+		if !allowed[flag] {
+			return fmt.Errorf("%s --stdin cannot be combined with payload flag --%s", command, flag)
 		}
 	}
-	if previous != nil && strings.TrimSpace(previous.Meta.TaskID) != "" {
-		return previous.Meta.TaskID
-	}
-	return "task-" + util.Slug(title)
+	return nil
 }
 
-func sourceStateID(sourceState *wtstate.Capsule) string {
-	if sourceState == nil {
-		return ""
+func validateHandoffFlags(command string, parsed parsedHandoffArgs) error {
+	allowed := map[string]map[string]bool{
+		"create": {
+			"stdin": true, "complete": true, "handoff-only": true, "new-task": true,
+			"scope": true, "format": true, "title": true, "project-id": true, "task-id": true,
+			"next-step": true, "question": true, "risk": true, "tags": true, "body": true,
+			"source-tool": true, "validation-status": true, "validation-command": true,
+			"validation-note": true, "validation-exit-code": true,
+		},
+		"list":    {"scope": true, "visibility": true, "task-id": true, "format": true},
+		"show":    {"scope": true, "visibility": true, "id": true, "format": true},
+		"close":   {"scope": true, "id": true, "format": true},
+		"publish": {"scope": true, "id": true, "format": true, "allow-dirty": true, "confirm": true, "supersedes": true},
+		"doctor":  {"scope": true, "format": true},
+		"repair":  {"scope": true, "format": true, "apply": true, "confirm": true},
 	}
-	return sourceState.State.ID
-}
-
-func previousHandoffID(previous *handoff.Record) string {
-	if previous == nil {
-		return ""
+	commandAllowed, ok := allowed[command]
+	if !ok {
+		return fmt.Errorf("unknown handoff subcommand %q", command)
 	}
-	return previous.Meta.ID
-}
-
-func renderHandoffRecordBody(title, summary string, sourceState *wtstate.Capsule, sourceStatePath string, previous *handoff.Record) string {
-	var b strings.Builder
-	b.WriteString("# Handoff: ")
-	b.WriteString(title)
-	b.WriteString("\n\n## Summary\n\n")
-	b.WriteString(strings.TrimSpace(summary))
-	b.WriteString("\n\n")
-	if sourceState != nil {
-		path := sourceStatePath
-		if strings.TrimSpace(path) == "" {
-			path = sourceState.Path
+	for flag := range parsed.Flags {
+		if !commandAllowed[flag] {
+			return fmt.Errorf("--%s is not valid for handoff %s", flag, command)
 		}
-		b.WriteString("## Source State\n\n")
-		fmt.Fprintf(&b, "- State ID: %s\n- Task ID: %s\n- Path: `%s`\n\n", sourceState.State.ID, wtstate.TaskID(*sourceState), filepathToSlash(path))
-		b.WriteString("## State Snapshot\n\n")
-		b.WriteString(strings.TrimSpace(sourceState.Body))
-		b.WriteString("\n\n")
 	}
-	if previous != nil {
-		b.WriteString("## Previous Handoff\n\n")
-		fmt.Fprintf(&b, "- Handoff ID: %s\n- Path: `%s`\n\n", previous.Meta.ID, filepathToSlash(previous.Path))
+	switch command {
+	case "list", "doctor", "repair":
+		if len(parsed.Positional) != 0 {
+			return fmt.Errorf("handoff %s does not accept positional arguments", command)
+		}
+	case "show", "close", "publish":
+		if len(parsed.Positional) > 1 {
+			return fmt.Errorf("handoff %s accepts exactly one handoff id", command)
+		}
+		if len(parsed.Positional) == 1 && parsed.first("id", "") != "" && parsed.Positional[0] != parsed.first("id", "") {
+			return fmt.Errorf("positional handoff id and --id must match")
+		}
 	}
-	b.WriteString("## Next Step\n\n")
-	if sourceState != nil {
-		b.WriteString("Read the linked state and continue from the latest validated point.\n")
-	} else {
-		b.WriteString("Read the linked knowledge and update the active state before continuing.\n")
-	}
-	return b.String()
+	return nil
 }
 
-func projectedArchivedStatePath(env paths.Env, scope, id string) string {
-	root, err := env.ScopeRoot(scope)
-	if err != nil || strings.TrimSpace(id) == "" {
-		return ""
+func (p parsedHandoffArgs) values(key string) []string {
+	return append([]string(nil), p.Flags[key]...)
+}
+
+func (p parsedHandoffArgs) first(key, fallback string) string {
+	values := p.Flags[key]
+	if len(values) == 0 {
+		return fallback
 	}
-	return filepath.Join(root, "state", wtstate.DirArchived, id+".md")
+	return values[len(values)-1]
+}
+
+func (p parsedHandoffArgs) boolean(key string) bool {
+	value := p.first(key, "")
+	parsed, _ := strconv.ParseBool(value)
+	return parsed
+}
+
+func nextStepsFromFlags(values []string) []model.NextStep {
+	steps := make([]model.NextStep, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			steps = append(steps, model.NextStep{Action: value})
+		}
+	}
+	return steps
+}
+
+func validationFromFlags(parsed parsedHandoffArgs) ([]model.ValidationEvidence, error) {
+	status := parsed.first("validation-status", "")
+	command := parsed.first("validation-command", "")
+	summary := parsed.first("validation-note", "")
+	exitCodeText := parsed.first("validation-exit-code", "")
+	if status == "" && command == "" && summary == "" && exitCodeText == "" {
+		return nil, nil
+	}
+	if status == "" {
+		status = model.ValidationStatusUnknown
+	}
+	var exitCode *int
+	if exitCodeText != "" {
+		value, err := strconv.Atoi(exitCodeText)
+		if err != nil {
+			return nil, fmt.Errorf("--validation-exit-code: %w", err)
+		}
+		exitCode = &value
+	}
+	return []model.ValidationEvidence{{Command: command, Status: status, ExitCode: exitCode, Summary: summary}}, nil
+}
+
+func withDefaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
 }
 
 func filepathToSlash(path string) string {
