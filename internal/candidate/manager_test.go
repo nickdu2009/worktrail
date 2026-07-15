@@ -704,10 +704,76 @@ func TestDiscardUpdatesStatusAndPreventsApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Meta.Status != StatusDiscarded {
+	if rec.Meta.Status != StatusArchived {
 		t.Fatalf("status = %q", rec.Meta.Status)
 	}
 	if _, err := m.Promote("project", "discard-me"); err == nil {
 		t.Fatal("Promote succeeded after discard")
+	}
+}
+
+func TestLegacyDiscardedStatusRemainsTerminal(t *testing.T) {
+	m := testManager(t)
+	rec, err := m.Create(CreateRequest{
+		ID:         "legacy-discarded",
+		Scope:      "project",
+		TargetPath: "project.md",
+		Title:      "Legacy Discarded",
+		Body:       "content\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Meta.Status = StatusDiscarded
+	if err := writeRecord(rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Promote("project", rec.Meta.ID); err == nil || !strings.Contains(err.Error(), "already discarded") {
+		t.Fatalf("Promote legacy discarded error = %v", err)
+	}
+	if _, err := m.Discard("project", rec.Meta.ID); err == nil || !strings.Contains(err.Error(), "already discarded") {
+		t.Fatalf("Discard legacy discarded error = %v", err)
+	}
+}
+
+func TestCreateCanonicalizesADRAlias(t *testing.T) {
+	m := testManager(t)
+	rec, err := m.Create(CreateRequest{
+		ID:            "legacy-adr",
+		Scope:         "project",
+		CandidateType: "adr",
+		TargetPath:    "decisions/ADR-0001-choice.md",
+		Title:         "Choice",
+		Summary:       "Decision candidate.",
+		Body:          "# ADR-0001: Choice\n\n## Context\n\nContext.\n\n## Decision\n\nChoice.\n\n## Consequences\n\nConsequence.\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Meta.CandidateType != "decision" {
+		t.Fatalf("candidate type = %q, want decision", rec.Meta.CandidateType)
+	}
+	shown, err := m.Show("project", rec.Meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shown.Meta.CandidateType != "decision" {
+		t.Fatalf("stored candidate type = %q, want decision", shown.Meta.CandidateType)
+	}
+}
+
+func TestCreateADRAliasCannotBypassSemanticSafety(t *testing.T) {
+	m := testManager(t)
+	_, err := m.Create(CreateRequest{
+		ID:            "unsafe-legacy-adr",
+		Scope:         "project",
+		CandidateType: "adr",
+		TargetPath:    "decisions/ADR-0002-unsafe.md",
+		Title:         "Unsafe ADR",
+		Summary:       "Decision candidate.",
+		Body:          "# ADR-0002: Unsafe\n\n- user: paste the transcript\n- assistant: pasted",
+	})
+	if err == nil || !strings.Contains(err.Error(), "body contains raw transcript-style conversation") {
+		t.Fatalf("Create unsafe ADR alias error = %v", err)
 	}
 }

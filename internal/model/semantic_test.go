@@ -11,6 +11,8 @@ func TestIsSemanticCandidateType(t *testing.T) {
 		{"index", true},
 		{"architecture", true},
 		{"decision", true},
+		{"adr", true},
+		{" adr ", true},
 		{"glossary", true},
 		{"integration", true},
 		{"lesson", true},
@@ -45,6 +47,7 @@ func TestSemanticTargetPathMatches(t *testing.T) {
 		{"architecture", "architecture/foo.md", true},
 		{"architecture", "decisions/foo.md", false},
 		{"decision", "decisions/foo.md", true},
+		{"adr", "decisions/foo.md", true},
 		{"prompt", "prompts/x.md", true},
 		{"prompt", "prompt/x.md", false},
 		{"unknown", "anything.md", false},
@@ -53,5 +56,14 @@ func TestSemanticTargetPathMatches(t *testing.T) {
 		if got := SemanticTargetPathMatches(c.typ, c.target); got != c.want {
 			t.Errorf("SemanticTargetPathMatches(%q, %q) = %v, want %v", c.typ, c.target, got, c.want)
 		}
+	}
+}
+
+func TestCanonicalSemanticCandidateType(t *testing.T) {
+	if got := CanonicalSemanticCandidateType(" adr "); got != "decision" {
+		t.Fatalf("CanonicalSemanticCandidateType() = %q, want decision", got)
+	}
+	if got := CanonicalSemanticCandidateType("rule"); got != "rule" {
+		t.Fatalf("CanonicalSemanticCandidateType() = %q, want rule", got)
 	}
 }

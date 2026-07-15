@@ -251,6 +251,74 @@
     "requires_confirmation": false
   },
   {
+    "id": "codex-draft-requirement-worktrail-only",
+    "tool": "codex",
+    "skill": "worktrail-draft",
+    "prompt": "Create a concise Chinese requirement for a browser timer and persist it only as project Worktrail requirement knowledge. Do not create docs, plans, or another standalone file. Create a pending candidate with topic browser-timer and then show the read-only review plan. Do not promote it.",
+    "expected_behavior": "must send a frontmatter-bearing requirement directly to a pending candidate through stdin without creating a standalone copy",
+    "expected_commands": ["worktrail draft create", "worktrail review plan --format json"],
+    "expected_artifacts": ["candidate_type=requirement"],
+    "forbidden_patterns": ["worktrail promote", "worktrail merge", "worktrail discard"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-draft-workflow-worktrail-only",
+    "tool": "codex",
+    "skill": "worktrail-draft",
+    "prompt": "Persist this content only as project Worktrail workflow knowledge with topic focused-testing and no standalone file: # Focused Testing\\n\\nRun the narrowest meaningful checks before the full suite. Create a pending candidate, inspect the review plan, and stop before promotion.",
+    "expected_behavior": "must create a frontmatter-bearing pending workflow candidate directly from in-context content and stop at review",
+    "expected_commands": ["worktrail draft create", "worktrail review plan --format json"],
+    "expected_artifacts": ["candidate_type=workflow"],
+    "forbidden_patterns": ["worktrail promote", "worktrail merge", "worktrail discard"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-draft-requirement-no-persist",
+    "tool": "codex",
+    "skill": "worktrail-draft",
+    "prompt": "Draft a short requirement for a browser timer in the reply only. Do not persist it, create a candidate, or inspect local Worktrail state.",
+    "expected_behavior": "must not create or inspect a Worktrail candidate",
+    "forbidden_patterns": ["worktrail draft create", "worktrail note add", "worktrail review"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-adr-persist-reviewed",
+    "tool": "codex",
+    "skill": "worktrail-adr",
+    "prompt": "This ADR passed an adr-rfc content review with review_result clean. Persist it to Worktrail as a pending candidate, then show the read-only review plan. ADR: # ADR-0001: Use SQLite\\n\\n- Status: Proposed\\n- Date: 2026-07-14\\n\\n## Context\\n\\nWe need local storage.\\n\\n## Decision\\n\\nUse SQLite.\\n\\n## Consequences\\n\\nLocal deployment stays simple.",
+    "expected_behavior": "must create a pending decision candidate and then inspect the review plan",
+    "expected_commands": ["worktrail adr create", "worktrail review plan --format json"],
+    "expected_artifacts": ["candidate_type=decision"],
+    "forbidden_patterns": ["worktrail promote", "worktrail merge", "worktrail discard"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-adr-persist-manually-reviewed",
+    "tool": "codex",
+    "skill": "worktrail-adr",
+    "prompt": "No external design-review skill is installed. I manually reviewed this complete ADR and explicitly confirm that its content review is complete and it is ready to persist. Save it to Worktrail as pending only: # ADR-0002: Use Files\\n\\n- Status: Proposed\\n- Date: 2026-07-14\\n\\n## Context\\n\\nWe need portable storage.\\n\\n## Decision\\n\\nUse files.\\n\\n## Consequences\\n\\nConcurrent writes need coordination.",
+    "expected_behavior": "must accept the neutral readiness attestation and create a pending decision candidate without requiring another skill",
+    "expected_commands": ["worktrail adr create", "worktrail review plan --format json"],
+    "expected_artifacts": ["candidate_type=decision"],
+    "forbidden_patterns": ["design-review-loop", "worktrail promote", "worktrail merge", "worktrail discard"],
+    "negative_case": false,
+    "requires_confirmation": false
+  },
+  {
+    "id": "codex-adr-draft-only",
+    "tool": "codex",
+    "skill": "worktrail-adr",
+    "prompt": "Draft an example ADR for choosing a cache, but do not save or persist anything to Worktrail.",
+    "expected_behavior": "must not create or apply any Worktrail candidate",
+    "forbidden_patterns": ["worktrail adr create", "worktrail note add", "worktrail promote", "worktrail merge", "worktrail discard"],
+    "negative_case": true,
+    "requires_confirmation": false
+  },
+  {
     "id": "codex-review-plan-json",
     "tool": "codex",
     "skill": "worktrail-review",

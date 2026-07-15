@@ -16,6 +16,8 @@ func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 		"worktrail-handoff":     {"worktrail state close --to handoff", "continue later in another chat", "switch agents", "do not only output a copyable text handoff"},
 		"worktrail-import":      {"worktrail import codex --since 14d", "worktrail import cursor --limit 20", "worktrail sync", "worktrail migrate kdd"},
 		"worktrail-distill":     {"worktrail distill --pending --summary", "validate/apply workflow", "Do not promote, merge, discard, archive, restore, or retire"},
+		"worktrail-draft":       {"worktrail draft create", "single-quoted heredoc", "frontmatter-bearing", "do not create `docs/`, `.plans/`"},
+		"worktrail-adr":         {"worktrail adr create", "pending decision candidate", "do not require agent-skills", "`.worktrail/decisions/`"},
 		"worktrail-review":      {"worktrail review plan --format json", "worktrail review apply-candidates", "promoted, merged, discarded, restored, or retired", "evidence or operational drafts"},
 		"worktrail-maintain":    {"worktrail context \"maintenance\"", "worktrail evidence plan --format json", "worktrail note add", "state-changing maintenance action"},
 	}
@@ -58,7 +60,7 @@ func TestRenderRootTemplateReplacesRoutingPlaceholder(t *testing.T) {
 			t.Fatalf("placeholder %q was not replaced:\n%s", placeholder, rendered)
 		}
 	}
-	for _, want := range []string{"# Worktrail", "## Skill Trigger Routing", "Project activation gate", "worktrail-handoff", "worktrail state close --to handoff", "continue later in another chat", "switch agents", "installed `worktrail-context` skill", "skill `worktrail-search`"} {
+	for _, want := range []string{"# Worktrail", "## Skill Trigger Routing", "Project activation gate", "worktrail-handoff", "worktrail state close --to handoff", "continue later in another chat", "switch agents", "installed `worktrail-context` skill", "skill `worktrail-search`", "artifact only as Worktrail knowledge", "do not create `docs/`, `.plans/`"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered root template missing %q:\n%s", want, rendered)
 		}
@@ -97,6 +99,8 @@ func TestPlaceholderIsOnlyUsedByRootRuleTemplates(t *testing.T) {
 		"skills/worktrail-handoff/SKILL.md",
 		"skills/worktrail-import/SKILL.md",
 		"skills/worktrail-distill/SKILL.md",
+		"skills/worktrail-draft/SKILL.md",
+		"skills/worktrail-adr/SKILL.md",
 		"skills/worktrail-review/SKILL.md",
 		"skills/worktrail-maintain/SKILL.md",
 	}
@@ -122,6 +126,8 @@ func TestSkillTemplatesExposeTriggerIntent(t *testing.T) {
 		"worktrail-handoff":     {"description:", "Use this skill", "continue later in another chat", "switch agents", "worktrail state close --to handoff", "do not only output", ".worktrail/"},
 		"worktrail-import":      {"description:", "Use this skill when", "import", "sync", "migrate", ".worktrail/"},
 		"worktrail-distill":     {"description:", "Use this skill when", "transcript_notes", "migration_source", "semantic Worktrail candidates", ".worktrail/"},
+		"worktrail-draft":       {"description:", "Use this skill", "non-ADR semantic artifacts", "standalone-file policy", "single-quoted heredoc", "frontmatter", ".worktrail/"},
+		"worktrail-adr":         {"description:", "Use this skill", "persist", "pending", "review", "omitted/empty lifecycle as current", ".worktrail/"},
 		"worktrail-review":      {"description:", "Use this skill when", "review candidates", "promoted", "retired", ".worktrail/"},
 		"worktrail-maintain":    {"description:", "Use this skill when", "maintain", "clean up", "evidence lifecycle", ".worktrail/"},
 	}
@@ -152,6 +158,8 @@ func TestSkillTemplateDescriptionsUseCanonicalTwoSentenceStyle(t *testing.T) {
 		"worktrail-handoff",
 		"worktrail-import",
 		"worktrail-distill",
+		"worktrail-draft",
+		"worktrail-adr",
 		"worktrail-review",
 		"worktrail-maintain",
 	}

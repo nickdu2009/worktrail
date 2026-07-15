@@ -150,6 +150,12 @@ Phase 1 should cover all installed Worktrail skills:
   legacy KDD docs.
 - `worktrail-distill`: distill pending transcript evidence, validate proposal,
   apply after confirmation.
+- `worktrail-draft`: persist non-ADR semantic artifacts directly as pending
+  candidates after explicit user intent, using stdin without an unrequested
+  standalone copy when Worktrail is the only destination.
+- `worktrail-adr`: persist a structurally valid, reviewed ADR as a pending
+  `decision` candidate after explicit user intent, without requiring an external
+  review skill or applying the candidate.
 - `worktrail-review`: review candidates, decide promote/merge/discard/retire.
 - `worktrail-maintain`: clean up Worktrail knowledge, maintenance summary,
   evidence lifecycle review.

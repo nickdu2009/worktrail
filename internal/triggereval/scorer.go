@@ -416,6 +416,8 @@ func skillCommandPrefix(skill string) string {
 		return "worktrail import"
 	case SkillDistill:
 		return "worktrail distill"
+	case SkillDraft:
+		return "worktrail draft"
 	case SkillReview:
 		return "worktrail review"
 	case SkillMaintain:
@@ -470,6 +472,8 @@ func skillKeywords(skill string) []string {
 		return []string{"import", "transcript", "sync", "migrate"}
 	case SkillDistill:
 		return []string{"distill", "proposal", "evidence"}
+	case SkillDraft:
+		return []string{"draft", "candidate", "requirement", "architecture", "workflow"}
 	case SkillReview:
 		return []string{"review", "candidate"}
 	case SkillMaintain:

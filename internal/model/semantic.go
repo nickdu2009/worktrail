@@ -15,7 +15,16 @@ var semanticTargetPrefixes = map[string]string{
 	"workflow":     "workflows/",
 }
 
+func CanonicalSemanticCandidateType(typ string) string {
+	typ = strings.TrimSpace(typ)
+	if typ == "adr" {
+		return "decision"
+	}
+	return typ
+}
+
 func IsSemanticCandidateType(typ string) bool {
+	typ = CanonicalSemanticCandidateType(typ)
 	if typ == "project" || typ == "index" {
 		return true
 	}
@@ -24,6 +33,7 @@ func IsSemanticCandidateType(typ string) bool {
 }
 
 func SemanticTargetPathMatches(typ, targetPath string) bool {
+	typ = CanonicalSemanticCandidateType(typ)
 	targetPath = strings.TrimSpace(targetPath)
 	switch typ {
 	case "project":

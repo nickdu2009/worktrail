@@ -181,6 +181,45 @@ var skillTriggers = []SkillTrigger{
 		RootGuardrail: "Do not promote, merge, discard, archive, restore, or retire from the distill lane.",
 	},
 	{
+		Skill: "worktrail-draft",
+		UseWhen: []string{
+			"the user explicitly asks to save, land, or persist a non-ADR semantic artifact such as requirements, architecture, an implementation plan, a rule, or a workflow in Worktrail",
+			"the user asks for an artifact to exist only as formal Worktrail knowledge without a standalone docs or plan copy",
+		},
+		RequiredActions: []string{
+			"Verify `.worktrail/`, explicit persistence intent, scope, semantic type, matching target path, stable id, and topic.",
+			"When Worktrail is the only requested destination, send the complete frontmatter-bearing artifact directly to `worktrail draft create` through a single-quoted heredoc instead of creating a standalone file.",
+			"Run `worktrail review plan --format json` after candidate creation and hand off to `worktrail-review`.",
+		},
+		Never: []string{
+			"Do not create a candidate for explain-only, draft-only, review-only, or explicit no-write requests.",
+			"Do not create `docs/`, `.plans/`, or another standalone copy unless the user explicitly requests one; preserve any existing user file.",
+			"Do not use this skill for ADRs, directly edit formal `.worktrail` knowledge, or automatically promote, merge, discard, restore, or retire.",
+		},
+		RootIntent:    "the user explicitly asks to persist a non-ADR semantic artifact as Worktrail knowledge",
+		RootCommand:   "Use `worktrail draft create` with matching type and target; when Worktrail is the only destination, pass a frontmatter-bearing artifact through a single-quoted heredoc, then run `worktrail review plan --format json`.",
+		RootGuardrail: "Create only a pending semantic candidate; do not create `docs/`, `.plans/`, or another standalone copy unless explicitly requested, edit formal `.worktrail` knowledge, or apply review actions automatically.",
+	},
+	{
+		Skill: "worktrail-adr",
+		UseWhen: []string{
+			"the user explicitly asks to save, land, or persist a reviewed Architecture Decision Record in Worktrail",
+		},
+		RequiredActions: []string{
+			"Verify `.worktrail/`, explicit persistence intent, valid ADR structure, and either compatible content-review evidence or explicit user attestation that content review is complete.",
+			"Run `worktrail adr create <title> --from-file <path> --format json` for a file or use explicit `--stdin` with a quoted heredoc for in-context Markdown.",
+			"Run `worktrail review plan --format json` after candidate creation and hand off to `worktrail-review`.",
+		},
+		Never: []string{
+			"Do not require `design-review-loop` or another external skill as a runtime dependency.",
+			"Do not create a candidate for explain-only, draft-only, review-only, or explicit no-write requests.",
+			"Do not directly edit `.worktrail/decisions/` or automatically promote, merge, discard, restore, or retire.",
+		},
+		RootIntent:    "the user explicitly asks to persist a reviewed ADR as Worktrail knowledge",
+		RootCommand:   "After the neutral review gate, run `worktrail adr create <title> --from-file <path> --format json` or explicit `--stdin`, then `worktrail review plan --format json`.",
+		RootGuardrail: "Create only a pending decision candidate; do not require agent-skills, edit `.worktrail/decisions/`, or apply review actions automatically.",
+	},
+	{
 		Skill: "worktrail-review",
 		UseWhen: []string{
 			"the user asks to review candidates, decide whether knowledge should be promoted, merged, discarded, restored, or retired, or inspect pending Worktrail knowledge",
@@ -259,9 +298,12 @@ func RenderRootShared() string {
 		"- Use the installed `worktrail-resume` skill, or `worktrail resume \"<task>\"`, at the start of a new session when you need to continue prior work from the latest state and handoff.",
 		"- Use the installed `worktrail-import` skill only for explicit transcript files that should become pending candidates.",
 		"- Use `worktrail note add ...` when the user asks to write, capture, or land a finding into Worktrail knowledge; this creates a pending candidate instead of editing formal `.worktrail` knowledge directly.",
+		"- Use the installed `worktrail-draft` skill when the user explicitly asks to persist a non-ADR semantic artifact such as requirements, architecture, an implementation plan, a rule, or a workflow.",
+		"- Use the installed `worktrail-adr` skill when the user explicitly asks to persist a reviewed ADR as a pending decision candidate.",
 		"- Use the installed `worktrail-review` skill, or `worktrail review`, to inspect candidates before any promote, merge, discard, restore, or retire action.",
 		"",
 		"Worktrail is the only project knowledge route. Use Worktrail context, note, review, and handoff flows for durable knowledge; do not read from or write to legacy KDD directories. Do not directly edit formal `.worktrail` knowledge files. Use `worktrail handoff` for durable handoff records under `.worktrail/handoffs/`.",
+		"When the user requests an artifact only as Worktrail knowledge, create a frontmatter-bearing pending candidate directly through stdin and do not create `docs/`, `.plans/`, or another standalone copy. Create or preserve a standalone file only when the user explicitly requests it or supplies an existing file.",
 		"",
 		"## Worktrail command picker",
 		"",
@@ -274,6 +316,8 @@ func RenderRootShared() string {
 		"| Browse the rendered Worktrail knowledge site for a doc, candidate, handoff, workflow, profile, rule, or lesson | `worktrail preview --scope <scope>` (skill `worktrail-doc-preview`) | `worktrail search`, target project's dev server, ad hoc Markdown viewers |",
 		"| Start substantial project work or load project memory for a new task | `worktrail context \"<task>\"` (skill `worktrail-context`) | `worktrail resume`, `worktrail search`, `worktrail preview` |",
 		"| Record current state, checkpoint, or update progress for the active session | `worktrail state start|update|checkpoint|inject` (skill `worktrail-state`) | `worktrail resume`, `worktrail handoff` (until ending the session) |",
+		"| Persist requirements, architecture, plans, rules, workflows, or other non-ADR semantic knowledge after explicit user request | `worktrail draft create ...` through stdin when Worktrail is the only destination, then `worktrail review plan --format json` (skill `worktrail-draft`) | unrequested `docs/` or `.plans/` copies, direct formal edits, automatic promote |",
+		"| Persist a reviewed ADR after explicit user request | `worktrail adr create <title> --from-file <path> --format json` or explicit `--stdin` (skill `worktrail-adr`) | direct `.worktrail/decisions/` edits, implicit persistence, automatic promote |",
 		"| Create a durable handoff because the user explicitly wants to hand off, switch agents, or continue later in a new chat | `worktrail state close --to handoff \"<summary>\"` (or `worktrail handoff \"<summary>\"` when no active explicit state exists) (skill `worktrail-handoff`) | `worktrail state checkpoint` alone, copy-pasted text summaries, automatic handoff at normal task boundaries |",
 		"",
 		"If two rows seem to fit, pick the more specific intent (search/resume win over context/preview/state when keyword lookup or session recovery is the primary goal).",

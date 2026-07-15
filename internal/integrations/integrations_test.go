@@ -51,6 +51,8 @@ var allWorktrailSkills = []string{
 	"worktrail-handoff",
 	"worktrail-import",
 	"worktrail-distill",
+	"worktrail-draft",
+	"worktrail-adr",
 	"worktrail-review",
 	"worktrail-maintain",
 }

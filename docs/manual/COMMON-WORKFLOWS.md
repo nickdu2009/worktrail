@@ -102,6 +102,52 @@ worktrail candidates diff <candidate-id>
 worktrail promote <candidate-id>
 ```
 
+如果 requirement、architecture、implementation plan、rule 或 workflow 只需要存在于 Worktrail，不要先创建 `docs/` 或 `.plans/`。使用 `worktrail-draft` 的带 frontmatter stdin 流程直接创建 pending candidate：
+
+```bash
+worktrail draft create \
+  --scope project \
+  --topic browser-timer \
+  --type requirement \
+  --target requirements/browser-timer.md \
+  --title "Browser Timer Requirements" \
+  --summary "Requirements for a browser timer." \
+  --format json <<'WORKTRAIL_DRAFT'
+---worktrail
+{
+  "schema": "worktrail.knowledge.v1",
+  "id": "browser-timer-requirements",
+  "scope": "project",
+  "type": "requirement",
+  "title": "Browser Timer Requirements",
+  "status": "active",
+  "lifecycle": "current",
+  "topic": "browser-timer"
+}
+---
+
+# Browser Timer Requirements
+
+The timer must support start, pause, resume, and reset.
+WORKTRAIL_DRAFT
+
+worktrail review plan --format json
+```
+
+如果用户明确要求普通文件，或已经提供现有文件，才使用 `--from-file` 并保留该文件。`worktrail-draft` 只创建 pending candidate，仍需在 review 后明确确认才能进入正式知识。
+
+已经完成内容评审的 ADR 使用专用入口：
+
+```bash
+worktrail adr create "Use SQLite" \
+  --from-file docs/adr/ADR-0001-use-sqlite.md \
+  --decision-status Accepted \
+  --format json
+worktrail review plan --format json
+```
+
+`adr create` 只创建 pending `decision` candidate。ADR 文档状态、candidate status 和 formal lifecycle 相互独立；只有 Accepted ADR 能通过 `--supersedes decisions/<old>.md` 建立替代关系。旧决策变为 historical/retired 仍需显式维护和确认。`worktrail-adr` 可以复用兼容的 ADR 内容评审结果，但不依赖任何外部 skill；没有兼容评审器时，需要完整结构和用户明确确认“内容已评审、可持久化”。
+
 ### 何时停止
 <div class="title-en">Stop When</div>
 

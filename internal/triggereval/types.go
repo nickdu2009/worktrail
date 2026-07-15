@@ -15,6 +15,8 @@ const (
 	SkillHandoff    = "worktrail-handoff"
 	SkillImport     = "worktrail-import"
 	SkillDistill    = "worktrail-distill"
+	SkillDraft      = "worktrail-draft"
+	SkillADR        = "worktrail-adr"
 	SkillReview     = "worktrail-review"
 	SkillMaintain   = "worktrail-maintain"
 )
@@ -139,6 +141,8 @@ func WorktrailSkills() []string {
 		SkillHandoff,
 		SkillImport,
 		SkillDistill,
+		SkillDraft,
+		SkillADR,
 		SkillReview,
 		SkillMaintain,
 	}

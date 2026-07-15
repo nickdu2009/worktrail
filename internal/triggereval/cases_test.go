@@ -11,8 +11,8 @@ func TestLoadCases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cases) != 30 {
-		t.Fatalf("len(cases) = %d, want 30", len(cases))
+	if len(cases) != 36 {
+		t.Fatalf("len(cases) = %d, want 36", len(cases))
 	}
 	seen := map[string]bool{}
 	for _, c := range cases {
@@ -24,6 +24,8 @@ func TestLoadCases(t *testing.T) {
 		"codex-resume-latest-session",
 		"codex-handoff-new-conversation",
 		"codex-distill-validate-proposal",
+		"codex-draft-requirement-worktrail-only",
+		"codex-adr-persist-reviewed",
 		"codex-maintain-evidence-plan",
 	} {
 		if !seen[id] {

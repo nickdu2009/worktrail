@@ -267,7 +267,7 @@ func TestReviewApplyPlanAppliesFreshActionsAndSkipsHumanReview(t *testing.T) {
 	}
 	assertCandidateStatus(t, manager, "apply-promote", candidate.StatusPromoted)
 	assertCandidateStatus(t, manager, "apply-merge", candidate.StatusMerged)
-	assertCandidateStatus(t, manager, "apply-discard", candidate.StatusDiscarded)
+	assertCandidateStatus(t, manager, "apply-discard", candidate.StatusArchived)
 	assertCandidateStatus(t, manager, "apply-human", candidate.StatusPending)
 	text := runApp(t, &out, &errb, "context", "Apply Promote")
 	if !strings.Contains(text, "rules/apply-promote.md") {
@@ -326,7 +326,7 @@ func TestReviewApplyPlanRejectsStaleSnapshot(t *testing.T) {
 	if !containsString(report.Items[0].ReasonCodes, "candidate_status_changed") || !containsString(report.Items[0].ReasonCodes, "candidate_metadata_hash_changed") {
 		t.Fatalf("stale reason codes unexpected: %+v", report.Items[0].ReasonCodes)
 	}
-	assertCandidateStatus(t, manager, "stale-promote", candidate.StatusDiscarded)
+	assertCandidateStatus(t, manager, "stale-promote", candidate.StatusArchived)
 	if _, err := os.Stat(filepath.Join(project, ".worktrail", "rules", "stale-promote.md")); !os.IsNotExist(err) {
 		t.Fatalf("stale apply-plan should not create target, err=%v", err)
 	}
@@ -593,7 +593,7 @@ func TestReviewApplyCandidatesAppliesBatchActionsAndRebuildsIndex(t *testing.T) 
 	if !strings.Contains(text, "index rebuilt\tproject") {
 		t.Fatalf("discard text output missing index rebuild:\n%s", text)
 	}
-	assertCandidateStatus(t, manager, "batch-discard", candidate.StatusDiscarded)
+	assertCandidateStatus(t, manager, "batch-discard", candidate.StatusArchived)
 }
 
 func TestReviewApplyCandidatesRejectsInvalidActionsBeforeMutation(t *testing.T) {

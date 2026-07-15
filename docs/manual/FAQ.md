@@ -31,6 +31,26 @@ Worktrail 把“捕获”和“应用”分开。`note add`、`import`、`distil
 
 `candidates create` 更通用，适合需要显式控制 candidate id、类型、operation、tags 或 stdin 内容的场景。
 
+## 只需要 Worktrail 正式知识时，还要先创建 `docs/` 文件吗？
+<div class="title-en">Do Worktrail-Only Artifacts Need a docs File?</div>
+
+不需要。显式要求 requirement、architecture、implementation plan、rule 或 workflow 只作为 Worktrail 知识存在时，`worktrail-draft` 会通过带 frontmatter 的 stdin 内容直接创建 pending semantic candidate，不创建 `docs/`、`.plans/` 或其他 standalone copy。
+
+只有用户明确要求普通文件，或已经提供现有文件时，才使用并保留 standalone artifact。candidate 仍需经过 review 和明确确认后才能 promote 或 merge。
+
+## ADR 应该用 `adr create` 还是 `note add --type decision`？
+<div class="title-en">adr create vs note add --type decision</div>
+
+已有标准 ADR Markdown 时优先用 `worktrail adr create`。它会校验 ADR ID、文档状态和必填章节，保留正文语义，并把新数据规范化为 pending `decision` candidate。普通决策笔记、不需要 ADR 结构时仍可使用 `note add --type decision`。
+
+ADR 有三个独立状态维度：
+
+- 文档状态：`Proposed`、`Accepted`、`Deprecated`、`Superseded`
+- candidate status：`pending`、`promoted`、`merged`、`archived`
+- formal lifecycle：`current`、`historical`、`retired`
+
+Promote 不会把 Proposed 自动改成 Accepted。只有 Accepted ADR 可以写入 `supersedes` 元数据；旧决策的退役仍需维护计划和明确确认。
+
 ## `review`、`review plan` 和 `apply-plan` 有什么区别？
 <div class="title-en">review vs review plan vs apply-plan</div>
 

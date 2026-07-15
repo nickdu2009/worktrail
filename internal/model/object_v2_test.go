@@ -37,6 +37,46 @@ func TestNormalizeObjectMetaLegacyCandidateSemantic(t *testing.T) {
 	}
 }
 
+func TestNormalizeObjectMetaLegacyADRAlias(t *testing.T) {
+	meta := map[string]any{
+		"schema":           SchemaCandidate,
+		"id":               "adr-1",
+		"scope":            "project",
+		"candidate_type":   "adr",
+		"target_path":      "decisions/ADR-0001-choice.md",
+		"title":            "Choice",
+		"operation":        "replace",
+		"status":           "pending",
+		"redaction_status": "clean",
+	}
+	obj, err := NormalizeObjectMeta("candidates/project/adr-1.md", meta)
+	if err != nil {
+		t.Fatalf("NormalizeObjectMeta() error = %v", err)
+	}
+	if obj.ProposedKnowledgeType != "decision" || obj.DraftKind != DraftKindSemantic {
+		t.Fatalf("unexpected normalized ADR alias: %+v", obj)
+	}
+}
+
+func TestNormalizeObjectMetaDecisionStatusUsesExplicitLifecycle(t *testing.T) {
+	meta := map[string]any{
+		"schema":    SchemaKnowledge,
+		"id":        "ADR-0001",
+		"scope":     "project",
+		"type":      "decision",
+		"title":     "Choice",
+		"status":    "accepted",
+		"lifecycle": "current",
+	}
+	obj, err := NormalizeObjectMeta("decisions/ADR-0001-choice.md", meta)
+	if err != nil {
+		t.Fatalf("NormalizeObjectMeta() error = %v", err)
+	}
+	if obj.KnowledgeType != "decision" || obj.LifecycleStatus != LifecycleCurrent {
+		t.Fatalf("unexpected normalized decision metadata: %+v", obj)
+	}
+}
+
 func TestNormalizeObjectMetaLegacyCandidateEvidence(t *testing.T) {
 	meta := map[string]any{
 		"schema":           SchemaCandidate,

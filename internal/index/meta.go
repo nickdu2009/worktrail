@@ -92,7 +92,7 @@ func entryTypeFromObject(meta model.ObjectMetaV2, rel string) string {
 	switch {
 	case meta.IsKnowledgeDoc():
 		if meta.KnowledgeType != "" {
-			return meta.KnowledgeType
+			return model.CanonicalSemanticCandidateType(meta.KnowledgeType)
 		}
 		return knowledgeTypeFallback(rel)
 	case meta.IsDraft(), meta.IsEvidence():
@@ -117,7 +117,7 @@ func entryCandidateTypeFromObject(meta model.ObjectMetaV2) string {
 		}
 	case meta.IsDraft():
 		if meta.ProposedKnowledgeType != "" {
-			return meta.ProposedKnowledgeType
+			return model.CanonicalSemanticCandidateType(meta.ProposedKnowledgeType)
 		}
 		return meta.DraftKind
 	default:
@@ -390,7 +390,7 @@ func buildEntry(root, path, rel, scope string) (Entry, bool, error) {
 		generatedID:   generatedID,
 	}
 	entry.SourceSessions = stringSliceMeta(meta, "source_sessions")
-	entry.CandidateType = stringMeta(meta, "candidate_type", "")
+	entry.CandidateType = model.CanonicalSemanticCandidateType(stringMeta(meta, "candidate_type", ""))
 	if norm, err := model.NormalizeObjectMeta(rel, meta); err == nil {
 		entry.ID = withFallback(entry.ID, norm.ID)
 		entry.Scope = withFallback(entry.Scope, norm.Scope)
@@ -416,6 +416,7 @@ func buildEntry(root, path, rel, scope string) (Entry, bool, error) {
 		if entry.CandidateType == "" {
 			entry.CandidateType = entryCandidateTypeFromObject(norm)
 		}
+		entry.CandidateType = model.CanonicalSemanticCandidateType(entry.CandidateType)
 		entry.Active = activeEntry(norm, rel, entry.Active)
 	}
 	if entry.Scope == "" {

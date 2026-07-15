@@ -32,6 +32,7 @@ type Knowledge struct {
 	Type           string    `json:"type"`
 	Title          string    `json:"title"`
 	Status         string    `json:"status"`
+	Lifecycle      string    `json:"lifecycle,omitempty"`
 	Stage          string    `json:"stage,omitempty"`
 	Topic          string    `json:"topic,omitempty"`
 	SourceOfTruth  bool      `json:"source_of_truth,omitempty"`

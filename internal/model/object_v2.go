@@ -245,7 +245,7 @@ func fromKnowledgeMetaV2(meta KnowledgeMetaV2) ObjectMetaV2 {
 	return ObjectMetaV2{
 		BaseMetaV2:      meta.BaseMetaV2,
 		LegacySchema:    meta.Schema,
-		KnowledgeType:   strings.TrimSpace(meta.KnowledgeType),
+		KnowledgeType:   CanonicalSemanticCandidateType(meta.KnowledgeType),
 		Topic:           strings.TrimSpace(meta.Topic),
 		Stage:           strings.TrimSpace(meta.Stage),
 		Durability:      withDefault(strings.TrimSpace(meta.Durability), DurabilityDurable),
@@ -262,7 +262,7 @@ func fromDraftMetaV2(meta DraftMetaV2) ObjectMetaV2 {
 		BaseMetaV2:            meta.BaseMetaV2,
 		LegacySchema:          meta.Schema,
 		DraftKind:             withDefault(strings.TrimSpace(meta.DraftKind), DraftKindSemantic),
-		ProposedKnowledgeType: strings.TrimSpace(meta.ProposedKnowledgeType),
+		ProposedKnowledgeType: CanonicalSemanticCandidateType(meta.ProposedKnowledgeType),
 		Topic:                 strings.TrimSpace(meta.Topic),
 		TargetPath:            strings.TrimSpace(meta.TargetPath),
 		Operation:             strings.TrimSpace(meta.Operation),
@@ -316,11 +316,11 @@ func normalizeLegacyKnowledge(meta Knowledge) ObjectMetaV2 {
 			UpdatedAt:  meta.UpdatedAt,
 		},
 		LegacySchema:    SchemaKnowledge,
-		KnowledgeType:   strings.TrimSpace(meta.Type),
+		KnowledgeType:   CanonicalSemanticCandidateType(meta.Type),
 		Topic:           strings.TrimSpace(meta.Topic),
 		Stage:           strings.TrimSpace(meta.Stage),
 		Durability:      DurabilityDurable,
-		LifecycleStatus: withDefault(strings.TrimSpace(meta.Status), LifecycleActive),
+		LifecycleStatus: withDefault(strings.TrimSpace(meta.Lifecycle), withDefault(strings.TrimSpace(meta.Status), LifecycleActive)),
 		SourceOfTruth:   meta.SourceOfTruth,
 		Supersedes:      cleanList(meta.Supersedes),
 		SupersededBy:    cleanList(meta.SupersededBy),
@@ -507,13 +507,11 @@ func normalizePathOnly(path string, raw map[string]any) (ObjectMetaV2, error) {
 }
 
 func normalizeKnowledgeTypeFromCandidate(candidateType, targetPath string) string {
-	candidateType = strings.TrimSpace(candidateType)
+	candidateType = CanonicalSemanticCandidateType(candidateType)
 	if candidateType == "" || candidateType == "knowledge" || candidateType == "manual" {
 		return knowledgeTypeFromPath(targetPath)
 	}
 	switch candidateType {
-	case "adr":
-		return "decision"
 	case "project":
 		return "project"
 	case "index":

@@ -99,7 +99,7 @@ func (m Manager) Create(req CreateRequest) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	candidateType := req.CandidateType
+	candidateType := model.CanonicalSemanticCandidateType(req.CandidateType)
 	if candidateType == "" {
 		candidateType = "knowledge"
 	}
@@ -391,7 +391,11 @@ func (m Manager) Discard(scope, id string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	rec.Meta.Status = StatusDiscarded
+	if isLifecycleEvidence(rec) {
+		rec.Meta.Status = StatusDiscarded
+	} else {
+		rec.Meta.Status = StatusArchived
+	}
 	rec.Meta.UpdatedAt = m.now()
 	if err := writeRecord(rec); err != nil {
 		return Record{}, err

@@ -107,6 +107,34 @@ func TestRebuildStatusSearch(t *testing.T) {
 	}
 }
 
+func TestRebuildCanonicalizesLegacyADRCandidateType(t *testing.T) {
+	root := t.TempDir()
+	mustWriteJSON(t, filepath.Join(root, "config.json"), map[string]any{"scope": "project"})
+	mustWriteDoc(t, filepath.Join(root, "candidates", "project", "legacy-adr.md"), map[string]any{
+		"schema":           "worktrail.candidate.v1",
+		"id":               "legacy-adr",
+		"scope":            "project",
+		"candidate_type":   "adr",
+		"target_path":      "decisions/ADR-0001-choice.md",
+		"title":            "Choice",
+		"operation":        "replace",
+		"status":           "pending",
+		"redaction_status": "clean",
+	}, "legacy ADR body")
+	rebuildAt := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	touchWorktrailDocs(t, root, rebuildAt)
+	if _, err := Rebuild(root, RebuildOptions{Now: rebuildAt}); err != nil {
+		t.Fatal(err)
+	}
+	results, err := Search(root, Query{Type: "candidate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Entry.CandidateType != "decision" {
+		t.Fatalf("unexpected candidate index: %+v", results)
+	}
+}
+
 func TestDiffHealthAndFilterFresh(t *testing.T) {
 	root := t.TempDir()
 	mustWriteJSON(t, filepath.Join(root, "config.json"), map[string]any{"scope": "project"})

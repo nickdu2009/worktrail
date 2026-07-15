@@ -584,7 +584,7 @@ func buildReviewPlanItem(env wtpaths.Env, scope string, records []candidate.Reco
 	warnings = append(warnings, sourceWarnings...)
 	item := reviewPlanItem{
 		CandidateID:        rec.Meta.ID,
-		CandidateType:      rec.Meta.CandidateType,
+		CandidateType:      model.CanonicalSemanticCandidateType(rec.Meta.CandidateType),
 		Status:             rec.Meta.Status,
 		Operation:          rec.Meta.Operation,
 		TargetPath:         rec.Meta.TargetPath,

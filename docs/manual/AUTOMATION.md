@@ -94,10 +94,16 @@ skills 是 Worktrail 的对话内工作流入口。它们把多步命令链包�
 - `worktrail-context`：任务开始、恢复旧任务、继续长任务时先生成 Context Pack
 - `worktrail-review`：把 pending semantic candidates 按推荐动作分组，并在确认后执行安全的 CLI 写操作
 - `worktrail-distill`：从 evidence 生成 distill pack、proposal、validate/apply 链路
+- `worktrail-draft`：在显式持久化请求后，把 requirement、architecture、workflow 等非 ADR 语义产物直接写成 pending candidate；当 Worktrail 是唯一目标时不创建额外 `docs/` 或 `.plans/` 副本
+- `worktrail-adr`：在显式持久化请求和中立内容就绪门禁之后，把标准 ADR 写成 pending `decision` candidate，再进入 review
 - `worktrail-maintain`：串起 `context "maintenance"`、`distill --summary`、`review plan`、`evidence plan`
 - `worktrail-handoff`：只在显式交接边界创建 durable handoff，例如用户明确要求 handoff、切 Agent、切 chat 或结束当天工作
 
 skills 自动化的是流程编排，不是绕过边界。
+
+`worktrail-draft` 默认使用带 Worktrail frontmatter 的 stdin 内容，确保 promote 后保留 stable id、topic、scope、type 和 lifecycle。只有用户明确要求普通文件，或已经提供现有文件时，才使用并保留 standalone artifact；它不会自动 promote。
+
+`worktrail-adr` 不要求安装 `design-review-loop` 或其他 agent-skills。若上下文已有兼容的 ADR clean review，可把它当作就绪证据；否则只执行标准结构校验，并要求用户明确确认内容评审已完成。它不会自动 promote，也不会直接写 `.worktrail/decisions/`。
 
 ## Hooks 和 Skills 的边界
 <div class="title-en">Hook and Skill Boundaries</div>

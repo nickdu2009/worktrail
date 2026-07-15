@@ -64,6 +64,8 @@ worktrail doctor knowledge
 as a pending semantic candidate. It does not edit formal knowledge or promote
 candidates; use `review`, `promote`, or `merge` for the explicit review step.
 
+`worktrail adr create` is the specialized path for a reviewed Architecture Decision Record. It accepts a standard ADR from `--from-file` or explicit `--stdin`, validates the ADR ID/status/required sections, and creates a pending `decision` candidate. ADR document status (`Proposed`, `Accepted`, `Deprecated`, `Superseded`), candidate status (`pending`, `promoted`, `merged`, `archived`), and formal lifecycle (`current`, `historical`, `retired`) remain independent. Only Accepted ADRs may write `supersedes` graph metadata; retiring the old decision still requires the explicit maintenance/review flow.
+
 `worktrail review` now behaves as a semantic draft review surface by default. It still keeps the legacy `candidate` terminology for compatibility, but the default inbox is only pending semantic drafts. Hidden evidence items are reported separately, and operational drafts stay out of the default review table unless you opt into `--all`. Semantic drafts include `source_candidate_ids` details when present, source health warnings, target/duplicate warnings, and a focused `worktrail candidates diff <id>` next step. Use `worktrail review --evidence` for evidence items such as `transcript_notes` and `migration_source`, or `worktrail review --all` when operational drafts also need inspection.
 
 `worktrail review plan --format json` emits the read-only agent contract `worktrail.review.plan.v1`. It groups pending semantic candidates into deterministic recommendations: `promote`, `merge`, `discard`, or `needs_human_review`. The command never changes candidate state or formal knowledge; state-changing commands still require explicit user confirmation.
@@ -121,7 +123,7 @@ worktrail install <tool> --user
 worktrail install <tool> --project
 ```
 
-When Worktrail updates bundled rules, skills, or hook/settings templates, rerun `worktrail install <tool> --user --project` for the affected tool so the managed integration files pick up the new contract.
+When Worktrail updates bundled rules, skills, or hook/settings templates, rerun `worktrail install <tool> --user --project` for the affected tool so the managed integration files pick up the new contract. This includes `worktrail-draft`, which persists non-ADR semantic artifacts directly as pending candidates when Worktrail is the only requested destination, and `worktrail-adr`, which does not require an external design-review skill.
 
 Use `worktrail install all --user --project` to set up Codex, Claude Code, Cursor, and ZCode Agent together, or explicit targets such as `worktrail install codex --user --project` and `worktrail install zcode --user` when only a subset should be installed. ZCode Agent currently uses only the user-level installation surface.
 

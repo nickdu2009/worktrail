@@ -71,6 +71,7 @@ func runCandidates(_ context.Context, env paths.Env, ioctx IO, args []string) er
 			Semantic: flagValue(flags, "semantic", "") == "true",
 			Evidence: flagValue(flags, "evidence", "") == "true",
 		})
+		records = canonicalCandidateRecords(records)
 		if flagValue(flags, "format", "text") == "json" {
 			return json.NewEncoder(ioctx.Out).Encode(records)
 		}
@@ -105,7 +106,7 @@ type candidateFilters struct {
 }
 
 func filterCandidateRecords(records []candidate.Record, filters candidateFilters) []candidate.Record {
-	filters.Type = strings.TrimSpace(filters.Type)
+	filters.Type = model.CanonicalSemanticCandidateType(filters.Type)
 	filters.Topic = strings.TrimSpace(filters.Topic)
 	filters.Status = strings.TrimSpace(filters.Status)
 	if filters.Type == "" && filters.Topic == "" && filters.Status == "" && !filters.Semantic && !filters.Evidence {
@@ -114,7 +115,7 @@ func filterCandidateRecords(records []candidate.Record, filters candidateFilters
 	filtered := records[:0]
 	for _, rec := range records {
 		objectMeta := rec.ObjectMeta()
-		if filters.Type != "" && rec.Meta.CandidateType != filters.Type {
+		if filters.Type != "" && model.CanonicalSemanticCandidateType(rec.Meta.CandidateType) != filters.Type {
 			continue
 		}
 		if filters.Topic != "" && objectMeta.Topic != filters.Topic {
@@ -132,6 +133,13 @@ func filterCandidateRecords(records []candidate.Record, filters candidateFilters
 		filtered = append(filtered, rec)
 	}
 	return filtered
+}
+
+func canonicalCandidateRecords(records []candidate.Record) []candidate.Record {
+	for i := range records {
+		records[i].Meta.CandidateType = model.CanonicalSemanticCandidateType(records[i].Meta.CandidateType)
+	}
+	return records
 }
 
 func runReview(_ context.Context, env paths.Env, ioctx IO, args []string) error {
