@@ -1,6 +1,6 @@
 # Worktrail Release Acceptance Requirements
 
-Last updated: 2026-05-15
+Last updated: 2026-07-17
 
 Status: proposed
 
@@ -11,10 +11,9 @@ maintenance hints, agent distillation guidance, batch review planning,
 confirmed `review apply-plan`, evidence lifecycle planning, and a maintenance
 skill.
 
-The next requirements should decide what "release-ready" means before adding
-more features. The main risk is no longer missing capability; it is inconsistent
-scope behavior, unclear confirmation boundaries, low-quality distilled
-knowledge, or insufficient dogfood evidence.
+The May 2026 requirements remain the release baseline. The July 2026 scope
+revision adds opt-in local semantic recall to v1.0.0, subject to separate
+runtime, model, release-evidence, and support-tier gates.
 
 ## Goals
 
@@ -30,14 +29,111 @@ knowledge, or insufficient dogfood evidence.
 
 ## Non-Goals
 
-- Do not add a daemon, watcher, scheduler, TUI, Web UI, HTTP API, vector store,
-  or embedded LLM provider.
+- Do not add a general Worktrail daemon, watcher, scheduler, TUI, Web UI, public
+  HTTP API, cloud embedding provider, or standalone vector database. The only
+  v1 exception is the explicitly installed, loopback-only `llama serve`
+  subprocess used by local semantic operations.
 - Do not make Worktrail automatically promote, merge, discard, archive, retire,
   or apply plans without explicit confirmation.
 - Do not require private transcripts, local absolute paths, or runtime proposal
   files to be committed as validation artifacts.
 - Do not replace agent-authored semantic judgment with Worktrail-internal
   semantic scoring.
+
+## V1.0.0 Local Semantic Recall Scope Revision
+
+The accepted release direction now includes an opt-in local semantic recall
+capability described by
+`docs/worktrail-local-semantic-recall-architecture.md`. This does not replace
+the existing lexical baseline or knowledge governance:
+
+- Markdown and frontmatter remain the source of truth.
+- Existing search text, JSON v1, Context Pack v1, and non-semantic commands
+  remain compatible.
+- Semantic installation is explicit and separate from generation construction.
+- Missing, stale, corrupt, or unavailable semantic capability degrades visibly
+  to lexical behavior in `auto` mode and fails with a stable reason in
+  `required` mode.
+- Semantic generations are derived, rebuild-only data and are never used to
+  mutate formal knowledge.
+
+The release requirements added by this scope revision are:
+
+- `REQ-SEM-001` — The canonical immutable manifest embedded in the formal
+  Worktrail release is the sole v1 runtime trust root. It pins the exact
+  BGE-M3 Q8_0 model, llama.app version, classified Apple runtime variants, and
+  artifact types, sizes, SHA-256 values, licenses, and attribution; only the
+  verified M1 variant declares a minimum macOS version. Before startup and
+  runtime reuse, Worktrail revalidates the installed bundle manifest identity,
+  the selected local-chip artifact, and its required trust metadata; only a
+  full match may run semantic work. This does not replace ordinary release tag
+  and binary-distribution integrity.
+- `REQ-SEM-002` — Core `worktrail init` remains usable without network access
+  by default. Only explicit `worktrail init --semantic` may download the
+  bundle; `worktrail init --no-semantic` explicitly disables semantic
+  installation, and installation never creates a generation.
+- `REQ-SEM-003` — The managed runtime binds only to loopback, requires a random
+  current-user API key, loads only locally integrity-verified pinned artifacts,
+  disables unwanted UI/content logging/network behavior, and is recovered without killing an
+  unknown process. Any bundle, profile, generation, or daemon identity mismatch
+  produces a visible warning and stable reason: `auto` degrades to lexical and
+  `required` fails stably instead of starting or reusing the mismatched runtime.
+- `REQ-SEM-004` — Structural chunks, profile identities, chunk FTS, vectors,
+  source catch-up, active-generation read-only access, and atomic activation
+  are deterministic and independently rebuildable.
+- `REQ-SEM-005` — `search --semantic` uses auditable FTS/vector fusion and
+  governance ranking while preserving default lexical output and JSON v1;
+  JSON v2 carries lanes, ranks, profile, citations, and degraded reasons.
+- `REQ-SEM-006` — `context --semantic` influences only knowledge sections;
+  active state, handoffs, recovery, maintenance, and evidence controls retain
+  deterministic contracts.
+- `REQ-SEM-007` — A successful generation replacement automatically deletes
+  the replaced generation after leases drain, exposes no rollback command, and
+  recovers by lexical degradation plus explicit rebuild from Markdown.
+- `REQ-SEM-008` — M1 is the only `verified` Apple runtime variant and passes
+  the complete physical-hardware runtime, offline, privacy, lifecycle, quality,
+  and performance gate. M2, M3, M4, and M5 ship only as opt-in
+  `experimental` variants. Each experimental variant has its own pinned
+  official artifact and must pass local install-time checks for artifact
+  integrity, loopback/API key, alias, tokenization, embedding shape, CLS
+  pooling, and L2 normalization before activation; it must never fall back to
+  another chip artifact. A failed self-check rejects the bundle before visible
+  lexical fallback and returns `semantic_runtime_unavailable`; a reused daemon
+  is retained only after the complete check passes, while a later token or
+  embedding failure stops and clears that already authenticated daemon before
+  rejection. If controlled stop or state cleanup fails, the integrity-verified
+  bundle and daemon state remain for later controlled recovery. Experimental
+  variants make no compatible or verified, performance, privacy, minimum-macOS,
+  or operational-support claim, and do not require pre-release per-chip
+  self-check reports. A18, Intel macOS, Linux, Windows, and other unlisted
+  targets remain lexical-capable and return `semantic_platform_unsupported`.
+- `REQ-SEM-009` — Default unit tests and CI remain fake/no-network. Real model
+  and runtime validation is bounded, explicit, reproducible, and recorded in a
+  dated release artifact without private source text.
+- `REQ-SEM-010` — No semantic implementation or trusted manifest is accepted
+  until the three governing ADRs are current and Accepted through Worktrail's
+  candidate/review/promotion flow.
+- `REQ-SEM-011` — The initial `verified` M1 runtime release envelope is
+  conservative and host-specific: macOS 15.7.3 or later, cold readiness to an
+  authenticated `/v1/models` response no greater than 25 seconds, warm
+  single-input embedding P95 no greater than 35 milliseconds, and peak runtime
+  RSS no greater than 1 GiB. These limits do not apply to experimental M2-M5
+  variants.
+
+## V1.0.0 Release Provenance Boundary
+
+Current M1 E2E evidence may be captured from a dirty development tree for
+engineering diagnosis, provided it includes a reproducible tracked/untracked
+source snapshot and states that it is not a clean-checkout release record.
+Such evidence can verify the M1 runtime behavior but cannot close
+`REQ-REL-001`, establish a release candidate identity, or authorize a tag or
+publication.
+
+Release acceptance remains incomplete until the user authorizes a reviewed
+candidate commit, a clean-checkout validation record naming that commit and
+showing clean before/after status, the intended v1.0.0 tag and its integrity
+checks, and any separate publication step. M1 remains the only `verified`
+variant; M2–M5 remain `experimental` throughout that process.
 
 ## Current Baseline
 

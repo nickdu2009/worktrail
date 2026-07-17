@@ -16,6 +16,8 @@ import (
 	"github.com/nickdu2009/worktrail/internal/knowledge"
 	"github.com/nickdu2009/worktrail/internal/model"
 	"github.com/nickdu2009/worktrail/internal/paths"
+	"github.com/nickdu2009/worktrail/internal/semantic/contracts"
+	"github.com/nickdu2009/worktrail/internal/semantic/selection"
 	"github.com/nickdu2009/worktrail/internal/transcript"
 )
 
@@ -134,23 +136,92 @@ func printIndexRebuildFailure(ioctx IO, result indexRebuildResult) {
 	fmt.Fprintf(ioctx.Err, "next: %s\n", result.NextStep)
 }
 
-func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error {
+func runSearch(ctx context.Context, env paths.Env, ioctx IO, args []string) error {
+	return runSearchWithSemantic(ctx, env, ioctx, args, newProductionSemanticSearcher(env))
+}
+
+func runSearchWithSemantic(ctx context.Context, env paths.Env, ioctx IO, args []string, semanticSearcher SemanticSearcher) error {
 	if wantsFlagHelpOrLeadingHelp(args) {
 		printSearchHelp(ioctx.Out)
 		return nil
 	}
-	flags, positional := splitFlags(args)
+	options, err := parseSemanticSearchOptions(args)
+	if err != nil {
+		return failSearchCommand(ioctx, args, err)
+	}
+	flags, positional := splitFlags(options.Args)
 	query := strings.TrimSpace(joinArgs(positional))
 	if query == "" {
+		err := errors.New("search requires a keyword; example: worktrail search \"<keyword>\"")
+		if isJSONFormat(flagValue(flags, "format", "text")) {
+			return failSearchCommand(ioctx, args, err)
+		}
 		printSearchHelp(ioctx.Err)
-		return errors.New("search requires a keyword; example: worktrail search \"<keyword>\"")
+		return err
 	}
+	scope := flagValue(flags, "scope", "project")
+	format := flagValue(flags, "format", "text")
+	if options.Enabled {
+		if semanticSearcher == nil {
+			semanticSearcher = unavailableSemanticSearcher{}
+		}
+		response, searchErr := semanticSearcher.Search(ctx, SemanticSearchRequest{
+			Query: query,
+			Scope: scope,
+			Type:  flagValue(flags, "type", ""),
+			Topic: flagValue(flags, "topic", ""),
+			Tag:   flagValue(flags, "tag", ""),
+			Mode:  options.Mode,
+			Limit: searchResultLimit,
+		})
+		if searchErr != nil {
+			if options.Mode == contracts.ModeRequired {
+				return failSearchCommand(ioctx, args, searchErr)
+			}
+			response = semanticSearchErrorDiagnostics(scope)
+		}
+		response = normalizeSemanticSearchDiagnostics(response, scope)
+		if semanticSearchDegraded(response) {
+			results, err := runLexicalSearch(env, flags, query)
+			if err != nil {
+				return failSearchCommand(ioctx, args, err)
+			}
+			printSemanticSearchDiagnostics(ioctx, options.Mode, response, options.Explain)
+			return writeSearchResults(ioctx, format, results, response)
+		}
+		printSemanticSearchDiagnostics(ioctx, options.Mode, response, options.Explain)
+		return writeSearchResults(ioctx, format, response.Results, response)
+	}
+
+	results, err := runLexicalSearch(env, flags, query)
+	if err != nil {
+		return failSearchCommand(ioctx, args, err)
+	}
+	return writeSearchResults(ioctx, format, results, SemanticSearchResponse{})
+}
+
+const searchResultLimit = 20
+
+func failSearchCommand(ioctx IO, args []string, err error) error {
+	format := "text"
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--format=json-v2" || args[i] == "--format" && i+1 < len(args) && args[i+1] == "json-v2" {
+			format = "json-v2"
+			break
+		}
+	}
+	if format == "text" && inferJSONMode(args) {
+		format = "json"
+	}
+	return failCLICommand(ioctx, format, "worktrail search", err)
+}
+
+func runLexicalSearch(env paths.Env, flags map[string]string, query string) ([]index.Result, error) {
 	scope := flagValue(flags, "scope", "project")
 	scopes := []string{scope}
 	if scope == "all" {
 		scopes = []string{"project", "user"}
 	}
-	const searchResultLimit = 20
 	perScopeLimit := searchResultLimit
 	if scope == "all" {
 		perScopeLimit = 0
@@ -159,7 +230,7 @@ func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 	for _, s := range scopes {
 		root, err := env.ScopeRoot(s)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		found, err := index.Search(root, index.Query{
 			Scope:   s,
@@ -170,15 +241,22 @@ func runSearch(_ context.Context, env paths.Env, ioctx IO, args []string) error 
 			Limit:   perScopeLimit,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		results = append(results, found...)
 	}
 	if scope == "all" {
 		results = index.RankSearchResults(results, searchResultLimit)
 	}
-	if flagValue(flags, "format", "text") == "json" {
+	return results, nil
+}
+
+func writeSearchResults(ioctx IO, format string, results []index.Result, response SemanticSearchResponse) error {
+	switch format {
+	case "json":
 		return json.NewEncoder(ioctx.Out).Encode(results)
+	case "json-v2":
+		return json.NewEncoder(ioctx.Out).Encode(semanticSearchJSONV2(results, response))
 	}
 	for _, result := range results {
 		fmt.Fprintf(ioctx.Out, "%.1f\t%s\t%s\t%s\n", result.Score, result.Entry.Scope, result.Entry.Type, result.Entry.Title)
@@ -220,25 +298,52 @@ func renderIndexDiffItems(out interface{ Write([]byte) (int, error) }, label str
 	}
 }
 
-func runContextPack(_ context.Context, env paths.Env, ioctx IO, args []string) error {
+func runContextPack(ctx context.Context, env paths.Env, ioctx IO, args []string) error {
+	return runContextPackWithSemanticSearcher(ctx, env, ioctx, args, newProductionSemanticSearcher(env))
+}
+
+func runContextPackWithSemantic(_ context.Context, env paths.Env, ioctx IO, args []string, selector ContextSemanticSelector) error {
 	if wantsFlagHelpOrLeadingHelp(args) {
 		printContextHelp(ioctx.Out)
 		return nil
 	}
-	flags, positional := splitFlagsWithBooleans(args, map[string]bool{"evidence": true})
+	semantic, err := parseContextSemanticOptions(args)
+	if err != nil {
+		return failContextCommand(ioctx, args, err)
+	}
+	flags, positional := splitFlagsWithBooleans(semantic.Args, map[string]bool{"evidence": true})
 	includeLifecycle, err := knowledge.ParseLifecycleList(flagValue(flags, "include-lifecycle", ""))
 	if err != nil {
 		return err
 	}
-	pack, err := contextpack.Build(env, contextpack.Options{
+	options := contextpack.Options{
 		Task:             joinArgs(positional),
 		Topic:            flagValue(flags, "topic", ""),
 		Stage:            flagValue(flags, "stage", ""),
 		IncludeLifecycle: includeLifecycle,
 		IncludeEvidence:  flagValue(flags, "evidence", "") == "true",
-	})
+	}
+	if semantic.Enabled {
+		if selector == nil {
+			selector = unavailableContextSemanticSelector{}
+		}
+		options.Selector = selector
+	}
+	pack, err := contextpack.Build(env, options)
 	if err != nil {
-		return err
+		if !semantic.Enabled {
+			return err
+		}
+		if semantic.Mode == contracts.ModeRequired {
+			return failContextCommand(ioctx, args, contextSemanticError(err))
+		}
+		semanticErr := err
+		options.Selector = nil
+		pack, err = contextpack.Build(env, options)
+		if err != nil {
+			return err
+		}
+		printContextSemanticFallback(ioctx, contextSemanticReason(semanticErr))
 	}
 	if flagValue(flags, "format", "markdown") == "json" {
 		return json.NewEncoder(ioctx.Out).Encode(pack)
@@ -247,8 +352,113 @@ func runContextPack(_ context.Context, env paths.Env, ioctx IO, args []string) e
 	return nil
 }
 
+func runContextPackWithSemanticSearcher(ctx context.Context, env paths.Env, ioctx IO, args []string, semanticSearcher SemanticSearcher) error {
+	if wantsFlagHelpOrLeadingHelp(args) {
+		printContextHelp(ioctx.Out)
+		return nil
+	}
+	semantic, err := parseContextSemanticOptions(args)
+	if err != nil {
+		return failContextCommand(ioctx, args, err)
+	}
+	flags, positional := splitFlagsWithBooleans(semantic.Args, map[string]bool{"evidence": true})
+	includeLifecycle, err := knowledge.ParseLifecycleList(flagValue(flags, "include-lifecycle", ""))
+	if err != nil {
+		return err
+	}
+	options := contextpack.Options{
+		Task:             joinArgs(positional),
+		Topic:            flagValue(flags, "topic", ""),
+		Stage:            flagValue(flags, "stage", ""),
+		IncludeLifecycle: includeLifecycle,
+		IncludeEvidence:  flagValue(flags, "evidence", "") == "true",
+	}
+	if semantic.Enabled {
+		if semanticSearcher == nil {
+			semanticSearcher = unavailableSemanticSearcher{}
+		}
+		response, searchErr := semanticSearcher.Search(ctx, SemanticSearchRequest{
+			Query: options.Task,
+			Scope: "all",
+			Mode:  semantic.Mode,
+			Limit: searchResultLimit,
+		})
+		if searchErr != nil || semanticSearchDegraded(response) {
+			reason := contextSemanticReason(searchErr)
+			if searchErr == nil {
+				reason = firstSemanticReason(response)
+			}
+			if semantic.Mode == contracts.ModeRequired {
+				return failContextCommand(ioctx, args, &SemanticSearchError{Code: reason})
+			}
+			pack, err := contextpack.Build(env, options)
+			if err != nil {
+				return err
+			}
+			printContextSemanticFallback(ioctx, reason)
+			return writeContextPack(ioctx, flags, pack)
+		}
+		options.Selector = selection.New(semanticContextRankings(response.Results))
+	}
+	pack, err := contextpack.Build(env, options)
+	if err != nil {
+		return err
+	}
+	return writeContextPack(ioctx, flags, pack)
+}
+
+func semanticContextRankings(results []index.Result) []selection.Ranking {
+	rankings := make([]selection.Ranking, 0, len(results))
+	for i, result := range results {
+		rankings = append(rankings, selection.Ranking{
+			Scope: result.Entry.Scope,
+			Path:  result.Entry.Path,
+			Rank:  i + 1,
+		})
+	}
+	return rankings
+}
+
+func writeContextPack(ioctx IO, flags map[string]string, pack contextpack.Pack) error {
+	if flagValue(flags, "format", "markdown") == "json" {
+		return json.NewEncoder(ioctx.Out).Encode(pack)
+	}
+	_, err := fmt.Fprint(ioctx.Out, contextpack.RenderMarkdown(pack))
+	return err
+}
+
+func contextSemanticError(err error) error {
+	var semanticErr *SemanticSearchError
+	if errors.As(err, &semanticErr) {
+		return err
+	}
+	return fmt.Errorf("%w: %v", &SemanticSearchError{Code: contracts.ReasonRuntimeUnavailable}, err)
+}
+
+func contextSemanticReason(err error) contracts.ReasonCode {
+	var semanticErr *SemanticSearchError
+	if errors.As(err, &semanticErr) && semanticErr.Code != "" {
+		return semanticErr.Code
+	}
+	return contracts.ReasonRuntimeUnavailable
+}
+
+func printContextSemanticFallback(ioctx IO, reason contracts.ReasonCode) {
+	fmt.Fprintln(ioctx.Err, "semantic context fallback (auto)")
+	fmt.Fprintf(ioctx.Err, "reason: %s\n", reason)
+	fmt.Fprintf(ioctx.Err, "next: %s\n", semanticSearchRebuildStep(""))
+}
+
+func failContextCommand(ioctx IO, args []string, err error) error {
+	format := "markdown"
+	if inferJSONMode(args) {
+		format = "json"
+	}
+	return failCLICommand(ioctx, format, "worktrail context", err)
+}
+
 func printContextHelp(out interface{ Write([]byte) (int, error) }) {
-	fmt.Fprintln(out, "usage: worktrail context [--topic <topic>] [--stage <stage>] [--include-lifecycle <list>] [--evidence] [--format markdown|json] <task>")
+	fmt.Fprintln(out, "usage: worktrail context [--semantic|--semantic=auto|--semantic=required] [--topic <topic>] [--stage <stage>] [--include-lifecycle <list>] [--evidence] [--format markdown|json] <task>")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Builds a read-only context pack from Worktrail knowledge, runtime state, and pending maintenance hints.")
 }

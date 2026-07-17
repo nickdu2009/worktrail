@@ -1,5 +1,16 @@
 # Worktrail 设计审核：移除类似 TUI 的额外复杂面
 
+## 2026-07-15 语义召回范围修订
+
+本文件保留原始复杂度审核依据，但“完全不做 daemon/vector”的结论已被
+`worktrail-local-semantic-recall-architecture.md` 的受限例外取代：
+
+- 不引入通用 Worktrail daemon、watcher、公共 HTTP API 或独立向量服务。
+- 只有显式安装和显式调用的本地语义能力可以按需启动受认证、仅 loopback
+  的 llama.app 进程。
+- sqlite-vec generation 是可删除、可重建的派生索引，不是 source of truth。
+- 该例外不得执行知识治理写操作，失败时现有 lexical 工作流仍然可用。
+
 ## 审核原则
 
 本次审核按三条标准判断是否存在类似 TUI 的问题：
@@ -16,9 +27,9 @@
 |---|---|---|
 | TUI | 额外终端界面，脱离 Codex / Claude Code | 移除；改为 chat-native review |
 | HTTP MCP server | 引入端口、服务生命周期、安全边界 | 移除；MCP 只支持 stdio |
-| 后台 daemon / watcher | 引入常驻进程和隐式行为 | 明确不做；只由 CLI、hooks、MCP stdio 显式触发 |
+| 后台 daemon / watcher | 引入常驻进程和隐式行为 | 通用 daemon/watcher 仍不做；仅允许显式语义操作管理的受限 llama.app 进程 |
 | MCP promote / merge / discard | AI 工具层可能绕过人工确认修改正式知识库 | 默认不暴露；写操作通过非交互 CLI，在用户确认后由 skill 调用 |
-| 本地 embedding / vector index | 增加复杂依赖，偏离 Markdown 本地工具定位 | 移除；使用本地文本索引和 metadata filter |
+| 本地 embedding / vector index | 增加复杂依赖，偏离 Markdown 本地工具定位 | 作为 opt-in v1 能力重新引入；必须本地、可重建、可审计并保留 lexical 基线 |
 | custom external command provider | 可能造成 arbitrary command execution | 移除；只支持 manual / codex / claude provider |
 | hooks 自动 promote | 自动化越过人审 | 明确禁止；hooks 只能生成 candidates 或更新 state |
 | 自动后台 sync | 隐式扫描用户文件和 transcript | 明确不做；sync 只能手动或由 hooks 触发 |
@@ -40,8 +51,8 @@ Markdown = source of truth
 1. 不做 TUI
 2. 不做 Web UI / dashboard
 3. 不做 HTTP MCP server
-4. 不做后台 daemon / 常驻服务
-5. 不做本地 embedding / vector index / 向量数据库
+4. 不做通用后台 daemon / watcher；语义 runtime 只能按显式语义操作启动
+5. 不做云 embedding 或独立向量数据库；本地 sqlite-vec 仅作派生索引
 6. 不做 custom external command provider
 7. 不通过 MCP 默认暴露 promote / merge / discard
 8. 不允许 hooks 自动 promote

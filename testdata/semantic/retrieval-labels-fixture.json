@@ -1,0 +1,17 @@
+{
+  "schema": "worktrail.semantic.eval.retrieval-labels.v1",
+  "queries": [
+    {
+      "id": "q-decision",
+      "text": "hybrid recall decision",
+      "category": "decision",
+      "relevant_ids": ["e2e-decision-hybrid-recall"]
+    },
+    {
+      "id": "q-rule",
+      "text": "semantic rebuild only rule",
+      "category": "rule",
+      "relevant_ids": ["e2e-rule-rebuild-only"]
+    }
+  ]
+}

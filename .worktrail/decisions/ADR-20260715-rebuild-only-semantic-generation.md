@@ -1,0 +1,55 @@
+---worktrail
+{
+  "id": "ADR-20260715-rebuild-only-semantic-generation",
+  "lifecycle": "current",
+  "schema": "worktrail.knowledge.v1",
+  "scope": "project",
+  "stage": "decision",
+  "status": "accepted",
+  "title": "Use Rebuild-Only Immutable Semantic Generations",
+  "type": "decision"
+}
+---
+
+# ADR-20260715-rebuild-only-semantic-generation: Use Rebuild-Only Immutable Semantic Generations
+
+- Status: Accepted
+- Date: 2026-07-15
+
+## Context
+
+Semantic vectors depend on the exact model space, runtime fingerprint, tokenizer, templates, chunker, lexical pipeline, sqlite-vec behavior, and generation schema. In-place migration or mixed vector spaces would make retrieval difficult to audit. At the same time, semantic reads must remain available while a replacement index is built from changing Markdown sources.
+
+## Decision
+
+Use one profile-local SQLite generation per scope containing structural chunks, chunk FTS, vectors, neighbor links, source snapshot, and complete profile metadata. The active generation is immutable: queries acquire a generation lease before opening it through a read-only SQLite URI and never execute schema or repair writes.
+
+A first generation, profile change, incompatible schema, missing generation, or corrupt generation requires explicit `worktrail semantic rebuild --scope project|user|all`. Search and Context Pack never trigger an implicit full rebuild. Same-profile source drift may use a bounded candidate refresh only within ADR-approved count and time budgets. Every candidate is built beside the active generation, catches up source changes, validates integrity and retrieval contracts, closes all write handles, and is activated by an atomic versioned pointer switch.
+
+Before activation, the previous active generation remains the failure fallback. After activation, Worktrail waits for query leases and build references to drain and automatically deletes the replaced generation. It is not placed in general GC inventory, retained as rollback stock, or exposed through a rollback command. Recovery after a bad activation is visible lexical degradation and an explicit rebuild from Markdown with a corrected or selected profile.
+
+Any model, runtime executable, chip variant, tokenizer, pooling, normalization, template, chunker, indexing policy, lexical pipeline, metric, sqlite-vec, or schema change creates a different recall profile and forces full rebuild. Vectors are reused only by exact profile ID and embedding-input hash while building a same-profile candidate.
+
+The bounded M1 capacity Gate shows sqlite-vec v0.1.9 exact cosine query P95 of 188.943 ms for 100,000 synthetic 1024-dimensional vectors with a 413,761,536-byte database. This validates the current scale hypothesis only; schema, source catch-up, active read-only behavior, lease safety, atomic activation, cleanup, incremental/full equivalence, and accepted resource budgets remain production gates.
+
+## Consequences
+
+### Positive
+
+- Active queries observe one complete and auditable vector space.
+- Upgrades and source changes cannot partially mutate the active database.
+- Markdown remains the complete recovery source; semantic data stays disposable.
+- Compatibility logic is reduced to exact profile recognition plus rebuild.
+
+### Negative
+
+- Rebuilds may temporarily duplicate database and model-related storage.
+- The first release has no generation rollback after activation.
+- Bounded same-profile refresh requires locks, leases, source snapshots, and catch-up logic.
+- Profile changes require full re-embedding even when outputs appear similar.
+
+## Links
+
+- Related: docs/worktrail-local-semantic-recall-architecture.md
+- Related: docs/worktrail-sqlite-gse-index-design.md
+- Evidence: docs/worktrail-semantic-sqlite-vec-spike-2026-07-15.md

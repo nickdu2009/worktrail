@@ -1,0 +1,14 @@
+{
+  "schema": "worktrail.semantic.dirty-tree-snapshot-verification.v1",
+  "verified_at": "2026-07-17T04:44:03Z",
+  "snapshot_file": "/Users/duxiaobo/workspaces/nickdu/worktrail-semantic-recall-v1-llama-app/docs/semantic-e2e-evidence/m1-release-gate-2026-07-17-source-snapshot.json",
+  "verified_fields": [
+    "head",
+    "status_porcelain_v1_z_sha256",
+    "tracked_diff_head_sha256",
+    "untracked",
+    "input_set"
+  ],
+  "matches": true,
+  "mismatches": {}
+}

@@ -1,6 +1,6 @@
 # Worktrail Long-Term Vision Discussion
 
-Last updated: 2026-05-15
+Last updated: 2026-07-15
 
 Status: discussion result
 
@@ -46,12 +46,20 @@ knowledge workflow, not just a proof of concept.
 - no automatic git commit
 - no automatic promote, merge, discard, archive, restore, retire, or apply-plan
 
+`v1.0.0` also commits to an explicit local semantic-recall capability only when
+its separate release gate passes:
+
+- a user-installed, loopback-only llama.app runtime managed by Worktrail
+- BGE-M3 Q8_0 dense embeddings and rebuild-only local sqlite-vec generations
+- explicit semantic search/context modes with visible lexical degradation
+- semantic support only for physically validated Apple chip variants
+
 `v1.0.0` does not commit to:
 
-- daemon or scheduler behavior
+- a general Worktrail daemon, watcher, or scheduler
 - UI, TUI, dashboard, or IDE sidebar
 - embedded LLM provider
-- vector search
+- cloud embeddings, standalone vector databases, or implicit semantic indexing
 - semantic quality auto-scoring
 - cross-machine sync
 - team collaboration
@@ -101,8 +109,11 @@ End-state direction:
 
 Design risk:
 
-- Background behavior introduces daemon, scheduler, notification, and trust
-  boundaries. These remain outside `v1.0.0`.
+- General background behavior introduces daemon, scheduler, notification, and
+  trust boundaries and remains outside `v1.0.0`. The semantic runtime is a
+  narrow exception: it starts only for explicit semantic operations, listens
+  only on authenticated loopback, performs no knowledge mutation, and can be
+  removed without affecting the lexical product.
 
 ### Risk-Aware Confirmation
 

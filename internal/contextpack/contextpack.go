@@ -27,6 +27,7 @@ type Options struct {
 	Limit            int
 	Now              time.Time
 	IncludeEvidence  bool
+	Selector         Selector
 }
 
 type Item struct {
@@ -44,6 +45,21 @@ type Item struct {
 	Content       string    `json:"content"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	Unapproved    bool      `json:"unapproved,omitempty"`
+}
+
+// Selector ranks or selects candidates within one knowledge section.
+// It must not load files, access a runtime, or allocate budget across sections.
+type Selector interface {
+	Select(SelectionRequest) ([]Item, error)
+}
+
+// SelectionRequest contains already-filtered candidates for one knowledge section.
+type SelectionRequest struct {
+	Task       string
+	Section    string
+	Topic      string
+	Limit      int
+	Candidates []Item
 }
 
 type Section struct {
@@ -135,7 +151,8 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 	for _, spec := range sectionSpecs {
 		var items []Item
 		for _, entry := range entries {
-			if pack.Topic != "" && entry.Topic != pack.Topic {
+			allowRequirementTopicFill := opts.Selector != nil && spec.selectable && spec.key == "requirements"
+			if pack.Topic != "" && entry.Topic != pack.Topic && !allowRequirementTopicFill {
 				continue
 			}
 			if !knowledge.IncludesLifecycle(includeLifecycle, entry.Lifecycle) {
@@ -155,7 +172,40 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 		if spec.limit > 0 && spec.limit < sectionLimit {
 			sectionLimit = spec.limit
 		}
-		if len(items) > sectionLimit {
+		if opts.Selector != nil && spec.selectable {
+			if spec.key == "requirements" && pack.Topic != "" {
+				pinned, fill := splitItemsByTopic(items, pack.Topic)
+				if len(pinned) > sectionLimit {
+					pinned = pinned[:sectionLimit]
+				}
+				if remaining := sectionLimit - len(pinned); remaining > 0 && len(fill) > 0 {
+					selected, err := selectItems(opts.Selector, SelectionRequest{
+						Task:       pack.Task,
+						Section:    spec.title,
+						Topic:      pack.Topic,
+						Limit:      remaining,
+						Candidates: fill,
+					})
+					if err != nil {
+						return Pack{}, err
+					}
+					pinned = append(pinned, selected...)
+				}
+				items = pinned
+			} else if len(items) > 0 {
+				selected, err := selectItems(opts.Selector, SelectionRequest{
+					Task:       pack.Task,
+					Section:    spec.title,
+					Topic:      pack.Topic,
+					Limit:      sectionLimit,
+					Candidates: items,
+				})
+				if err != nil {
+					return Pack{}, err
+				}
+				items = selected
+			}
+		} else if len(items) > sectionLimit {
 			items = items[:sectionLimit]
 		}
 		if len(items) > 0 {
@@ -339,27 +389,29 @@ func itemFromEntry(entry index.Entry, supersededBy []string) Item {
 }
 
 type sectionSpec struct {
-	title string
-	keep  func(index.Entry) bool
-	limit int
+	key        string
+	title      string
+	keep       func(index.Entry) bool
+	limit      int
+	selectable bool
 }
 
 func sectionSpecsForStage(stage string, includeEvidence bool) []sectionSpec {
 	specs := map[string]sectionSpec{
-		"user":         {"User Knowledge", func(e index.Entry) bool { return e.Scope == "user" && isKnowledge(e.Type) }, 0},
-		"project":      {"Project Knowledge", func(e index.Entry) bool { return e.Scope == "project" && isProjectKnowledge(e.Type) }, 0},
-		"requirements": {"Requirements", func(e index.Entry) bool { return e.Type == "requirement" }, 0},
-		"architecture": {"Architecture", func(e index.Entry) bool { return e.Type == "architecture" }, 0},
-		"integrations": {"Integrations", func(e index.Entry) bool { return e.Type == "integration" }, 0},
-		"validation":   {"Validation", func(e index.Entry) bool { return e.Type == "validation" }, 0},
-		"glossary":     {"Glossary", func(e index.Entry) bool { return e.Type == "glossary" }, 0},
-		"workflows":    {"Workflows", func(e index.Entry) bool { return e.Type == "workflow" }, 0},
-		"recovery":     {"Recovery", func(e index.Entry) bool { return isRecoveryEntry(e) }, 0},
-		"state":        {"Active State", func(e index.Entry) bool { return e.Type == "state" && e.Active }, 0},
-		"decisions":    {"Decisions", func(e index.Entry) bool { return e.Type == "decision" }, 0},
-		"handoffs":     {"Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }, 2},
-		"rules":        {"Rules", func(e index.Entry) bool { return e.Type == "rule" }, 0},
-		"pending":      {"Pending Candidates", func(e index.Entry) bool { return pendingCandidateVisible(e, includeEvidence) }, 0},
+		"user":         {"user", "User Knowledge", func(e index.Entry) bool { return e.Scope == "user" && isKnowledge(e.Type) }, 0, true},
+		"project":      {"project", "Project Knowledge", func(e index.Entry) bool { return e.Scope == "project" && isProjectKnowledge(e.Type) }, 0, true},
+		"requirements": {"requirements", "Requirements", func(e index.Entry) bool { return e.Type == "requirement" }, 0, true},
+		"architecture": {"architecture", "Architecture", func(e index.Entry) bool { return e.Type == "architecture" }, 0, true},
+		"integrations": {"integrations", "Integrations", func(e index.Entry) bool { return e.Type == "integration" }, 0, true},
+		"validation":   {"validation", "Validation", func(e index.Entry) bool { return e.Type == "validation" }, 0, true},
+		"glossary":     {"glossary", "Glossary", func(e index.Entry) bool { return e.Type == "glossary" }, 0, true},
+		"workflows":    {"workflows", "Workflows", func(e index.Entry) bool { return e.Type == "workflow" }, 0, true},
+		"recovery":     {"recovery", "Recovery", func(e index.Entry) bool { return isRecoveryEntry(e) }, 0, false},
+		"state":        {"state", "Active State", func(e index.Entry) bool { return e.Type == "state" && e.Active }, 0, false},
+		"decisions":    {"decisions", "Decisions", func(e index.Entry) bool { return e.Type == "decision" }, 0, true},
+		"handoffs":     {"handoffs", "Handoffs", func(e index.Entry) bool { return e.Type == "handoff" }, 2, false},
+		"rules":        {"rules", "Rules", func(e index.Entry) bool { return e.Type == "rule" }, 0, true},
+		"pending":      {"pending", "Pending Candidates", func(e index.Entry) bool { return pendingCandidateVisible(e, includeEvidence) }, 0, false},
 	}
 	order := []string{"state", "handoffs", "recovery", "user", "project", "requirements", "architecture", "decisions", "validation", "rules", "workflows", "integrations", "glossary", "pending"}
 	switch stage {
@@ -373,6 +425,61 @@ func sectionSpecsForStage(stage string, includeEvidence bool) []sectionSpec {
 	out := make([]sectionSpec, 0, len(order))
 	for _, key := range order {
 		out = append(out, specs[key])
+	}
+	return out
+}
+
+func splitItemsByTopic(items []Item, topic string) (matched, other []Item) {
+	for _, item := range items {
+		if item.Topic == topic {
+			matched = append(matched, item)
+		} else {
+			other = append(other, item)
+		}
+	}
+	return matched, other
+}
+
+func selectItems(selector Selector, request SelectionRequest) ([]Item, error) {
+	selected, err := selector.Select(SelectionRequest{
+		Task:       request.Task,
+		Section:    request.Section,
+		Topic:      request.Topic,
+		Limit:      request.Limit,
+		Candidates: cloneItems(request.Candidates),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("select context section %q: %w", request.Section, err)
+	}
+	if len(selected) > request.Limit {
+		return nil, fmt.Errorf("select context section %q: selector returned %d items, limit is %d", request.Section, len(selected), request.Limit)
+	}
+	candidates := make(map[string]Item, len(request.Candidates))
+	for _, item := range request.Candidates {
+		candidates[item.Path] = item
+	}
+	seen := make(map[string]bool, len(selected))
+	out := make([]Item, 0, len(selected))
+	for _, item := range selected {
+		canonical, ok := candidates[item.Path]
+		if !ok {
+			return nil, fmt.Errorf("select context section %q: selector returned non-candidate path %q", request.Section, item.Path)
+		}
+		if seen[item.Path] {
+			return nil, fmt.Errorf("select context section %q: selector returned duplicate path %q", request.Section, item.Path)
+		}
+		seen[item.Path] = true
+		out = append(out, canonical)
+	}
+	return out, nil
+}
+
+func cloneItems(items []Item) []Item {
+	out := make([]Item, len(items))
+	copy(out, items)
+	for i := range out {
+		out[i].SupersededBy = append([]string{}, out[i].SupersededBy...)
+		out[i].Tags = append([]string{}, out[i].Tags...)
 	}
 	return out
 }

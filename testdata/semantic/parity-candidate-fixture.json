@@ -1,0 +1,22 @@
+{
+  "schema": "worktrail.semantic.eval.capture.v1",
+  "provider": "fixture-candidate",
+  "model": "fixture-bge-m3-q8",
+  "revision": "fixture-candidate-v1",
+  "artifact_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "config": {
+    "dimension": 4,
+    "tokenizer": "fixture-tokenizer-v1",
+    "pooling": "cls",
+    "normalization": "l2",
+    "query_template": "{text}",
+    "document_template": "{text}"
+  },
+  "embeddings": [
+    {"id": "query-auth", "single": [1, 0, 0, 0], "batch": [1, 0, 0, 0]},
+    {"id": "query-rebuild", "single": [0, 1, 0, 0], "batch": [0, 1, 0, 0]},
+    {"id": "doc-auth", "single": [1, 0, 0, 0], "batch": [1, 0, 0, 0]},
+    {"id": "doc-rebuild", "single": [0, 1, 0, 0], "batch": [0, 1, 0, 0]},
+    {"id": "doc-unrelated", "single": [0, 0, 1, 0], "batch": [0, 0, 1, 0]}
+  ]
+}

@@ -4,6 +4,19 @@ Last updated: 2026-06-06
 
 Status: implemented
 
+## Relationship To Local Semantic Recall
+
+This document remains the implemented lexical baseline. Its no-daemon and
+no-vector constraints describe this subsystem, not the complete v1.0.0 product
+after the July 2026 scope revision.
+
+The opt-in semantic subsystem defined in
+`worktrail-local-semantic-recall-architecture.md` does not alter this entry
+schema or default search contract. It uses separate profile-local generation
+databases for chunks, chunk FTS, and sqlite-vec vectors; starts a managed
+llama.app process only for explicit semantic work; and degrades back to this
+lexical path when unavailable.
+
 ## Summary
 
 This document proposes the long-term replacement for Worktrail's current JSON

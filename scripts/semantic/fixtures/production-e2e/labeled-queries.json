@@ -1,0 +1,59 @@
+{
+  "schema": "worktrail.semantic.eval.retrieval-labels.v1",
+  "queries": [
+    {
+      "id": "q-identifier",
+      "text": "e2e-prod-gate-needle-zx9",
+      "category": "identifier",
+      "relevant_ids": ["e2e-decision-hybrid-recall"]
+    },
+    {
+      "id": "q-paraphrase",
+      "text": "how should local semantic search fuse lexical and vector results",
+      "category": "paraphrase",
+      "relevant_ids": ["e2e-decision-hybrid-recall"]
+    },
+    {
+      "id": "q-zh-en",
+      "text": "语义索引 rebuild-only immutable generation",
+      "category": "zh_en_mixed",
+      "relevant_ids": ["e2e-rule-rebuild-only"]
+    },
+    {
+      "id": "q-decision",
+      "text": "hybrid recall context contract decision",
+      "category": "decision",
+      "relevant_ids": ["e2e-decision-hybrid-recall"]
+    },
+    {
+      "id": "q-rule",
+      "text": "rebuild only semantic generation rule",
+      "category": "rule",
+      "relevant_ids": ["e2e-rule-rebuild-only"]
+    },
+    {
+      "id": "q-workflow",
+      "text": "production e2e semantic release gate workflow",
+      "category": "workflow",
+      "relevant_ids": ["e2e-workflow-release-gate"]
+    },
+    {
+      "id": "q-active-state",
+      "text": "active state semantic e2e release gate",
+      "category": "active_state",
+      "relevant_ids": ["e2e-state-active-release-gate"]
+    },
+    {
+      "id": "q-handoff",
+      "text": "latest handoff continue semantic release gate",
+      "category": "handoff",
+      "relevant_ids": ["e2e-handoff-latest-release-gate"]
+    },
+    {
+      "id": "q-user-lesson",
+      "text": "user lesson avoid inferring lane ranks from search json",
+      "category": "user_lesson",
+      "relevant_ids": ["e2e-user-lesson-lane-ranks"]
+    }
+  ]
+}

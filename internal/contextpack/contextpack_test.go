@@ -1,6 +1,7 @@
 package contextpack
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -490,6 +491,185 @@ func TestBuildLimitsHandoffsAndPrefersCurrentEntries(t *testing.T) {
 	}
 }
 
+func TestBuildSelectorOnlyUsesKnowledgeSections(t *testing.T) {
+	tmp := t.TempDir()
+	env := paths.Env{
+		UserRoot:  filepath.Join(tmp, "user"),
+		ProjectWT: filepath.Join(tmp, "project", ".worktrail"),
+	}
+	writeSelectorKnowledgeFixture(t, env)
+	selector := &fakeSelector{}
+
+	pack, err := Build(env, Options{Task: "select knowledge", IncludeEvidence: true, Selector: selector})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	wantSections := map[string]bool{
+		"User Knowledge": true, "Project Knowledge": true, "Requirements": true, "Architecture": true,
+		"Decisions": true, "Validation": true, "Rules": true, "Workflows": true,
+		"Integrations": true, "Glossary": true,
+	}
+	if len(selector.calls) != len(wantSections) {
+		t.Fatalf("selector calls = %d, want %d: %+v", len(selector.calls), len(wantSections), selector.calls)
+	}
+	for _, call := range selector.calls {
+		if !wantSections[call.Section] {
+			t.Fatalf("selector called deterministic section %q", call.Section)
+		}
+		if len(call.Candidates) != 1 {
+			t.Fatalf("selector candidates for %q = %+v, want one pre-filtered item", call.Section, call.Candidates)
+		}
+		delete(wantSections, call.Section)
+	}
+	if len(wantSections) != 0 {
+		t.Fatalf("selector missed knowledge sections: %+v", wantSections)
+	}
+	for _, deterministic := range []string{"Active State", "Handoffs", "Recovery", "Pending Candidates"} {
+		if !hasSection(pack, deterministic) {
+			t.Fatalf("missing deterministic section %q: %+v", deterministic, pack.Sections)
+		}
+	}
+	if !hasItem(section(pack, "Pending Candidates"), "Transcript Evidence") {
+		t.Fatalf("evidence toggle should remain deterministic: %+v", section(pack, "Pending Candidates"))
+	}
+}
+
+func TestBuildSelectorRequirementsWithoutTopicRanksAllCandidates(t *testing.T) {
+	tmp := t.TempDir()
+	env := paths.Env{ProjectWT: filepath.Join(tmp, "project", ".worktrail")}
+	for _, requirement := range []struct {
+		name, topic, title string
+	}{
+		{"delivery", "delivery", "Delivery Requirement"},
+		{"billing", "billing", "Billing Requirement"},
+		{"security", "security", "Security Requirement"},
+	} {
+		writePackDoc(t, filepath.Join(env.ProjectWT, "requirements", requirement.name+".md"), map[string]any{
+			"id": requirement.name, "scope": "project", "type": "requirement", "title": requirement.title, "topic": requirement.topic,
+		}, requirement.title)
+	}
+	selector := &fakeSelector{selectFn: func(request SelectionRequest) ([]Item, error) {
+		if request.Section != "Requirements" {
+			return request.Candidates, nil
+		}
+		return []Item{request.Candidates[2], request.Candidates[1], request.Candidates[0]}, nil
+	}}
+
+	pack, err := Build(env, Options{Task: "rank requirements", Limit: 3, Selector: selector})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if len(selector.calls) != 1 || selector.calls[0].Section != "Requirements" || len(selector.calls[0].Candidates) != 3 {
+		t.Fatalf("requirements selector request = %+v, want all three candidates", selector.calls)
+	}
+	requirements := section(pack, "Requirements")
+	want := itemTitles(selector.calls[0].Candidates)
+	reverseStrings(want)
+	if got := itemTitles(requirements.Items); !sameStrings(got, want) {
+		t.Fatalf("requirements selector order = %v, want %v", got, want)
+	}
+}
+
+func TestBuildSelectorTopicPinsRequirementsAndFiltersOtherKnowledge(t *testing.T) {
+	tmp := t.TempDir()
+	env := paths.Env{ProjectWT: filepath.Join(tmp, "project", ".worktrail")}
+	writePackDoc(t, filepath.Join(env.ProjectWT, "requirements", "delivery.md"), map[string]any{
+		"id": "delivery", "scope": "project", "type": "requirement", "title": "Delivery Requirement", "topic": "delivery",
+		"updated_at": "2026-07-01T00:00:00Z",
+	}, "Pinned delivery requirement.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "requirements", "billing.md"), map[string]any{
+		"id": "billing", "scope": "project", "type": "requirement", "title": "Billing Requirement", "topic": "billing",
+		"updated_at": "2026-07-02T00:00:00Z",
+	}, "Cross-topic fill requirement.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "rules", "delivery.md"), map[string]any{
+		"id": "delivery-rule", "scope": "project", "type": "rule", "title": "Delivery Rule", "topic": "delivery",
+	}, "Delivery guidance.")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "rules", "billing.md"), map[string]any{
+		"id": "billing-rule", "scope": "project", "type": "rule", "title": "Billing Rule", "topic": "billing",
+	}, "Billing guidance.")
+	selector := &fakeSelector{selectFn: func(request SelectionRequest) ([]Item, error) {
+		switch request.Section {
+		case "Requirements":
+			if request.Limit != 1 || len(request.Candidates) != 1 || request.Candidates[0].Topic != "billing" {
+				t.Fatalf("requirements fill request = %+v, want one billing candidate and one remaining slot", request)
+			}
+		case "Rules":
+			if len(request.Candidates) != 1 || request.Candidates[0].Topic != "delivery" {
+				t.Fatalf("rules request should hard-filter topic: %+v", request)
+			}
+		}
+		return request.Candidates, nil
+	}}
+
+	pack, err := Build(env, Options{Task: "delivery work", Topic: "delivery", Limit: 2, Selector: selector})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if got, want := itemTitles(section(pack, "Requirements").Items), []string{"Delivery Requirement", "Billing Requirement"}; !sameStrings(got, want) {
+		t.Fatalf("requirements = %v, want pinned item before semantic fill %v", got, want)
+	}
+	if got, want := itemTitles(section(pack, "Rules").Items), []string{"Delivery Rule"}; !sameStrings(got, want) {
+		t.Fatalf("rules = %v, want topic-filtered %v", got, want)
+	}
+}
+
+func TestBuildSelectorRejectsFailureAndInvalidOutput(t *testing.T) {
+	tmp := t.TempDir()
+	env := paths.Env{ProjectWT: filepath.Join(tmp, "project", ".worktrail")}
+	for _, name := range []string{"one", "two"} {
+		writePackDoc(t, filepath.Join(env.ProjectWT, "rules", name+".md"), map[string]any{
+			"id": name, "scope": "project", "type": "rule", "title": name,
+		}, "rule")
+	}
+	tests := []struct {
+		name     string
+		limit    int
+		selectFn func(SelectionRequest) ([]Item, error)
+		want     string
+	}{
+		{
+			name:  "selector error",
+			limit: 1,
+			selectFn: func(SelectionRequest) ([]Item, error) {
+				return nil, errors.New("semantic runtime unavailable")
+			},
+			want: "semantic runtime unavailable",
+		},
+		{
+			name:  "unknown candidate",
+			limit: 1,
+			selectFn: func(SelectionRequest) ([]Item, error) {
+				return []Item{{Path: "rules/not-a-candidate.md"}}, nil
+			},
+			want: "non-candidate",
+		},
+		{
+			name:  "duplicate candidate",
+			limit: 2,
+			selectFn: func(request SelectionRequest) ([]Item, error) {
+				return []Item{request.Candidates[0], request.Candidates[0]}, nil
+			},
+			want: "duplicate",
+		},
+		{
+			name:  "exceeds limit",
+			limit: 1,
+			selectFn: func(request SelectionRequest) ([]Item, error) {
+				return request.Candidates, nil
+			},
+			want: "limit is 1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Build(env, Options{Task: "validate selector", Limit: tt.limit, Selector: &fakeSelector{selectFn: tt.selectFn}})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Build() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildMaintenanceSkipsCodexSessionsAlreadyRepresentedByCandidate(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
@@ -533,6 +713,71 @@ func TestBuildMaintenanceSkipsCodexSessionsAlreadyRepresentedByCandidate(t *test
 	}
 	if containsStep(pack.Maintenance.NextSteps, "worktrail import codex --since 14d --all") {
 		t.Fatalf("maintenance next steps should not re-import represented transcript: %+v", pack.Maintenance.NextSteps)
+	}
+}
+
+type fakeSelector struct {
+	calls    []SelectionRequest
+	selectFn func(SelectionRequest) ([]Item, error)
+}
+
+func (s *fakeSelector) Select(request SelectionRequest) ([]Item, error) {
+	s.calls = append(s.calls, request)
+	if s.selectFn != nil {
+		return s.selectFn(request)
+	}
+	return request.Candidates, nil
+}
+
+func writeSelectorKnowledgeFixture(t *testing.T, env paths.Env) {
+	t.Helper()
+	docs := []struct {
+		path string
+		meta map[string]any
+	}{
+		{filepath.Join(env.UserRoot, "profile", "preferences.md"), map[string]any{"id": "profile", "scope": "user", "type": "profile", "title": "Preferences"}},
+		{filepath.Join(env.ProjectWT, "project.md"), map[string]any{"id": "project", "scope": "project", "type": "project", "title": "Project"}},
+		{filepath.Join(env.ProjectWT, "requirements", "requirement.md"), map[string]any{"id": "requirement", "scope": "project", "type": "requirement", "title": "Requirement"}},
+		{filepath.Join(env.ProjectWT, "architecture", "architecture.md"), map[string]any{"id": "architecture", "scope": "project", "type": "architecture", "title": "Architecture"}},
+		{filepath.Join(env.ProjectWT, "decisions", "decision.md"), map[string]any{"id": "decision", "scope": "project", "type": "decision", "title": "Decision"}},
+		{filepath.Join(env.ProjectWT, "validation", "validation.md"), map[string]any{"id": "validation", "scope": "project", "type": "validation", "title": "Validation"}},
+		{filepath.Join(env.ProjectWT, "rules", "rule.md"), map[string]any{"id": "rule", "scope": "project", "type": "rule", "title": "Rule"}},
+		{filepath.Join(env.ProjectWT, "workflows", "workflow.md"), map[string]any{"id": "workflow", "scope": "project", "type": "workflow", "title": "Workflow"}},
+		{filepath.Join(env.ProjectWT, "integrations", "integration.md"), map[string]any{"id": "integration", "scope": "project", "type": "integration", "title": "Integration"}},
+		{filepath.Join(env.ProjectWT, "glossary", "glossary.md"), map[string]any{"id": "glossary", "scope": "project", "type": "glossary", "title": "Glossary"}},
+		{filepath.Join(env.ProjectWT, "state", "active", "state.md"), map[string]any{"id": "state", "scope": "project", "type": "state", "title": "State", "status": "active"}},
+		{filepath.Join(env.ProjectWT, "handoffs", "handoff.md"), map[string]any{"id": "handoff", "scope": "project", "type": "handoff", "title": "Handoff"}},
+		{filepath.Join(env.ProjectWT, "runtime", "recovery", "recovery.md"), map[string]any{"id": "recovery", "scope": "project", "type": "recovery", "title": "Recovery"}},
+		{filepath.Join(env.ProjectWT, "candidates", "project", "evidence.md"), map[string]any{"id": "evidence", "scope": "project", "candidate_type": "transcript_notes", "title": "Transcript Evidence", "status": "pending"}},
+	}
+	for _, doc := range docs {
+		writePackDoc(t, doc.path, doc.meta, doc.meta["title"].(string))
+	}
+}
+
+func itemTitles(items []Item) []string {
+	titles := make([]string, len(items))
+	for i, item := range items {
+		titles[i] = item.Title
+	}
+	return titles
+}
+
+func sameStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func reverseStrings(values []string) {
+	for i, j := 0, len(values)-1; i < j; i, j = i+1, j-1 {
+		values[i], values[j] = values[j], values[i]
 	}
 }
 

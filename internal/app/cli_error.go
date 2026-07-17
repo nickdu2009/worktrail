@@ -7,25 +7,27 @@ import (
 	"strings"
 
 	"github.com/nickdu2009/worktrail/internal/candidate"
+	"github.com/nickdu2009/worktrail/internal/semantic/daemon"
 	"github.com/nickdu2009/worktrail/internal/textsafety"
 )
 
 const cliErrorSchema = "worktrail.cli.error.v1"
 
 type CLIErrorReport struct {
-	Schema     string              `json:"schema"`
-	OK         bool                `json:"ok"`
-	Command    string              `json:"command"`
-	Message    string              `json:"message"`
-	ErrorCodes []string            `json:"error_codes,omitempty"`
-	Issues     []textsafety.Issue  `json:"issues,omitempty"`
+	Schema     string             `json:"schema"`
+	OK         bool               `json:"ok"`
+	Command    string             `json:"command"`
+	Message    string             `json:"message"`
+	ErrorCodes []string           `json:"error_codes,omitempty"`
+	Issues     []textsafety.Issue `json:"issues,omitempty"`
 }
 
 func inferJSONMode(args []string) bool {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
-		case arg == "--format=json" || arg == "--format" && i+1 < len(args) && args[i+1] == "json":
+		case arg == "--format=json", arg == "--format=json-v2",
+			arg == "--format" && i+1 < len(args) && (args[i+1] == "json" || args[i+1] == "json-v2"):
 			return true
 		case arg == "--json" || arg == "--json=true" || strings.HasPrefix(arg, "--json="):
 			return true
@@ -80,6 +82,14 @@ func cliErrorCodes(err error) []string {
 	if errors.Is(err, candidate.ErrRetireReasonRequired) || errors.Is(err, candidate.ErrEvidenceReasonRequired) {
 		return []string{textsafety.FieldCode("reason", "required")}
 	}
+	var semanticSearchErr *SemanticSearchError
+	if errors.As(err, &semanticSearchErr) && strings.TrimSpace(string(semanticSearchErr.Code)) != "" {
+		return []string{string(semanticSearchErr.Code)}
+	}
+	var semanticErr *daemon.Error
+	if errors.As(err, &semanticErr) {
+		return []string{string(semanticErr.Code)}
+	}
 	code := generalCLIErrorCode(err)
 	if code == "" {
 		return nil
@@ -130,7 +140,7 @@ func failCLICommand(io IO, format, command string, err error) error {
 
 func isJSONFormat(format string) bool {
 	switch strings.TrimSpace(strings.ToLower(format)) {
-	case "json", "true":
+	case "json", "json-v2", "true":
 		return true
 	default:
 		return false

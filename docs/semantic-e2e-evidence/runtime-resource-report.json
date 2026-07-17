@@ -1,0 +1,19 @@
+{
+  "schema": "worktrail.semantic.eval.runtime-resource.v1",
+  "runtime": {
+    "version": "b9986-91c631b21",
+    "alias": "worktrail-bge-m3-b9986-m1",
+    "endpoint": "http://127.0.0.1:55045",
+    "model_dimension": 1024
+  },
+  "network_policy": {
+    "sandbox_profile": "allow default; deny network-outbound",
+    "api_succeeded_under_policy": true,
+    "unauthenticated_tokenize_status": 401
+  },
+  "cold_start_ms": 1081.031583,
+  "warm_embedding_samples": 20,
+  "warm_embedding_p50_ms": 10.722479,
+  "warm_embedding_p95_ms": 17.446834,
+  "peak_rss_kb": 802992
+}
