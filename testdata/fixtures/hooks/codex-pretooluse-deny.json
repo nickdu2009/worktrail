@@ -1,0 +1,9 @@
+{
+  "session_id": "codex-session-deny",
+  "turn_id": "turn-deny",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu-deny-1",
+  "tool_input": {
+    "command": "echo blocked > .worktrail/decisions/blocked.md"
+  }
+}

@@ -39,7 +39,7 @@ func EnsurePrivateDir(root, rel string) (string, error) {
 		info, statErr := os.Lstat(current)
 		switch {
 		case errors.Is(statErr, os.ErrNotExist):
-			if err := os.Mkdir(current, 0o700); err != nil {
+			if err := os.Mkdir(current, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 				return "", err
 			}
 			info, statErr = os.Lstat(current)

@@ -1,0 +1,5 @@
+{
+  "codex_cli_version": "0.144.5",
+  "contract_version": "worktrail.hooks.v1",
+  "notes": "Protocol smoke tests must assert this Codex CLI version before release."
+}

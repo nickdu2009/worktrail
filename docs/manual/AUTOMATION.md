@@ -22,7 +22,7 @@ Worktrail 的自动化目标很克制：
 1. agent 集成安装后的运行时文件，例如 hooks、settings 配置和用户级 skills
 2. 对话内 skills，例如 `worktrail-context`、`worktrail-review`、`worktrail-distill`、`worktrail-maintain`、`worktrail-handoff`
 3. `context` 暴露的 maintenance hints 和只读计划命令
-4. hooks 在特定事件点生成 runtime session、runtime checkpoint、takeover note 或审计日志的能力
+4. hooks 在特定事件点注入有界 active-task context、做正式知识路径 guard、写入 runtime session/checkpoint 与审计日志的能力
 
 Worktrail 的自动化不是“后台一直运行的系统”，而是围绕当前 Agent 会话按事件点显式触发。
 
@@ -43,34 +43,34 @@ worktrail install <tool> --user --project
 
 这里要区分两件事：
 
-- `worktrail init` 负责初始化用户级和项目级 Worktrail 根目录
-- `worktrail install ...` 负责安装工具集成文件，例如 hooks、settings 和用户级 rules/skills
+- `worktrail init` 负责初始化用户级和项目级 Worktrail 根目录与 `.gitignore`；**不会**隐式写入 Cursor/Codex hooks
+- `worktrail install <tool> --project` 才负责安装项目级 hooks 配置；`install --user` 只安装 Rules/Skills
 
 用户级 Worktrail skills 不应在没有 `.worktrail/` 的项目里自动跑常规工作流；没有这个标记时，Worktrail 仍然只适合显式 init、install、inspect 或 repair 请求。
 
 ## Hooks 自动化了什么
 <div class="title-en">What Hooks Automate</div>
 
-hooks 的职责是把会话事件转换成 Worktrail 可用的运行材料。
+Cursor/Codex 项目 hooks 直接调用 `worktrail hook <host> <event>`，不生成 runner、wrapper、Plugin、Cloud Agent 或 MCP server。
 
 它们适合做的事情包括：
 
-- 记录 allowlist 内的会话事件元数据和审计信息
-- 在 compact、stop 或 session end 之类的事件点写入有界的 runtime session 或 runtime checkpoint
-- 生成 checkpoint、takeover note、runtime record 或审计日志
-- 把有信号的事件转化为后续 degraded recovery 可用的 runtime 材料
+- 在唯一显式 active task 存在时注入不超过 6 KiB 的有界 context
+- 对可事前判定的 Shell/MCP（及 Codex PreToolUse/PermissionRequest）正式知识写入做 guard
+- 在 compact/stop 等事件点幂等写入 runtime session 或 checkpoint，并保留 reason-code 审计
+- Cursor `afterFileEdit` 仅做事后审计（Cursor 没有事前文件编辑 hook）
 
 它们不适合做的事情包括：
 
-- 自动 promote
-- 自动 merge
-- 自动 discard
-- 自动修改正式知识
-- 创建 local handoff
-- 发布 team handoff
-- 自动 prune runtime 记录
+- 自动 promote / merge / discard
+- 自动修改正式知识，或绕过 `draft` / `adr` / `review`
+- 创建 takeover note、local handoff、candidate 或正式知识
+- 持久化完整 prompt、工具输出、transcript 绝对路径或 secret
+- 自动 prune runtime / receipt / binding（需显式 `worktrail runtime prune --apply --confirm` 或 `worktrail doctor ops repair --confirm`）
 
-也就是说，hooks 可以“自动采集和准备”，但不能“自动采纳”或“自动交接”。Handoff 只在用户明确要求跨 chat、切 Agent 或稍后继续时由 skill/CLI 创建。
+也就是说，hooks 可以“自动采集、guard 和准备”，但不能“自动采纳”或“自动交接”。Handoff 只在用户明确要求跨 chat、切 Agent 或稍后继续时由 skill/CLI 创建。
+
+Hook receipt 与 runtime/audit effect 受 ops control-tree 约束，无法写入同一 journal intent；claim 与 complete 各自短暂持有 ops lock，apply（含 runtime/audit）在锁外执行以避免与 `wlog.Append` 重入冲突。apply 失败会回滚 claim。若进程在 effect 成功后、completed 写入前崩溃，receipt 会停留在 claimed，需 doctor repair 清理后由后续 hook 重试（不 auto-replay）。
 
 ## ZCode Agent 的自动化边界
 <div class="title-en">ZCode Agent Automation Boundary</div>
@@ -113,7 +113,7 @@ skills 自动化的是流程编排，不是绕过边界。
 
 Worktrail 只保留 CLI、hooks 和 skills 这三类自动化入口。
 
-- hooks 负责在明确事件点自动写 runtime session、runtime checkpoint、takeover note 和日志；hooks 永不创建 handoff
+- hooks 负责在明确事件点注入 context、执行路径 guard、写 runtime session/checkpoint 和日志；hooks 永不创建 handoff 或 takeover
 - skills 负责在对话里编排 `context`、`review`、`distill`、`handoff`、`resume` 等流程
 - 高风险写动作仍然通过显式 CLI 执行，并保留人工确认边界
 

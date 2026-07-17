@@ -1,0 +1,8 @@
+{
+  "session_id": "codex-post",
+  "tool_name": "Bash",
+  "tool_use_id": "tu-post-1",
+  "tool_input": {
+    "command": "echo ok"
+  }
+}

@@ -97,6 +97,16 @@ worktrail install claude --project
 
 项目级安装主要写入当前仓库需要的 hooks、settings 配置和 `.gitignore` 运行时条目。它不会从 `templates/root/**` 或 `templates/skills/**` 安装项目级规则或项目级 skills。ZCode Agent 当前没有 Worktrail-managed 的项目级 hooks 或 runtime settings，因此不需要 `worktrail install zcode --project`。
 
+Cursor/Codex 项目 hooks 使用宿主原生 schema，并直接调用 `worktrail hook <host> <event>`：
+
+- Cursor：event array；guard 事件 timeout 1 秒，其他 2 秒
+- Codex：event → matcher group → command handler；同样要求显式 timeout
+- 安装会保留用户已有 handler；重复安装不会复制 Worktrail managed handler
+- 若 Codex hooks 仍是非 Worktrail 的旧 scalar 字符串，整个 project install 会零写入并要求手动迁移
+- `worktrail init` 不会写入 `.codex/hooks.json` 或 `.cursor/hooks.json`
+
+Codex 安装后需在 Codex 内用 `/hooks` 确认项目 hooks 已信任，否则 managed handler 不会生效（trust 状态不可机器检测；`doctor codex` 以 manual-only check 提示）。升级 hooks schema 后请重新执行 `worktrail install cursor|codex --project`。
+
 ### 一次安装用户级和项目级
 <div class="title-en">Install Both Scopes</div>
 

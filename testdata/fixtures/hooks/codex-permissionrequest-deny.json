@@ -1,0 +1,8 @@
+{
+  "session_id": "codex-session-perm",
+  "turn_id": "turn-perm",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "rm .worktrail/rules/coding-rules.md"
+  }
+}

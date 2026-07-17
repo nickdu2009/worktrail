@@ -1,7 +1,4 @@
 {
-  "session_id": "codex:test-session",
-  "task": "Implement Worktrail hook handling",
-  "summary": "State and candidate drafts should be generated without promotion.",
-  "files": ["internal/hooks/hooks.go"],
-  "commands": ["go test ./internal/hooks"]
+  "session_id": "codex-test-session",
+  "turn_id": "turn-stop-1"
 }

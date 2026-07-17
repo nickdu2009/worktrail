@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/nickdu2009/worktrail/internal/hookconfig"
 	wlog "github.com/nickdu2009/worktrail/internal/log"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/store"
@@ -254,6 +255,9 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 	skills := cfg.userSkills
 	rootFile := cfg.userRootFile
 	if scope == "project" {
+		if err := preflightProjectHooks(cfg); err != nil {
+			return err
+		}
 		if err := cleanupLegacyProjectAgentFiles(cfg, report); err != nil {
 			return err
 		}
@@ -304,13 +308,19 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 			return err
 		}
 		report.Actions = append(report.Actions, Action{Path: filepath.Join(env.ProjectRoot, ".gitignore"), Action: "gitignore-managed-block-installed"})
-		if err := mergeJSONTemplate(cfg.projectJSONPath, cfg.projectJSONTmpl); err != nil {
-			return err
+		if host := hooksHostFor(cfg); host != "" {
+			if err := replaceProjectHooks(cfg.projectJSONPath, host, hookconfig.ModeInstall, report); err != nil {
+				return err
+			}
+		} else {
+			if err := mergeJSONTemplate(cfg.projectJSONPath, cfg.projectJSONTmpl); err != nil {
+				return err
+			}
+			if err := removeLegacyMCPConfig(cfg.projectJSONPath); err != nil {
+				return err
+			}
+			report.Actions = append(report.Actions, Action{Path: cfg.projectJSONPath, Action: "worktrail-json-merged"})
 		}
-		if err := removeLegacyMCPConfig(cfg.projectJSONPath); err != nil {
-			return err
-		}
-		report.Actions = append(report.Actions, Action{Path: cfg.projectJSONPath, Action: "worktrail-json-merged"})
 	}
 	jsons := cfg.userJSONs
 	if scope == "project" {
@@ -323,6 +333,12 @@ func installScope(cfg integrationConfig, scope string, report *Report) error {
 		}
 	}
 	for _, jt := range jsons {
+		if host := hooksHostForPath(cfg, jt.path); host != "" {
+			if err := replaceProjectHooks(jt.path, host, hookconfig.ModeInstall, report); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := mergeJSONTemplate(jt.path, jt.template); err != nil {
 			return err
 		}
@@ -370,19 +386,31 @@ func uninstallScope(cfg integrationConfig, scope string, report *Report) error {
 		report.Actions = append(report.Actions, Action{Path: path, Action: "managed-block-removed"})
 	}
 	if scope == "project" && cfg.projectJSONPath != "" && cfg.projectJSONTmpl != "" {
-		if err := removeJSONTemplate(cfg.projectJSONPath, cfg.projectJSONTmpl); err != nil {
-			return err
+		if host := hooksHostFor(cfg); host != "" {
+			if err := replaceProjectHooks(cfg.projectJSONPath, host, hookconfig.ModeUninstall, report); err != nil {
+				return err
+			}
+		} else {
+			if err := removeJSONTemplate(cfg.projectJSONPath, cfg.projectJSONTmpl); err != nil {
+				return err
+			}
+			if err := removeLegacyMCPConfig(cfg.projectJSONPath); err != nil {
+				return err
+			}
+			report.Actions = append(report.Actions, Action{Path: cfg.projectJSONPath, Action: "worktrail-json-removed"})
 		}
-		if err := removeLegacyMCPConfig(cfg.projectJSONPath); err != nil {
-			return err
-		}
-		report.Actions = append(report.Actions, Action{Path: cfg.projectJSONPath, Action: "worktrail-json-removed"})
 	}
 	jsons := cfg.userJSONs
 	if scope == "project" {
 		jsons = cfg.projectJSONs
 	}
 	for _, jt := range jsons {
+		if host := hooksHostForPath(cfg, jt.path); host != "" {
+			if err := replaceProjectHooks(jt.path, host, hookconfig.ModeUninstall, report); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := removeJSONTemplate(jt.path, jt.template); err != nil {
 			return err
 		}
@@ -424,8 +452,21 @@ func doctorScope(cfg integrationConfig, scope string, report *Report) {
 	if scope == "project" && cfg.projectJSONPath != "" {
 		projectRoot := filepath.Dir(filepath.Dir(cfg.projectJSONPath))
 		report.Checks = append(report.Checks, hashManagedCheck(scope+" gitignore", filepath.Join(projectRoot, ".gitignore")))
-		ok, note := jsonHasTemplate(cfg.projectJSONPath, cfg.projectJSONTmpl)
-		report.Checks = append(report.Checks, Check{Name: scope + " hooks/settings", Path: cfg.projectJSONPath, OK: ok, Note: note})
+		if host := hooksHostFor(cfg); host != "" {
+			report.Checks = append(report.Checks, hooksDoctorChecks(cfg.projectJSONPath, host)...)
+			report.Checks = append(report.Checks, bindingReceiptDoctorChecks(projectRoot)...)
+			if host == hookconfig.HostCodex {
+				report.Checks = append(report.Checks, Check{
+					Name: scope + " codex hooks trust (manual-only)",
+					Path: cfg.projectJSONPath,
+					OK:   true,
+					Note: "manual-only: Codex project-hook trust is not machine-detectable; confirm with /hooks before relying on managed handlers",
+				})
+			}
+		} else {
+			ok, note := jsonHasTemplate(cfg.projectJSONPath, cfg.projectJSONTmpl)
+			report.Checks = append(report.Checks, Check{Name: scope + " hooks/settings", Path: cfg.projectJSONPath, OK: ok, Note: note})
+		}
 		report.Checks = append(report.Checks, worktrailWritableChecks(projectRoot)...)
 	}
 	jsons := cfg.userJSONs
@@ -435,9 +476,14 @@ func doctorScope(cfg integrationConfig, scope string, report *Report) {
 			projectRoot := filepath.Dir(filepath.Dir(jsons[0].path))
 			report.Checks = append(report.Checks, hashManagedCheck(scope+" gitignore", filepath.Join(projectRoot, ".gitignore")))
 			report.Checks = append(report.Checks, worktrailWritableChecks(projectRoot)...)
+			report.Checks = append(report.Checks, bindingReceiptDoctorChecks(projectRoot)...)
 		}
 	}
 	for _, jt := range jsons {
+		if host := hooksHostForPath(cfg, jt.path); host != "" {
+			report.Checks = append(report.Checks, hooksDoctorChecks(jt.path, host)...)
+			continue
+		}
 		ok, note := jsonHasTemplate(jt.path, jt.template)
 		report.Checks = append(report.Checks, Check{Name: scope + " " + filepath.Base(jt.path), Path: jt.path, OK: ok, Note: note})
 	}
@@ -653,6 +699,231 @@ func splitSkillDocument(body string) (frontmatter string, content string, ok boo
 		closeEnd++
 	}
 	return strings.TrimSpace(body[:closeEnd]), strings.TrimSpace(body[closeEnd:]), true
+}
+
+func hooksHostFor(cfg integrationConfig) string {
+	switch cfg.tool {
+	case ToolCodex:
+		return hookconfig.HostCodex
+	case ToolCursor:
+		return hookconfig.HostCursor
+	default:
+		return ""
+	}
+}
+
+func hooksHostForPath(cfg integrationConfig, path string) string {
+	switch {
+	case cfg.tool == ToolCodex && strings.HasSuffix(filepath.ToSlash(path), "/.codex/hooks.json"):
+		return hookconfig.HostCodex
+	case cfg.tool == ToolCursor && strings.HasSuffix(filepath.ToSlash(path), "/.cursor/hooks.json"):
+		return hookconfig.HostCursor
+	default:
+		return ""
+	}
+}
+
+func preflightProjectHooks(cfg integrationConfig) error {
+	targets := projectHooksTargets(cfg)
+	for _, target := range targets {
+		current, err := readOptionalFile(target.path)
+		if err != nil {
+			return err
+		}
+		if _, err := hookconfig.Reconcile(target.host, current, hookconfig.ModeInstall); err != nil {
+			if errors.Is(err, hookconfig.ErrLegacyCodexUserHook) {
+				return fmt.Errorf("%w; project install aborted with zero writes", err)
+			}
+			return fmt.Errorf("hooks preflight %s: %w", target.path, err)
+		}
+	}
+	return nil
+}
+
+type hooksTarget struct {
+	path string
+	host string
+}
+
+func projectHooksTargets(cfg integrationConfig) []hooksTarget {
+	var targets []hooksTarget
+	if host := hooksHostFor(cfg); host != "" && cfg.projectJSONPath != "" {
+		targets = append(targets, hooksTarget{path: cfg.projectJSONPath, host: host})
+	}
+	for _, jt := range cfg.projectJSONs {
+		if host := hooksHostForPath(cfg, jt.path); host != "" {
+			targets = append(targets, hooksTarget{path: jt.path, host: host})
+		}
+	}
+	return targets
+}
+
+func replaceProjectHooks(path, host string, mode hookconfig.ReconcileMode, report *Report) error {
+	current, err := readOptionalFile(path)
+	if err != nil {
+		return err
+	}
+	next, err := hookconfig.Reconcile(host, current, mode)
+	if err != nil {
+		return err
+	}
+	if mode == hookconfig.ModeUninstall {
+		if len(strings.TrimSpace(string(next))) == 0 || string(next) == "{}\n" {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			report.Actions = append(report.Actions, Action{Path: path, Action: "worktrail-hooks-removed"})
+			return nil
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(next, &doc); err == nil && len(doc) == 0 {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			report.Actions = append(report.Actions, Action{Path: path, Action: "worktrail-hooks-removed"})
+			return nil
+		}
+	}
+	if err := util.AtomicWrite(path, next, 0o644); err != nil {
+		report.Actions = append(report.Actions, Action{
+			Path:   path,
+			Action: "hooks-replace-failed-retryable",
+		})
+		return fmt.Errorf("hooks replace failed for %s after rules/skills install; original hooks preserved: %w", path, err)
+	}
+	action := "worktrail-hooks-installed"
+	if mode == hookconfig.ModeUninstall {
+		action = "worktrail-hooks-removed"
+	}
+	report.Actions = append(report.Actions, Action{Path: path, Action: action})
+	return nil
+}
+
+func readOptionalFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return data, err
+}
+
+func hooksDoctorChecks(path, host string) []Check {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return []Check{{Name: host + " hooks", Path: path, OK: false, Note: err.Error()}}
+	}
+	findings, err := hookconfig.Diagnose(host, data)
+	if err != nil {
+		return []Check{{Name: host + " hooks", Path: path, OK: false, Note: err.Error()}}
+	}
+	if len(findings) == 0 {
+		return []Check{{Name: host + " hooks", Path: path, OK: true, Note: "managed schema and handlers present"}}
+	}
+	checks := make([]Check, 0, len(findings))
+	for _, finding := range findings {
+		checks = append(checks, Check{
+			Name: host + " hooks " + finding.Code,
+			Path: path,
+			OK:   false,
+			Note: finding.Message,
+		})
+	}
+	return checks
+}
+
+func bindingReceiptDoctorChecks(projectRoot string) []Check {
+	root := filepath.Join(projectRoot, ".worktrail")
+	checks := []Check{}
+	for _, rel := range []string{
+		filepath.Join("runtime", "hooks", "bindings"),
+		filepath.Join("ops", "hook-receipts"),
+	} {
+		path := filepath.Join(root, rel)
+		info, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			checks = append(checks, Check{
+				Name: "project " + filepath.ToSlash(rel),
+				Path: path,
+				OK:   true,
+				Note: "not created yet",
+			})
+			continue
+		}
+		if err != nil {
+			checks = append(checks, Check{Name: "project " + filepath.ToSlash(rel), Path: path, OK: false, Note: err.Error()})
+			continue
+		}
+		if !info.IsDir() {
+			checks = append(checks, Check{Name: "project " + filepath.ToSlash(rel), Path: path, OK: false, Note: "not a directory"})
+			continue
+		}
+		mode := info.Mode().Perm()
+		ok := mode&0o077 == 0
+		note := fmt.Sprintf("mode=%04o", mode)
+		if !ok {
+			note = "permissions too open; expected 0700-style private directory"
+		}
+		checks = append(checks, Check{Name: "project " + filepath.ToSlash(rel) + " permissions", Path: path, OK: ok, Note: note})
+	}
+	claimedKeys, err := listClaimedHookReceiptKeys(root)
+	if err != nil {
+		checks = append(checks, Check{
+			Name: "project ops/hook-receipts claimed",
+			Path: filepath.Join(root, "ops", "hook-receipts"),
+			OK:   false,
+			Note: err.Error(),
+		})
+		return checks
+	}
+	if len(claimedKeys) == 0 {
+		checks = append(checks, Check{
+			Name: "project ops/hook-receipts claimed",
+			Path: filepath.Join(root, "ops", "hook-receipts"),
+			OK:   true,
+			Note: "no claimed receipts",
+		})
+		return checks
+	}
+	checks = append(checks, Check{
+		Name: "project ops/hook-receipts claimed",
+		Path: filepath.Join(root, "ops", "hook-receipts"),
+		OK:   false,
+		Note: fmt.Sprintf("%d claimed receipt(s) pending repair via worktrail doctor ops repair --confirm: %s", len(claimedKeys), strings.Join(claimedKeys, ", ")),
+	})
+	return checks
+}
+
+func listClaimedHookReceiptKeys(root string) ([]string, error) {
+	dir := filepath.Join(root, "ops", "hook-receipts")
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		var receipt struct {
+			EffectKey string `json:"effect_key"`
+			Status    string `json:"status"`
+		}
+		if err := json.Unmarshal(data, &receipt); err != nil {
+			continue
+		}
+		if receipt.Status == "claimed" {
+			keys = append(keys, receipt.EffectKey)
+		}
+	}
+	sort.Strings(keys)
+	return keys, nil
 }
 
 func mergeJSONTemplate(path, templatePath string) error {
