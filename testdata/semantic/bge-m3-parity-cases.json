@@ -1,0 +1,56 @@
+{
+  "schema": "worktrail.semantic.eval.corpus.v1",
+  "queries": [
+    {
+      "id": "query-chinese",
+      "text": "语义索引损坏后应该怎样恢复？",
+      "relevant_ids": ["doc-rebuild"]
+    },
+    {
+      "id": "query-english",
+      "text": "How does the local runtime authenticate embedding requests?",
+      "relevant_ids": ["doc-auth"]
+    },
+    {
+      "id": "query-mixed",
+      "text": "如何用 --semantic=required 查询 Context Pack？",
+      "relevant_ids": ["doc-cli"]
+    },
+    {
+      "id": "query-code",
+      "text": "Which Go code opens an immutable SQLite connection?",
+      "relevant_ids": ["doc-sqlite"]
+    },
+    {
+      "id": "query-near-limit",
+      "text": "Explain the relationship between a content-addressed semantic bundle, its manifest SHA-256, the selected Apple Silicon runtime, source Markdown, a profile-local vector generation, lease-safe atomic activation, automatic deletion after leases drain, lexical degradation, and the explicit worktrail semantic rebuild command. Include the terms bundle_id, runtime alias, CLS pooling, L2 normalization, sqlite-vec cosine distance, current-user API key, loopback binding, no Web UI, no request text logs, and no implicit full rebuild.",
+      "relevant_ids": ["doc-bundle", "doc-rebuild"]
+    }
+  ],
+  "documents": [
+    {
+      "id": "doc-rebuild",
+      "text": "缺少、损坏或不兼容的 semantic generation 不会触发隐式完整重建。auto 模式降级为 lexical FTS；required 模式返回稳定错误和 worktrail semantic rebuild --scope all 修复命令。"
+    },
+    {
+      "id": "doc-auth",
+      "text": "The managed llama serve process binds only to 127.0.0.1 and uses a random current-user API key. Worktrail calls the local API first and enters a lock-protected recovery path only when the API is unavailable."
+    },
+    {
+      "id": "doc-cli",
+      "text": "Use worktrail search --semantic=required \"task\" for strict semantic search. Context Pack semantic selection may affect knowledge sections only; state and current handoffs remain deterministic."
+    },
+    {
+      "id": "doc-sqlite",
+      "text": "An active semantic generation is opened through a read-only immutable SQLite URI after a query acquires its generation lease. The query closes the connection before releasing the lease."
+    },
+    {
+      "id": "doc-bundle",
+      "text": "A semantic bundle is content-addressed by the SHA-256 of its canonical trusted manifest. The manifest pins the BGE-M3 Q8_0 GGUF, llama.app runtime variant, CLS pooling, L2 normalization, and sqlite-vec cosine profile. Candidate generations build beside the active generation and atomically activate after validation."
+    },
+    {
+      "id": "doc-unrelated",
+      "text": "Pending knowledge candidates require explicit human review before promotion. Evidence is not formal knowledge."
+    }
+  ]
+}

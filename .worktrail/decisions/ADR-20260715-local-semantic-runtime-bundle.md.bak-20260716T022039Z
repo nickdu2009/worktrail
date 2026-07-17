@@ -1,0 +1,54 @@
+---worktrail
+{
+  "id": "ADR-20260715-local-semantic-runtime-bundle",
+  "lifecycle": "current",
+  "schema": "worktrail.knowledge.v1",
+  "scope": "project",
+  "stage": "decision",
+  "status": "accepted",
+  "title": "Use a Worktrail-Managed llama.app BGE-M3 Q8 Bundle",
+  "type": "decision"
+}
+---
+
+# ADR-20260715-local-semantic-runtime-bundle: Use a Worktrail-Managed llama.app BGE-M3 Q8 Bundle
+
+- Status: Accepted
+- Date: 2026-07-15
+
+## Context
+
+Worktrail v1.0.0 includes opt-in local semantic recall. The runtime and model must remain local, reproducible, explicitly installed, isolated from the system PATH, and removable without affecting lexical search. The release candidate uses the immutable ggml-org BGE-M3 Q8_0 GGUF and the official prebuilt llama.app unified llama program. Apple M1-M5 are candidate chip families, but a release may advertise only variants that pass matching physical-hardware validation.
+
+## Decision
+
+Use a Worktrail-managed, content-addressed semantic bundle containing the pinned BGE-M3 Q8_0 GGUF, one release-pinned llama.app version, only physically validated Apple runtime variants, the canonical trusted manifest, licenses, and attribution. The bundle ID is the SHA-256 of the versioned canonical manifest excluding its own ID, signatures, timestamps, and mutable local state.
+
+Core init remains network-free unless semantic installation is explicit or interactively confirmed. Worktrail downloads only immutable manifest URLs, verifies compressed and final sizes and SHA-256 values, decompresses llama-app.zst in process with the pinned pure-Go zstd package, stages the complete bundle, and atomically renames the verified directory. It never executes a remote installer, compiles llama.cpp, or changes PATH.
+
+Semantic operations may start llama serve as a detached current-user process. It binds only to authenticated loopback, uses the bundle ID as alias, loads only the verified local GGUF, disables unwanted UI, request-content logging, metrics, and network behavior, and uses API-first recovery. Worktrail verifies runtime/model files before launch and verifies API alias, dimension, and response contracts without assuming the API exposes file SHA-256. Unknown processes are never killed.
+
+The bounded M1 Gate validates llama.app b9986 / executable b9986-91c631b21, BGE-M3 Q8_0 parity, loopback API-key authentication, alias, 1024 dimensions, embedding endpoints, CLS pooling, L2 normalization, and the requested no-WebUI/no-content-log/offline configuration on Apple M1 Pro/macOS 15.7.3. The candidate runtime manifest remains explicitly non-installable: M2-M5, A18, and non-Darwin variants are unsupported, and no trusted manifest or production semantic installation is accepted until blocked-outbound, licensing/attribution, resource-budget, minimum-macOS, canonical-manifest, and release-attestation gates complete.
+
+## Consequences
+
+### Positive
+
+- Semantic inference, model files, query text, and vectors remain local and auditable.
+- Content-addressed bundles permit side-by-side upgrades without identity collisions.
+- Unsupported or absent semantic capability leaves the lexical product available.
+- Terminal users do not need Python, CMake, a source build, or a system llama installation.
+
+### Negative
+
+- Worktrail owns download, decompression, process supervision, authentication, endpoint allocation, and cache cleanup.
+- The model and warm process consume meaningful disk and memory.
+- Each advertised Apple chip variant requires physical-hardware release evidence.
+- Runtime or manifest changes create a new bundle and force generation rebuilds.
+
+## Links
+
+- Related: docs/worktrail-local-semantic-recall-architecture.md
+- Related: docs/worktrail-release-acceptance.md
+- Evidence: docs/worktrail-semantic-parity-spike-2026-07-15.md
+- Candidate manifest: docs/worktrail-semantic-m1-candidate-manifest.yaml

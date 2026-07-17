@@ -8,7 +8,31 @@
 
 Worktrail 是一个 local-first 的文档知识库、工作记录和交接工具。它帮助 Agent 在任务开始前读取项目知识和状态，在长任务中保留进度，在显式跨 chat 或切换 Agent 时留下 task-scoped handoff，并把确认过的经验沉淀成可 review 的知识候选。
 
-它不是 TUI、Web UI、daemon、向量数据库或后台服务。
+它不是 TUI、Web UI、通用 daemon、云 embedding 服务或独立向量数据库。
+v1.0.0 计划提供一个需要显式安装和调用的本地语义召回例外，但它仍以
+Markdown 为 source of truth，并保留现有 lexical 路径。
+
+## 本地语义召回现在可用了吗？
+<div class="title-en">Is Local Semantic Recall Available Now?</div>
+
+v1.0.0 已把本地语义召回纳入发布范围，并保留 SQLite + FTS5 lexical
+search 作为基线。M1 是唯一的 `verified` runtime 变体，继续要求完整的
+真机、离线、隐私、生命周期、检索质量和资源验证。M2、M3、M4、M5 仅作为
+需要显式选择的 `experimental` 变体发布：每种芯片只使用自己的 pinned
+official artifact，并且必须在安装时通过本地 integrity、authenticated
+loopback、alias、tokenization、embedding shape、CLS pooling 和 L2
+normalization self-check 后才能激活，绝不回退到其他芯片的 artifact。
+
+`experimental` 不代表 `compatible` 或 `verified`。它不承诺性能、隐私、
+最低 macOS 版本或运营支持，也不要求在发布前提供每种芯片的 self-check
+报告。自检失败时，semantic `auto` mode 会显式降级到 lexical；需要
+semantic 的严格模式会返回稳定的失败原因。
+
+该能力不会随安装 Worktrail 二进制自动下载模型。核心 `worktrail init`
+默认不访问网络；只有 `worktrail init --semantic` 会安装 semantic bundle，
+而 `worktrail init --no-semantic` 会明确禁用语义安装。安装后仍需显式执行
+`worktrail semantic rebuild --scope all`。未安装或不可用时，现有 lexical CLI
+继续工作。
 
 ## 用户级 scope 和项目级 scope 有什么区别？
 <div class="title-en">User Scope vs Project Scope</div>

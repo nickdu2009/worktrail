@@ -1,0 +1,217 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/nickdu2009/worktrail/internal/index"
+	"github.com/nickdu2009/worktrail/internal/semantic/contracts"
+)
+
+const semanticSearchResultSchema = "worktrail.search.results.v2"
+
+// SemanticSearcher is the application boundary for semantic recall. Production
+// wiring may adapt a semantic implementation to this interface without making
+// the command layer depend on that implementation.
+type SemanticSearcher interface {
+	Search(context.Context, SemanticSearchRequest) (SemanticSearchResponse, error)
+}
+
+type SemanticSearchRequest struct {
+	Query string
+	Scope string
+	Type  string
+	Topic string
+	Tag   string
+	Mode  contracts.Mode
+	Limit int
+}
+
+type SemanticSearchResponse struct {
+	Results         []index.Result
+	Policy          string
+	Profile         string
+	Lanes           []SemanticSearchLane
+	Degraded        bool
+	DegradedReasons []contracts.ReasonCode
+	NextSteps       []string
+}
+
+type SemanticSearchLane struct {
+	Name     string               `json:"name"`
+	Degraded bool                 `json:"degraded,omitempty"`
+	Reason   contracts.ReasonCode `json:"reason,omitempty"`
+}
+
+type SemanticSearchError struct {
+	Code contracts.ReasonCode
+}
+
+func (e *SemanticSearchError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("semantic search required but unavailable (%s)", e.Code)
+}
+
+type unavailableSemanticSearcher struct{}
+
+func (unavailableSemanticSearcher) Search(_ context.Context, request SemanticSearchRequest) (SemanticSearchResponse, error) {
+	reason := contracts.ReasonRuntimeUnavailable
+	if request.Mode == contracts.ModeRequired {
+		return SemanticSearchResponse{}, &SemanticSearchError{Code: reason}
+	}
+	return SemanticSearchResponse{
+		Degraded:        true,
+		DegradedReasons: []contracts.ReasonCode{reason},
+		NextSteps:       []string{semanticSearchRebuildStep(request.Scope)},
+	}, nil
+}
+
+type semanticSearchOptions struct {
+	Mode    contracts.Mode
+	Enabled bool
+	Explain bool
+	Args    []string
+}
+
+func parseSemanticSearchOptions(args []string) (semanticSearchOptions, error) {
+	options := semanticSearchOptions{Mode: contracts.ModeLexical}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--semantic":
+			if options.Enabled || i+1 < len(args) && (args[i+1] == "auto" || args[i+1] == "required") {
+				return semanticSearchOptions{}, searchSemanticUsageError(args)
+			}
+			options.Enabled = true
+			options.Mode = contracts.ModeAuto
+		case strings.HasPrefix(arg, "--semantic="):
+			if options.Enabled {
+				return semanticSearchOptions{}, searchSemanticUsageError(args)
+			}
+			mode, err := contracts.ParseMode(strings.TrimPrefix(arg, "--semantic="))
+			if err != nil || mode == contracts.ModeLexical {
+				return semanticSearchOptions{}, searchSemanticUsageError(args)
+			}
+			options.Enabled = true
+			options.Mode = mode
+		case arg == "--explain":
+			if options.Explain {
+				return semanticSearchOptions{}, searchSemanticUsageError(args)
+			}
+			options.Explain = true
+		case strings.HasPrefix(arg, "--explain="):
+			return semanticSearchOptions{}, searchSemanticUsageError(args)
+		default:
+			options.Args = append(options.Args, arg)
+		}
+	}
+	if options.Explain && !options.Enabled {
+		return semanticSearchOptions{}, searchSemanticUsageError(args)
+	}
+	return options, nil
+}
+
+func searchSemanticUsageError(args []string) error {
+	return fmt.Errorf("usage: worktrail search [--semantic|--semantic=auto|--semantic=required] [--explain] [--scope project|user|all] [--type <type>] [--topic <topic>] [--tag <tag>] [--format text|json|json-v2] <keyword>: invalid semantic arguments %q", args)
+}
+
+func semanticSearchRebuildStep(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "all"
+	}
+	return "worktrail semantic rebuild --scope " + scope
+}
+
+func semanticSearchDegraded(response SemanticSearchResponse) bool {
+	if response.Degraded || len(response.DegradedReasons) > 0 {
+		return true
+	}
+	for _, lane := range response.Lanes {
+		if lane.Degraded {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeSemanticSearchDiagnostics(response SemanticSearchResponse, scope string) SemanticSearchResponse {
+	if !semanticSearchDegraded(response) {
+		return response
+	}
+	response.Degraded = true
+	if len(response.DegradedReasons) == 0 {
+		for _, lane := range response.Lanes {
+			if lane.Degraded && lane.Reason != "" {
+				response.DegradedReasons = append(response.DegradedReasons, lane.Reason)
+			}
+		}
+		if len(response.DegradedReasons) == 0 {
+			response.DegradedReasons = []contracts.ReasonCode{contracts.ReasonRuntimeUnavailable}
+		}
+	}
+	if len(response.NextSteps) == 0 {
+		response.NextSteps = []string{semanticSearchRebuildStep(scope)}
+	}
+	return response
+}
+
+func semanticSearchErrorDiagnostics(scope string) SemanticSearchResponse {
+	return normalizeSemanticSearchDiagnostics(SemanticSearchResponse{Degraded: true}, scope)
+}
+
+func printSemanticSearchDiagnostics(ioctx IO, mode contracts.Mode, response SemanticSearchResponse, explain bool) {
+	if !semanticSearchDegraded(response) && !explain {
+		return
+	}
+	if semanticSearchDegraded(response) {
+		fmt.Fprintf(ioctx.Err, "semantic search fallback (%s)\n", mode)
+		for _, reason := range response.DegradedReasons {
+			fmt.Fprintf(ioctx.Err, "reason: %s\n", reason)
+		}
+		for _, nextStep := range response.NextSteps {
+			fmt.Fprintf(ioctx.Err, "next: %s\n", nextStep)
+		}
+	}
+	if !explain {
+		return
+	}
+	if response.Policy != "" {
+		fmt.Fprintf(ioctx.Err, "policy: %s\n", response.Policy)
+	}
+	if response.Profile != "" {
+		fmt.Fprintf(ioctx.Err, "profile: %s\n", response.Profile)
+	}
+	for _, lane := range response.Lanes {
+		if lane.Degraded {
+			fmt.Fprintf(ioctx.Err, "lane: %s (degraded: %s)\n", lane.Name, lane.Reason)
+			continue
+		}
+		fmt.Fprintf(ioctx.Err, "lane: %s\n", lane.Name)
+	}
+}
+
+type semanticSearchEnvelope struct {
+	Schema          string                 `json:"schema"`
+	Results         []index.Result         `json:"results"`
+	Policy          string                 `json:"policy,omitempty"`
+	Profile         string                 `json:"profile,omitempty"`
+	Lanes           []SemanticSearchLane   `json:"lanes,omitempty"`
+	DegradedReasons []contracts.ReasonCode `json:"degraded_reasons,omitempty"`
+	NextSteps       []string               `json:"next_steps,omitempty"`
+}
+
+func semanticSearchJSONV2(results []index.Result, response SemanticSearchResponse) semanticSearchEnvelope {
+	return semanticSearchEnvelope{
+		Schema:          semanticSearchResultSchema,
+		Results:         results,
+		Policy:          response.Policy,
+		Profile:         response.Profile,
+		Lanes:           response.Lanes,
+		DegradedReasons: response.DegradedReasons,
+		NextSteps:       response.NextSteps,
+	}
+}

@@ -1,0 +1,25 @@
+{
+  "schema": "worktrail.semantic.eval.retrieval-rankings.v1",
+  "queries": [
+    {
+      "query_id": "q-decision",
+      "lanes": {
+        "entry_fts": ["e2e-decision-hybrid-recall", "e2e-rule-rebuild-only"],
+        "chunk_fts": ["e2e-decision-hybrid-recall", "e2e-rule-rebuild-only"],
+        "dense": ["e2e-decision-hybrid-recall", "e2e-rule-rebuild-only"],
+        "rrf": ["e2e-decision-hybrid-recall", "e2e-rule-rebuild-only"],
+        "governed": ["e2e-decision-hybrid-recall", "e2e-rule-rebuild-only"]
+      }
+    },
+    {
+      "query_id": "q-rule",
+      "lanes": {
+        "entry_fts": ["e2e-rule-rebuild-only", "e2e-decision-hybrid-recall"],
+        "chunk_fts": ["e2e-rule-rebuild-only", "e2e-decision-hybrid-recall"],
+        "dense": ["e2e-rule-rebuild-only", "e2e-decision-hybrid-recall"],
+        "rrf": ["e2e-rule-rebuild-only", "e2e-decision-hybrid-recall"],
+        "governed": ["e2e-rule-rebuild-only", "e2e-decision-hybrid-recall"]
+      }
+    }
+  ]
+}

@@ -46,13 +46,9 @@ func Run(ctx context.Context, args []string, in io.Reader, out io.Writer, errw i
 		}
 		fmt.Fprintln(out, "initialized project worktrail:", env.ProjectWT)
 	case "init":
-		if err := store.InitUser(env); err != nil {
-			return err
-		}
-		if err := store.InitProject(env); err != nil {
-			return err
-		}
-		fmt.Fprintln(out, "initialized user and project worktrail")
+		return runInit(ctx, env, ioctx, args[1:])
+	case "semantic":
+		return runSemantic(ctx, ioctx, args[1:])
 	case "state":
 		return runState(ctx, env, ioctx, args[1:])
 	case "resume":

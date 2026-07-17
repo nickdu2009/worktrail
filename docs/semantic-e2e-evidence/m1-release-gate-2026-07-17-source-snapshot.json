@@ -1,0 +1,961 @@
+{
+  "schema": "worktrail.semantic.dirty-tree-snapshot.v1",
+  "captured_at": "2026-07-17T04:38:07Z",
+  "input_set": {
+    "base_revision": "HEAD",
+    "tracked_changes": "git diff --binary --no-ext-diff HEAD with the documented exclusion pathspecs",
+    "untracked_changes": "git ls-files --others --exclude-standard -z, byte-sorted after excluding documented evidence outputs",
+    "excluded_pathspecs": [
+      "docs/semantic-e2e-evidence/**",
+      "docs/worktrail-semantic-production-e2e-*.md",
+      "docs/worktrail-semantic-m1-release-evidence-*.md"
+    ],
+    "exclusion_reason": "Gate-generated and gate-overwritten evidence is not a source input. Excluding it makes the pre-build dirty-tree snapshot reproducible after the gate writes its evidence."
+  },
+  "head": "91907b1a7a6bdce0f8fd6f3ca3c3d91205f8eac4",
+  "status_porcelain_v1_z_sha256": "14dceaa4428375de839594ebc04c3dd844b1606da6bef7ad7573a055447e5e2a",
+  "tracked_diff_head_sha256": "827ff09422a112f4e05464a1d86b74c16f7105f426cf81a172ba8d4bfd14459f",
+  "untracked": {
+    "algorithm": "git ls-files --others --exclude-standard -z; exclude documented gate evidence outputs; byte-sort remaining paths; regular files hash raw bytes; symlinks hash symlink\\\\0 plus raw target bytes; inventory SHA-256 hashes the version marker and path, kind, size_bytes, and content_sha256 fields separated by NUL/newline bytes.",
+    "count": 156,
+    "inventory_sha256": "088acd8f92f793bb29cdf4167d5063b059a2adf6b4f0a7f3792fd845ca06f26d",
+    "entries": [
+      {
+        "path": ".github/workflows/ci.yml",
+        "kind": "regular",
+        "size_bytes": 493,
+        "content_sha256": "08227b72fd3ad209f23cbb783deb60c884c6e455e7e4991120dae505d5343d5b"
+      },
+      {
+        "path": ".github/workflows/semantic-runtime-verify.yml",
+        "kind": "regular",
+        "size_bytes": 544,
+        "content_sha256": "7d5fa63c153c770d75c93dbaa92ef4419dddff673defd875689cc20fd7b7966c"
+      },
+      {
+        "path": ".worktrail/decisions/ADR-20260715-hybrid-recall-context-contract.md",
+        "kind": "regular",
+        "size_bytes": 3800,
+        "content_sha256": "476970d24303f437f32eb365632a7dbd9e742390750486c9b7d2cf1f66ad8ca6"
+      },
+      {
+        "path": ".worktrail/decisions/ADR-20260715-hybrid-recall-context-contract.md.bak-20260716T015329Z",
+        "kind": "regular",
+        "size_bytes": 3662,
+        "content_sha256": "9aa37ffbe191cd7f182265f60fa8e2d37a26d7cc6d24d617cb6c23536f069c9a"
+      },
+      {
+        "path": ".worktrail/decisions/ADR-20260715-local-semantic-runtime-bundle.md",
+        "kind": "regular",
+        "size_bytes": 4201,
+        "content_sha256": "46d301293cc3a94437c4510a972def73d13daa24862f5c62b457c77ad3edd306"
+      },
+      {
+        "path": ".worktrail/decisions/ADR-20260715-local-semantic-runtime-bundle.md.bak-20260716T015329Z",
+        "kind": "regular",
+        "size_bytes": 3384,
+        "content_sha256": "1a69e03ab571a35a1921e98d7d342a453d6cc770825f50ec5243d33835baafde"
+      },
+      {
+        "path": ".worktrail/decisions/ADR-20260715-local-semantic-runtime-bundle.md.bak-20260716T022039Z",
+        "kind": "regular",
+        "size_bytes": 3860,
+        "content_sha256": "895d0ca014a058ab4dcad510dcb6a6dcb656fdf747411b46ef6e7a7b1f7a4b16"
+      },
+      {
+        "path": ".worktrail/decisions/ADR-20260715-local-semantic-runtime-bundle.md.bak-20260716T071049Z",
+        "kind": "regular",
+        "size_bytes": 4842,
+        "content_sha256": "6ed34d1c52ab37a5e81a14a0c2aacb7ea33262f5f10ddfe9fcf26f2c709a1d82"
+      },
+      {
+        "path": ".worktrail/decisions/ADR-20260715-local-semantic-runtime-bundle.md.bak-20260717T023704Z",
+        "kind": "regular",
+        "size_bytes": 5717,
+        "content_sha256": "1b07a1691bace0743e181cd3ea66bcb0e83277d00ec0e19e00572a09b006bdcd"
+      },
+      {
+        "path": ".worktrail/decisions/ADR-20260715-local-semantic-runtime-bundle.md.bak-20260717T030529Z",
+        "kind": "regular",
+        "size_bytes": 4098,
+        "content_sha256": "7ff0fd6b57fd6cfdabc4072945debe22e62194667677a51e8b3f0d1035257ca6"
+      },
+      {
+        "path": ".worktrail/decisions/ADR-20260715-rebuild-only-semantic-generation.md",
+        "kind": "regular",
+        "size_bytes": 3764,
+        "content_sha256": "8712ebc554990a28c1e446331b8a15c5d5d14eb4f490e0b4d18a8fd187e6ce47"
+      },
+      {
+        "path": ".worktrail/decisions/ADR-20260715-rebuild-only-semantic-generation.md.bak-20260716T015329Z",
+        "kind": "regular",
+        "size_bytes": 3592,
+        "content_sha256": "e33b1a2e941319bc78b99632db86e6f1c541b5cfcd828577a5c5ad26e6d639b0"
+      },
+      {
+        "path": "CHANGELOG.md",
+        "kind": "regular",
+        "size_bytes": 1247,
+        "content_sha256": "dc1c9e69fa67a44c9276e37ea39f8a0a45495aca59a256f0c37a2f2ce9d5bb43"
+      },
+      {
+        "path": "cmd/worktrail-semantic-eval/collect_retrieval.go",
+        "kind": "regular",
+        "size_bytes": 7492,
+        "content_sha256": "16eaf7f843df5279a423aaa92f7af9302042ef38d2763047a1674a4a0802d317"
+      },
+      {
+        "path": "cmd/worktrail-semantic-eval/main.go",
+        "kind": "regular",
+        "size_bytes": 8358,
+        "content_sha256": "a490d258fec675e3f84339f1ab64103e0ace95c30f2792a56c7ad410f88a9667"
+      },
+      {
+        "path": "cmd/worktrail-semantic-eval/main_test.go",
+        "kind": "regular",
+        "size_bytes": 3117,
+        "content_sha256": "89a213281c06d26d604faaf2a8e57f740b45a55aff5c9df701489c35fa827ae0"
+      },
+      {
+        "path": "docs/worktrail-local-semantic-recall-architecture.md",
+        "kind": "regular",
+        "size_bytes": 71018,
+        "content_sha256": "b1df80c394fac1fced7f2b7c261b355c288ed1c5d57fc90a7ca2a9f8719b8489"
+      },
+      {
+        "path": "docs/worktrail-semantic-m1-candidate-manifest.yaml",
+        "kind": "regular",
+        "size_bytes": 6305,
+        "content_sha256": "768c15b3714ada0295d270cd50977cada0a4f39e35ee2671fe7ed4f42a4bf678"
+      },
+      {
+        "path": "docs/worktrail-semantic-m1-trusted-manifest-boundary.md",
+        "kind": "regular",
+        "size_bytes": 4544,
+        "content_sha256": "2bcbd9d03d895e25f5c617d1debbaeae58d21a9e8d264a361463226a0a0b2f52"
+      },
+      {
+        "path": "docs/worktrail-semantic-parity-environment-2026-07-15.txt",
+        "kind": "regular",
+        "size_bytes": 1349,
+        "content_sha256": "55e8860ef26f63b1bef4360f65b38370d91ae638ef3c78cc459b329a4bb9a7b4"
+      },
+      {
+        "path": "docs/worktrail-semantic-parity-spike-2026-07-15.md",
+        "kind": "regular",
+        "size_bytes": 5608,
+        "content_sha256": "102e07a1b823179aa75b3d5f5c25e289babb6f17817e174770c57ea4083614df"
+      },
+      {
+        "path": "docs/worktrail-semantic-runtime-security-resource-spike-2026-07-16.md",
+        "kind": "regular",
+        "size_bytes": 3676,
+        "content_sha256": "51162f47dc8ec8e8c60327bff9eac1be88b2fbdb17b35217557e71f48f9fc6c1"
+      },
+      {
+        "path": "docs/worktrail-semantic-sqlite-vec-spike-2026-07-15.md",
+        "kind": "regular",
+        "size_bytes": 2026,
+        "content_sha256": "ffcef56b1e5855e0218276823cc1285e9197552212ebb788ac0d0e5ef147253c"
+      },
+      {
+        "path": "internal/app/context_semantic.go",
+        "kind": "regular",
+        "size_bytes": 2152,
+        "content_sha256": "62404462b41f6a305418033b9219af046d6fa69f24984744a0bb5d06f8daa9ca"
+      },
+      {
+        "path": "internal/app/context_semantic_test.go",
+        "kind": "regular",
+        "size_bytes": 7448,
+        "content_sha256": "5980985ea21a2bd6e69af05b105d1bd4237e88f67021b31275ed42a3972bdcbb"
+      },
+      {
+        "path": "internal/app/init.go",
+        "kind": "regular",
+        "size_bytes": 2572,
+        "content_sha256": "255643071129205d3deb62d426ec4d5e036b9bac91f80c5a76cbe506a195cf75"
+      },
+      {
+        "path": "internal/app/init_test.go",
+        "kind": "regular",
+        "size_bytes": 5024,
+        "content_sha256": "ef59856d84074c8bba28a0acc46dc6b3eb007667820a12e7a9e790c8ab893046"
+      },
+      {
+        "path": "internal/app/semantic.go",
+        "kind": "regular",
+        "size_bytes": 15383,
+        "content_sha256": "b22cba58a6a259bee00d68e85fccdc0fea9ce6fe4fe255b5616cd8bbd332f69e"
+      },
+      {
+        "path": "internal/app/semantic_installer_production.go",
+        "kind": "regular",
+        "size_bytes": 7734,
+        "content_sha256": "371f46d00013308cab29743dec16c0d2a38401c06d4a9fd7d679794cefc50ad6"
+      },
+      {
+        "path": "internal/app/semantic_installer_production_test.go",
+        "kind": "regular",
+        "size_bytes": 14698,
+        "content_sha256": "9493b7f1f7005097f37394ba6c1b836a7c29b3a757128cd19f6c47b36444ab56"
+      },
+      {
+        "path": "internal/app/semantic_production.go",
+        "kind": "regular",
+        "size_bytes": 8516,
+        "content_sha256": "99a54746082ee4ccac516eabed65daa777728e4ae62f8a5674c80d3da02e5ee7"
+      },
+      {
+        "path": "internal/app/semantic_production_test.go",
+        "kind": "regular",
+        "size_bytes": 6516,
+        "content_sha256": "b6d2d99b416461f3fd9ea3423054f516d6768dcd4f4b3e537d579f7fb7e010e0"
+      },
+      {
+        "path": "internal/app/semantic_rebuild_test.go",
+        "kind": "regular",
+        "size_bytes": 11957,
+        "content_sha256": "4c85ab79d26b7bb1a33531a757a87beeedcb138f0f86828eb10d0dc378ec607b"
+      },
+      {
+        "path": "internal/app/semantic_search.go",
+        "kind": "regular",
+        "size_bytes": 6714,
+        "content_sha256": "090c522157633ea7f959e8d4f01e284e895d64d59d7fa956ff1eb5fb0df10ec0"
+      },
+      {
+        "path": "internal/app/semantic_search_test.go",
+        "kind": "regular",
+        "size_bytes": 11320,
+        "content_sha256": "c7cf84cd18922b5dae1e0347562b33041c82b58874d7cc2997d5d3e63e2a812a"
+      },
+      {
+        "path": "internal/app/semantic_test.go",
+        "kind": "regular",
+        "size_bytes": 14637,
+        "content_sha256": "762548d77cd71dea27ecb3826de5db0b28be842bfe4310a89f034c970211f1d9"
+      },
+      {
+        "path": "internal/index/detailed_search.go",
+        "kind": "regular",
+        "size_bytes": 4220,
+        "content_sha256": "de1fd56f2cce5067f9a9f69e7129e8c9ec0bfbde1c9f75605f9c22d9b97418b2"
+      },
+      {
+        "path": "internal/index/detailed_search_test.go",
+        "kind": "regular",
+        "size_bytes": 5463,
+        "content_sha256": "390f421de074433c0a1047e2325f902ff3e6d4566505e8e084406e1e0270f557"
+      },
+      {
+        "path": "internal/index/entry_lookup.go",
+        "kind": "regular",
+        "size_bytes": 4612,
+        "content_sha256": "b5a0912826ad960b11cab4831704cfcbf74a98cc5a3cb44174cf7f9eb0c510f4"
+      },
+      {
+        "path": "internal/index/entry_lookup_test.go",
+        "kind": "regular",
+        "size_bytes": 4233,
+        "content_sha256": "26d4e2a49a1866e4b90666c48030d4b9bca8866a16f6ad518629f299ec1ae0f1"
+      },
+      {
+        "path": "internal/index/snapshot.go",
+        "kind": "regular",
+        "size_bytes": 10303,
+        "content_sha256": "18068ea0419c32c3e037bde49f4ac0898115a1acb5e283d2f23c50754993e1d4"
+      },
+      {
+        "path": "internal/index/snapshot_test.go",
+        "kind": "regular",
+        "size_bytes": 12412,
+        "content_sha256": "68260783e116ec1bc899dd664183801b35d99a587b8311b3d4c45c260a781877"
+      },
+      {
+        "path": "internal/paths/semantic.go",
+        "kind": "regular",
+        "size_bytes": 1645,
+        "content_sha256": "3ea7e80b43d3a9c47c30ba0e0f584c27243ea05554bf489945e27509c99fe5fb"
+      },
+      {
+        "path": "internal/paths/semantic_index.go",
+        "kind": "regular",
+        "size_bytes": 2005,
+        "content_sha256": "b1591079daf5a2810bc9c7dc2137fe3895a650baba8c7ad726c93e2cd1b17cda"
+      },
+      {
+        "path": "internal/paths/semantic_index_test.go",
+        "kind": "regular",
+        "size_bytes": 3008,
+        "content_sha256": "7fcd7d5928459d30fa7a18d896b5ad1900226edc1ccb65272a01ff58a95277f3"
+      },
+      {
+        "path": "internal/paths/semantic_test.go",
+        "kind": "regular",
+        "size_bytes": 1111,
+        "content_sha256": "1cdf73ab3a9b54e2b9e8b41759131f7375f9ca52b330ba59f09da43f300979cc"
+      },
+      {
+        "path": "internal/semantic/bundle/assets/ATTRIBUTIONS.md",
+        "kind": "regular",
+        "size_bytes": 942,
+        "content_sha256": "b6b2586a63280720d84de679c6402310f045053cce38e46a4dcbe4b9fe15a5ec"
+      },
+      {
+        "path": "internal/semantic/bundle/assets/licenses/MIT.txt",
+        "kind": "regular",
+        "size_bytes": 1078,
+        "content_sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+      },
+      {
+        "path": "internal/semantic/bundle/assets/trusted-manifest-m1.json",
+        "kind": "regular",
+        "size_bytes": 6773,
+        "content_sha256": "6da1818c3202c2b6e50fb162cd3f9431949bc0656dd78734422e8ae0637d8a71"
+      },
+      {
+        "path": "internal/semantic/bundle/chip.go",
+        "kind": "regular",
+        "size_bytes": 1422,
+        "content_sha256": "4648822541920da0aec7440783dcebb9e80244288ab8080b9fd4df9a0ad978e5"
+      },
+      {
+        "path": "internal/semantic/bundle/chip_darwin.go",
+        "kind": "regular",
+        "size_bytes": 286,
+        "content_sha256": "9f227af8687c524661992ea70b12682528957423c5a71a3350b662cad7e39ece"
+      },
+      {
+        "path": "internal/semantic/bundle/chip_test.go",
+        "kind": "regular",
+        "size_bytes": 1690,
+        "content_sha256": "2cf5915b3dae51fc0ae0468b1b1a67e9efc45efbc94161d43345b6aec98ad436"
+      },
+      {
+        "path": "internal/semantic/bundle/chip_unsupported.go",
+        "kind": "regular",
+        "size_bytes": 173,
+        "content_sha256": "a9b9309b60d4af39fc7dffbf61b8ffc3afd00ca9db49675a3d4ef1659b4894af"
+      },
+      {
+        "path": "internal/semantic/bundle/downloader_http.go",
+        "kind": "regular",
+        "size_bytes": 4226,
+        "content_sha256": "03221acc4437ea9c30be40a48ef723dd3179f2065b7405ed9caab4aeaa96fb74"
+      },
+      {
+        "path": "internal/semantic/bundle/downloader_http_test.go",
+        "kind": "regular",
+        "size_bytes": 4300,
+        "content_sha256": "456eba037904dde90899afbdf20f0b65e92a82d8dfa38f76f16589ff2aa3d850"
+      },
+      {
+        "path": "internal/semantic/bundle/installed.go",
+        "kind": "regular",
+        "size_bytes": 12032,
+        "content_sha256": "8c085c3410c444abd4e792c3db7da5ef438046e8b843d4c88e10d6ab45359c4b"
+      },
+      {
+        "path": "internal/semantic/bundle/installed_test.go",
+        "kind": "regular",
+        "size_bytes": 9239,
+        "content_sha256": "63fd0404d8f848c7f774747ec8cf2e9e68bf69012a9216ee9d961246f1cf17b8"
+      },
+      {
+        "path": "internal/semantic/bundle/installer.go",
+        "kind": "regular",
+        "size_bytes": 21870,
+        "content_sha256": "5d701179d06652c83e563c78de9ced2b59a9f110f5a27f6c9ae9d2af6a45c4bc"
+      },
+      {
+        "path": "internal/semantic/bundle/installer_test.go",
+        "kind": "regular",
+        "size_bytes": 23073,
+        "content_sha256": "591bf12f21fcc227de0f401741e8006fe96eec3840ef62af2bc6d7f5d14c6219"
+      },
+      {
+        "path": "internal/semantic/bundle/lock_unix.go",
+        "kind": "regular",
+        "size_bytes": 848,
+        "content_sha256": "c52da997c8c74fc6220bcef7e42f5df82a6ac15cf15b7ae0bb737dc61aec02dc"
+      },
+      {
+        "path": "internal/semantic/bundle/lock_unsupported.go",
+        "kind": "regular",
+        "size_bytes": 254,
+        "content_sha256": "04f686e752e6894bc7bf8377bfc7a2daeb020da0d4ddd8736dce1135fe677c6e"
+      },
+      {
+        "path": "internal/semantic/bundle/manifest.go",
+        "kind": "regular",
+        "size_bytes": 10662,
+        "content_sha256": "974d3e054296f0ce1110b2c717d53463f3dd7ae0cf51ed65147b0efdfe77e638"
+      },
+      {
+        "path": "internal/semantic/bundle/manifest_test.go",
+        "kind": "regular",
+        "size_bytes": 10215,
+        "content_sha256": "5344a9ee27d17a8b0057cb25a01afa3c6a695f2750644f12a45990b1a7d70f83"
+      },
+      {
+        "path": "internal/semantic/bundle/runtime_verifier.go",
+        "kind": "regular",
+        "size_bytes": 3966,
+        "content_sha256": "d0a6dc598073272d823fd56ae82a5d07fcc8dfcff4587cc07d049294da9344cc"
+      },
+      {
+        "path": "internal/semantic/bundle/runtime_verifier_test.go",
+        "kind": "regular",
+        "size_bytes": 7857,
+        "content_sha256": "1339a9df763de0138b35034c31b016f8aa7a6bdfa334bab4dc2398243942d2c0"
+      },
+      {
+        "path": "internal/semantic/chunk/chunk.go",
+        "kind": "regular",
+        "size_bytes": 15615,
+        "content_sha256": "292f6b490d5da53edf2775ea2a1fe85f45586580f9b6e0cbb3f3c4e12e6708c1"
+      },
+      {
+        "path": "internal/semantic/chunk/chunk_test.go",
+        "kind": "regular",
+        "size_bytes": 8739,
+        "content_sha256": "f8809d47202f2d7a4b9933a0934d2530ef54cc7daf0776352315fa603829aba5"
+      },
+      {
+        "path": "internal/semantic/composition/composition.go",
+        "kind": "regular",
+        "size_bytes": 7525,
+        "content_sha256": "92863f615133a886ebd0b8400aa14d62f5d7c7618716a1413bb759aa4ad408be"
+      },
+      {
+        "path": "internal/semantic/composition/composition_test.go",
+        "kind": "regular",
+        "size_bytes": 15831,
+        "content_sha256": "f72e0141b1a26fc7a5b767f151c0c374da3e7c55e14cd13dd595e8737ea43edf"
+      },
+      {
+        "path": "internal/semantic/contracts/contracts.go",
+        "kind": "regular",
+        "size_bytes": 1180,
+        "content_sha256": "e63c0613f29b4fad90f77a9da0e2547a567c73ba5cbb427333203e038317f654"
+      },
+      {
+        "path": "internal/semantic/contracts/contracts_test.go",
+        "kind": "regular",
+        "size_bytes": 427,
+        "content_sha256": "61647a65893ddea12c7801bad4fc7ee95d7551199359876e2ff345842fb9e55c"
+      },
+      {
+        "path": "internal/semantic/daemon/adapters.go",
+        "kind": "regular",
+        "size_bytes": 4940,
+        "content_sha256": "14eedaa5df257403bfa501b5facf2e3f4940202abb45e85ba83915ea8b41eb22"
+      },
+      {
+        "path": "internal/semantic/daemon/adapters_test.go",
+        "kind": "regular",
+        "size_bytes": 7598,
+        "content_sha256": "5b5bf9b853e2f21445647c72d38b532ca560390889430357b1d886086582b1d8"
+      },
+      {
+        "path": "internal/semantic/daemon/attestation.go",
+        "kind": "regular",
+        "size_bytes": 974,
+        "content_sha256": "d9ade4bb067148c43506d710e7f8d0d600557f0622b243a9a9804fb8661f6057"
+      },
+      {
+        "path": "internal/semantic/daemon/attestation_test.go",
+        "kind": "regular",
+        "size_bytes": 4473,
+        "content_sha256": "2b83f429f000ba495aa761c52f99fe79a4b5226e355d2e7137634dc4e16eea42"
+      },
+      {
+        "path": "internal/semantic/daemon/controller.go",
+        "kind": "regular",
+        "size_bytes": 3217,
+        "content_sha256": "4f91c80368075bbb14fa73b47eb5e9b781366f11fea4011b954d40924d24e735"
+      },
+      {
+        "path": "internal/semantic/daemon/controller_test.go",
+        "kind": "regular",
+        "size_bytes": 4128,
+        "content_sha256": "b49a77e74d09542d76b19ccd9b6b85fc3b4ffc0679e15e979bd83d8b511745ad"
+      },
+      {
+        "path": "internal/semantic/daemon/descriptor.go",
+        "kind": "regular",
+        "size_bytes": 8572,
+        "content_sha256": "51b6418a8bc248b2b4dfdf6666c19a6f943cb4ca20f447137ef9da2f2111f717"
+      },
+      {
+        "path": "internal/semantic/daemon/descriptor_test.go",
+        "kind": "regular",
+        "size_bytes": 6031,
+        "content_sha256": "8211fde0c83d5063f7e23ddddcf1aec170a04aaf5ef43616f136f3b700815e48"
+      },
+      {
+        "path": "internal/semantic/daemon/http_client.go",
+        "kind": "regular",
+        "size_bytes": 11259,
+        "content_sha256": "69b0fa697dcfb2f925282e02faa2f386a0aa59e594eeac5325593f5a313293f7"
+      },
+      {
+        "path": "internal/semantic/daemon/http_client_test.go",
+        "kind": "regular",
+        "size_bytes": 12447,
+        "content_sha256": "635b7fbf95654e02d3c21360612fc61ff641ba35d87b2731a486dbfcc89324a2"
+      },
+      {
+        "path": "internal/semantic/daemon/local.go",
+        "kind": "regular",
+        "size_bytes": 595,
+        "content_sha256": "1b768b18358e4b39478c7d46de18633aa0714e86bcf322defd038665b28e0140"
+      },
+      {
+        "path": "internal/semantic/daemon/local_darwin.go",
+        "kind": "regular",
+        "size_bytes": 2955,
+        "content_sha256": "ce3b86eb55b5b2d39ca0fde1d9761d7a0b131dfe15af6a4369426d58ae8f17bb"
+      },
+      {
+        "path": "internal/semantic/daemon/local_unsupported.go",
+        "kind": "regular",
+        "size_bytes": 919,
+        "content_sha256": "faff0f4cc7f6d1a509f3146dd9f344354fe660db7e05779f0b67c721fbd3b64c"
+      },
+      {
+        "path": "internal/semantic/daemon/process.go",
+        "kind": "regular",
+        "size_bytes": 1373,
+        "content_sha256": "1d8e44bd824d5b58b87416a8ccbbe439ff731c2ca6c76cafc84ba790005af787"
+      },
+      {
+        "path": "internal/semantic/daemon/process_darwin.go",
+        "kind": "regular",
+        "size_bytes": 3746,
+        "content_sha256": "28cc10a502f9b25454f0fd904b79bfe4e71fdfcee9164d03478402fb9501510b"
+      },
+      {
+        "path": "internal/semantic/daemon/process_darwin_test.go",
+        "kind": "regular",
+        "size_bytes": 2134,
+        "content_sha256": "cb5887285dca5cc7a07484ca130cfd7563122f63b17c161fa3c3ed5fa4afca56"
+      },
+      {
+        "path": "internal/semantic/daemon/process_unsupported.go",
+        "kind": "regular",
+        "size_bytes": 811,
+        "content_sha256": "391a6f8ccd11cb44a62adbed8d4c831b1007efa2a904c8f932ccdd454137e65b"
+      },
+      {
+        "path": "internal/semantic/daemon/process_unsupported_test.go",
+        "kind": "regular",
+        "size_bytes": 1936,
+        "content_sha256": "04ac140ff94775dd6bd6e0e401d2f7c72d53fbb27548bd6d2a09b0685781ca21"
+      },
+      {
+        "path": "internal/semantic/daemon/signals_darwin.go",
+        "kind": "regular",
+        "size_bytes": 162,
+        "content_sha256": "d1d9eeec5bb5ca92300584c662e6e351f99893631644cc44543e037a04fb95de"
+      },
+      {
+        "path": "internal/semantic/daemon/signals_unsupported.go",
+        "kind": "regular",
+        "size_bytes": 292,
+        "content_sha256": "fe70854b84925aed9cc0b754c6a1639895591facbf8ff82404234f77cfdb1ead"
+      },
+      {
+        "path": "internal/semantic/daemon/supervisor.go",
+        "kind": "regular",
+        "size_bytes": 17838,
+        "content_sha256": "274da167f8332e22efaead93f22c67d354fb8615864512e0c54f755da2182cf3"
+      },
+      {
+        "path": "internal/semantic/daemon/supervisor_test.go",
+        "kind": "regular",
+        "size_bytes": 18526,
+        "content_sha256": "acbc54f55db9d0bdd31a629f21ce241b83de46f009a26c192da996ef23259638"
+      },
+      {
+        "path": "internal/semantic/eval/parity.go",
+        "kind": "regular",
+        "size_bytes": 13560,
+        "content_sha256": "16ccd31d69c10da26db778197e18c0016f6c51f14b3eac25c19c7322af7de24b"
+      },
+      {
+        "path": "internal/semantic/eval/parity_test.go",
+        "kind": "regular",
+        "size_bytes": 2423,
+        "content_sha256": "32ea1614e6731a20690df145b3a39802e7e1dcd5db5befc4d96f2c8a43515bae"
+      },
+      {
+        "path": "internal/semantic/eval/retrieval.go",
+        "kind": "regular",
+        "size_bytes": 11559,
+        "content_sha256": "1fc1b862d449ca69f079d7ca7edf934baaa53c765d013cd33358b176b4fb7bea"
+      },
+      {
+        "path": "internal/semantic/eval/retrieval_test.go",
+        "kind": "regular",
+        "size_bytes": 3491,
+        "content_sha256": "92d2bc09c35df227cc4254b670e5e424df999aa3edf3b40f806c5be2b84a3abd"
+      },
+      {
+        "path": "internal/semantic/eval/vec.go",
+        "kind": "regular",
+        "size_bytes": 6657,
+        "content_sha256": "478d5b352cb6684ab06db95d8d81dd97dd143b4e373a502b9576ca55239ac4ce"
+      },
+      {
+        "path": "internal/semantic/eval/vec_test.go",
+        "kind": "regular",
+        "size_bytes": 1984,
+        "content_sha256": "57aeb3f8418af378b83202d72123ca64fe4313013ad611ea3dc1eb941dff0180"
+      },
+      {
+        "path": "internal/semantic/eval/vec_unsupported.go",
+        "kind": "regular",
+        "size_bytes": 949,
+        "content_sha256": "251413ab039fa6b954789b12dc21aa3e278dc16afc82824fbe6574bde6db4890"
+      },
+      {
+        "path": "internal/semantic/eval/zstd.go",
+        "kind": "regular",
+        "size_bytes": 958,
+        "content_sha256": "d4a13075796cb9094284725e1ca898ee04a85dd9323ba84387d0fdf7da6651be"
+      },
+      {
+        "path": "internal/semantic/eval/zstd_test.go",
+        "kind": "regular",
+        "size_bytes": 1001,
+        "content_sha256": "b08f5d6cc896438e1fd06ddb4bbc652fef9d18486b669e20466834904bbf0075"
+      },
+      {
+        "path": "internal/semantic/generation/activate.go",
+        "kind": "regular",
+        "size_bytes": 4487,
+        "content_sha256": "9976c695751dad0e12a09a53d69e173214ac0db6228d570d8d13fe2fb92a7c1e"
+      },
+      {
+        "path": "internal/semantic/generation/builder.go",
+        "kind": "regular",
+        "size_bytes": 7460,
+        "content_sha256": "2f78e84f6a4d3c27afae388e5dce8fb3552d3fe11055ce34a904775fdeffe2ec"
+      },
+      {
+        "path": "internal/semantic/generation/builder_test.go",
+        "kind": "regular",
+        "size_bytes": 12820,
+        "content_sha256": "1cf3ae9e49dd621e7565fe2aad484eecea6e2ac5a4e0e651872fc9e384d68b08"
+      },
+      {
+        "path": "internal/semantic/generation/lease.go",
+        "kind": "regular",
+        "size_bytes": 1790,
+        "content_sha256": "09bf7329f01acf2eef54bfa377e9aeed41f70f0bfc4b26ee9117680127e4ebe3"
+      },
+      {
+        "path": "internal/semantic/generation/lock_unix.go",
+        "kind": "regular",
+        "size_bytes": 960,
+        "content_sha256": "cefddbc034ea07dac5464c2b054f5024c48df5b32ea255264faf0f99c52b4d60"
+      },
+      {
+        "path": "internal/semantic/generation/lock_unsupported.go",
+        "kind": "regular",
+        "size_bytes": 273,
+        "content_sha256": "b0f4353a232a5c1547c0c4f8398fbc1596a9195d9139984d606e27086a4b6fbd"
+      },
+      {
+        "path": "internal/semantic/generation/metadata_test.go",
+        "kind": "regular",
+        "size_bytes": 2400,
+        "content_sha256": "e707345f0bd21c589fee9a54e945e5a10f2d30b33f7f4a8d071756db0defa354"
+      },
+      {
+        "path": "internal/semantic/generation/pointer.go",
+        "kind": "regular",
+        "size_bytes": 8067,
+        "content_sha256": "bb113f99c964ab629cbf3a8ca70c395bb7a2cb20b37c8bce0baa536d3ce17d99"
+      },
+      {
+        "path": "internal/semantic/generation/pointer_test.go",
+        "kind": "regular",
+        "size_bytes": 4966,
+        "content_sha256": "c8958fbc989378966ae5271ccc03552bac4c6eb35707deb786b7e2fe8a858075"
+      },
+      {
+        "path": "internal/semantic/generation/query.go",
+        "kind": "regular",
+        "size_bytes": 3827,
+        "content_sha256": "6a5691b58dbece8f0b0f15f81fa75c1222a2dd38e79c5c8ed5baf7cd7e9f284c"
+      },
+      {
+        "path": "internal/semantic/generation/query_test.go",
+        "kind": "regular",
+        "size_bytes": 6933,
+        "content_sha256": "89c9c29ab0e629db14dcdb079fc6169a72fb920c42ea5d00795240bab2905665"
+      },
+      {
+        "path": "internal/semantic/generation/rebuild.go",
+        "kind": "regular",
+        "size_bytes": 4925,
+        "content_sha256": "daa78b4d1764caff9c8ee14cb8dceea98af23160c360c486b289597952faf1bb"
+      },
+      {
+        "path": "internal/semantic/generation/rebuild_test.go",
+        "kind": "regular",
+        "size_bytes": 7596,
+        "content_sha256": "f0a466cd6ae06856e667b920d86d3f7aee35c20e424b7bd3e4a6ba1bf8c79e0b"
+      },
+      {
+        "path": "internal/semantic/generation/schema.go",
+        "kind": "regular",
+        "size_bytes": 3911,
+        "content_sha256": "3c87ce81bd3492def2bec3b5d0085664d8839dc827a68451b1f59fdc1a200112"
+      },
+      {
+        "path": "internal/semantic/generation/schema_test.go",
+        "kind": "regular",
+        "size_bytes": 6425,
+        "content_sha256": "ede7b079fd9c0af36866c3f09e4db9af5b9e385ff59043f84787804cc943c29a"
+      },
+      {
+        "path": "internal/semantic/generation/search.go",
+        "kind": "regular",
+        "size_bytes": 6432,
+        "content_sha256": "298979ec9644b2cc39ec8523adcb82e9493e63c495d5831aea25773f460b34e8"
+      },
+      {
+        "path": "internal/semantic/generation/search_test.go",
+        "kind": "regular",
+        "size_bytes": 10110,
+        "content_sha256": "3ce217836bd6084564193e887b1fca9f3399c30e22c5b030be31e1aa1e8af397"
+      },
+      {
+        "path": "internal/semantic/generation/store.go",
+        "kind": "regular",
+        "size_bytes": 7682,
+        "content_sha256": "64b3fef8934e126ef896f933d2184f35c76dcad1eb1c4c51ade11077ed4aee5a"
+      },
+      {
+        "path": "internal/semantic/policy/policy.go",
+        "kind": "regular",
+        "size_bytes": 3016,
+        "content_sha256": "8197a08fb4969c1630a321bb897a45cb3f4584233e4b489ad31e7d3968a5813f"
+      },
+      {
+        "path": "internal/semantic/policy/policy_test.go",
+        "kind": "regular",
+        "size_bytes": 3713,
+        "content_sha256": "96bf58ae79ce2d0a44741018f5834ee943918d998660d55704b42193a5f5f188"
+      },
+      {
+        "path": "internal/semantic/policy/snapshot.go",
+        "kind": "regular",
+        "size_bytes": 275,
+        "content_sha256": "102eebea5d5fc4f78393dc3ce6e4751b1afb2dd361ede51eb399dd86852cfb12"
+      },
+      {
+        "path": "internal/semantic/policy/snapshot_test.go",
+        "kind": "regular",
+        "size_bytes": 1984,
+        "content_sha256": "2a25dc02db9ee144ee24bcef2b9d5740e3c97ca1216187b03931718fc258d1a1"
+      },
+      {
+        "path": "internal/semantic/policy/sources.go",
+        "kind": "regular",
+        "size_bytes": 337,
+        "content_sha256": "aeabb3a18baf8844300634eb9eba725628842553f7dd6d1b0461f8862ec71401"
+      },
+      {
+        "path": "internal/semantic/policy/sources_test.go",
+        "kind": "regular",
+        "size_bytes": 3171,
+        "content_sha256": "040267e997202ec804b2acade427e55f57ece88ddc6ed84411ce318ade5a4df5"
+      },
+      {
+        "path": "internal/semantic/profile/profile.go",
+        "kind": "regular",
+        "size_bytes": 9007,
+        "content_sha256": "8a3f654bd2dd8f8df034627da5edfa93575aa9f10627b392caf1fd1432311623"
+      },
+      {
+        "path": "internal/semantic/profile/profile_test.go",
+        "kind": "regular",
+        "size_bytes": 6753,
+        "content_sha256": "b766a00a3f8463f5021b4f03a22dc87ffba420a923a38ccde6d7ded1c598c8dd"
+      },
+      {
+        "path": "internal/semantic/retrieve/adapters.go",
+        "kind": "regular",
+        "size_bytes": 9141,
+        "content_sha256": "8c2c8daba82cd1a2017873aa5f2ad3b9afd9675ba86614c8ca14ed362a59c339"
+      },
+      {
+        "path": "internal/semantic/retrieve/adapters_test.go",
+        "kind": "regular",
+        "size_bytes": 15464,
+        "content_sha256": "ec67d9b99025fd08a079a9d2b9d4350d3d1894e625eada75c4c3798942f24e55"
+      },
+      {
+        "path": "internal/semantic/retrieve/retrieve.go",
+        "kind": "regular",
+        "size_bytes": 11709,
+        "content_sha256": "eee2d14418167f85a72ca7449eb8b818f43ff19d7a303c82c87cc42f3068b227"
+      },
+      {
+        "path": "internal/semantic/retrieve/retrieve_test.go",
+        "kind": "regular",
+        "size_bytes": 11236,
+        "content_sha256": "4c17a35e9345c0832256bf71d290c30a87ae3c5d6e66f41907ea02c5dc3d6308"
+      },
+      {
+        "path": "internal/semantic/selection/selector.go",
+        "kind": "regular",
+        "size_bytes": 3475,
+        "content_sha256": "ed42a137ddcc490238173d714103a84b02306f9a170f932648b181b04da50b71"
+      },
+      {
+        "path": "internal/semantic/selection/selector_test.go",
+        "kind": "regular",
+        "size_bytes": 7772,
+        "content_sha256": "f05d4f276bbc81e0b5d0ed63b60980be1cf648e9d924d85d4c43567a87d0789e"
+      },
+      {
+        "path": "scripts/semantic/README.md",
+        "kind": "regular",
+        "size_bytes": 5129,
+        "content_sha256": "5eed8f76a6597a0bfa9c76684e2a072341c24da792939e7d065602d7cb737f87"
+      },
+      {
+        "path": "scripts/semantic/capture-parity.py",
+        "kind": "regular",
+        "size_bytes": 4758,
+        "content_sha256": "995c22d87686e14c09c53d846314ab89ba06fd37f19abeda91ca5287bced4ffe"
+      },
+      {
+        "path": "scripts/semantic/fixtures/production-e2e/labeled-queries.json",
+        "kind": "regular",
+        "size_bytes": 1743,
+        "content_sha256": "af9464b7ca02c47535c9e890acc785c3d95bce56d5af0342e1ae148bebf19a2c"
+      },
+      {
+        "path": "scripts/semantic/fixtures/production-e2e/project/decisions/hybrid-recall.md",
+        "kind": "regular",
+        "size_bytes": 608,
+        "content_sha256": "2878f857e662b376abec881a273a4bf68c53dde1a5be9d33d5f3ade7cba8b0f4"
+      },
+      {
+        "path": "scripts/semantic/fixtures/production-e2e/project/handoffs/latest-release-gate.md",
+        "kind": "regular",
+        "size_bytes": 441,
+        "content_sha256": "2fc2ff8f1bf394735b3542d4b55114c0e32e920b4dae17b76a85f7ad4f644b8b"
+      },
+      {
+        "path": "scripts/semantic/fixtures/production-e2e/project/rules/rebuild-only.md",
+        "kind": "regular",
+        "size_bytes": 542,
+        "content_sha256": "086678069557752bfdf1a29c63d1677ef471b3d1e8560860bd82ff9d86c6b5b8"
+      },
+      {
+        "path": "scripts/semantic/fixtures/production-e2e/project/state/active/release-gate.md",
+        "kind": "regular",
+        "size_bytes": 454,
+        "content_sha256": "76122d4888a9b7b8abccc425d8fec1bbbb92e54f14956f20b8c154adfda7623d"
+      },
+      {
+        "path": "scripts/semantic/fixtures/production-e2e/project/workflows/release-gate.md",
+        "kind": "regular",
+        "size_bytes": 425,
+        "content_sha256": "95a29495a892eb24e590c1e669d80f20aac6def0ab5f54602a5b462dd0a362e3"
+      },
+      {
+        "path": "scripts/semantic/fixtures/production-e2e/search-json-v1.golden",
+        "kind": "regular",
+        "size_bytes": 428,
+        "content_sha256": "c6583f63b3ab7a75d61d9cc437eff5db39dde217597e73f6b76413f9aaf352a4"
+      },
+      {
+        "path": "scripts/semantic/fixtures/production-e2e/user/lessons/lane-ranks.md",
+        "kind": "regular",
+        "size_bytes": 403,
+        "content_sha256": "e71d3270620b1dde240e51d92d960680d9dde3aa0e9a367e650a02b8e73bacb6"
+      },
+      {
+        "path": "scripts/semantic/fixtures/production-e2e/user/workflows/offline-eval.md",
+        "kind": "regular",
+        "size_bytes": 405,
+        "content_sha256": "390b4d64338b842a2bb3628aee49093917185d4572ab1a11cf5018c2a43143cd"
+      },
+      {
+        "path": "scripts/semantic/run-offline-gate.sh",
+        "kind": "regular",
+        "size_bytes": 525,
+        "content_sha256": "7356ff00e29a73605f0fc86e570dda11db071674c89da10ea8475bd2114b8d99"
+      },
+      {
+        "path": "scripts/semantic/run-production-e2e-gate.sh",
+        "kind": "regular",
+        "size_bytes": 40210,
+        "content_sha256": "eb30dd186efc570307db1ae2304f0570ec92cea3dab1c5c8ba4da399ff6fa215"
+      },
+      {
+        "path": "scripts/semantic/run-real-darwin-m1-gate.sh",
+        "kind": "regular",
+        "size_bytes": 4173,
+        "content_sha256": "a473cd6d3202ac1a897584baea112478c6dc2cec5c6b497f31a2fa8c5d38b7a9"
+      },
+      {
+        "path": "scripts/semantic/run-runtime-security-resource-gate.sh",
+        "kind": "regular",
+        "size_bytes": 5566,
+        "content_sha256": "ce4a7f244ec3410262852595b5b43d298ce7c3015ec3de9ca9630a8edc410f20"
+      },
+      {
+        "path": "scripts/semantic/test-production-e2e-gate-signals.sh",
+        "kind": "regular",
+        "size_bytes": 2215,
+        "content_sha256": "1f3e2fe61d21354edcded176eea0fc1aac378a8a8c18f64bbe2bc858f62c7132"
+      },
+      {
+        "path": "testdata/semantic/bge-m3-parity-cases.json",
+        "kind": "regular",
+        "size_bytes": 2875,
+        "content_sha256": "ad9bea3d208f755c50b0c0715f9dd4029a61d14fc40fd34c3d809d716e63e651"
+      },
+      {
+        "path": "testdata/semantic/parity-candidate-fixture.json",
+        "kind": "regular",
+        "size_bytes": 834,
+        "content_sha256": "5e87ec11454a4bd374c61cc1740b3a79c209ed94307bb3393dbc2faf6a96b97b"
+      },
+      {
+        "path": "testdata/semantic/parity-corpus-fixture.json",
+        "kind": "regular",
+        "size_bytes": 654,
+        "content_sha256": "f37981364052a4bf021734f40ec8b53c1091710a362297b689fc3b50b5474624"
+      },
+      {
+        "path": "testdata/semantic/parity-reference-fixture.json",
+        "kind": "regular",
+        "size_bytes": 831,
+        "content_sha256": "5d9af8adae5cb0274ffbc6c57a22e705565aaab7dba4d8f4e82f50b7fb01f342"
+      },
+      {
+        "path": "testdata/semantic/retrieval-labels-fixture.json",
+        "kind": "regular",
+        "size_bytes": 396,
+        "content_sha256": "70e795a9234d31e7aabde7543a4fdccb6e85ead187c3de25bfef7c5e111ad600"
+      },
+      {
+        "path": "testdata/semantic/retrieval-rankings-fixture.json",
+        "kind": "regular",
+        "size_bytes": 975,
+        "content_sha256": "380e90a34c1ba726945a05b008312beb7b4d80e5cba918e1fb50fee8b7e9f605"
+      }
+    ]
+  }
+}

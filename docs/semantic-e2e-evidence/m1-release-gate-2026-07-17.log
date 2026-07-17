@@ -1,0 +1,217 @@
+[e2e] isolated tmp_root=/var/folders/sf/ff83t05564q67_f7l5rb2s6h0000gn/T//worktrail-semantic-e2e.ti5kpK (KEEP_TMP=0)
+[e2e] building temporary binaries (using host Go caches)
+[e2e] phase offline: tests, vet, builds, offline-gate, sandbox default path
+?   	github.com/nickdu2009/worktrail/cmd/worktrail	[no test files]
+ok  	github.com/nickdu2009/worktrail/cmd/worktrail-semantic-eval	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/app	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/candidate	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/contextpack	(cached)
+?   	github.com/nickdu2009/worktrail/internal/distill	[no test files]
+ok  	github.com/nickdu2009/worktrail/internal/extract	(cached)
+?   	github.com/nickdu2009/worktrail/internal/handoff	[no test files]
+ok  	github.com/nickdu2009/worktrail/internal/hooks	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/index	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/integrations	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/knowledge	(cached)
+?   	github.com/nickdu2009/worktrail/internal/log	[no test files]
+ok  	github.com/nickdu2009/worktrail/internal/migration/kdd	(cached)
+?   	github.com/nickdu2009/worktrail/internal/migration/storage	[no test files]
+ok  	github.com/nickdu2009/worktrail/internal/model	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/paths	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/preview	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/recovery	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/redact	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/runtime	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/bundle	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/chunk	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/composition	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/contracts	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/daemon	1.333s
+ok  	github.com/nickdu2009/worktrail/internal/semantic/eval	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/generation	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/policy	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/profile	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/retrieve	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/selection	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/state	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/store	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/textsafety	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/transcript	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/triggereval	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/util	(cached)
+ok  	github.com/nickdu2009/worktrail/templates	(cached)
+ok  	github.com/nickdu2009/worktrail/internal/semantic/eval	(cached)
+ok  	github.com/nickdu2009/worktrail/cmd/worktrail-semantic-eval	(cached)
+2026/07/17 12:38:12 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:38:12 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:38:13 Gse dictionary loaded finished.
+{
+  "schema": "worktrail.semantic.eval.report.v1",
+  "reference": {
+    "provider": "fixture-reference",
+    "model": "fixture-bge-m3",
+    "revision": "fixture-reference-v1",
+    "artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "candidate": {
+    "provider": "fixture-candidate",
+    "model": "fixture-bge-m3-q8",
+    "revision": "fixture-candidate-v1",
+    "artifact_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "thresholds": {
+    "k": 10,
+    "norm_tolerance": 0.00001,
+    "min_cosine": 0.999,
+    "max_batch_delta": 0.0002,
+    "min_top_k_overlap": 0.9,
+    "min_recall_at_k": 0.9,
+    "min_mrr": 0.9,
+    "min_ndcg_at_k": 0.9
+  },
+  "entries": 5,
+  "queries": 2,
+  "min_cosine": 1,
+  "max_batch_delta": 0,
+  "top_k_overlap": 1,
+  "recall_at_k": 1,
+  "mrr": 1,
+  "ndcg_at_k": 1,
+  "passed": true
+}
+2026/07/17 12:38:13 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:38:13 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:38:14 Gse dictionary loaded finished.
+{
+  "schema": "worktrail.semantic.eval.vec.v1",
+  "vec_version": "v0.1.9",
+  "count": 1000,
+  "dimension": 1024,
+  "queries": 10,
+  "limit": 10,
+  "database_size": 4251648,
+  "insert_ms": 170.669917,
+  "query_p50_ms": 2.096375,
+  "query_p95_ms": 2.270458
+}
+2026/07/17 12:38:15 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:38:15 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:38:15 Gse dictionary loaded finished.
+2026/07/17 12:38:16 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:38:16 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:38:16 Gse dictionary loaded finished.
+user	16	index/index.sqlite
+2026/07/17 12:38:16 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:38:17 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:38:17 Gse dictionary loaded finished.
+project	12	index/index.sqlite
+2026/07/17 12:38:17 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:38:18 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:38:18 Gse dictionary loaded finished.
+2026/07/17 12:38:18 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:38:19 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:38:19 Gse dictionary loaded finished.
+[e2e] phase offline passed
+[e2e] phase install: confirm core init stays offline, then init --semantic
+[e2e] init --semantic attempt 1
+2026/07/17 12:41:44 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:41:44 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:41:44 Gse dictionary loaded finished.
+status_ok stopped
+[e2e] phase install passed
+[e2e] phase positive: rebuild, lifecycle, search/context, retrieval report
+2026/07/17 12:41:45 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:41:45 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:41:46 Gse dictionary loaded finished.
+user	2	index/index.sqlite
+2026/07/17 12:41:46 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:41:46 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:41:47 Gse dictionary loaded finished.
+project	5	index/index.sqlite
+2026/07/17 12:41:47 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:41:47 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:41:47 Gse dictionary loaded finished.
+json_ok semantic rebuild user
+2026/07/17 12:41:50 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:41:50 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:41:51 Gse dictionary loaded finished.
+json_ok semantic rebuild project
+2026/07/17 12:41:52 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:41:52 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:41:53 Gse dictionary loaded finished.
+json_ok semantic rebuild all
+2026/07/17 12:41:54 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:41:54 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:41:54 Gse dictionary loaded finished.
+json_ok first semantic search
+first_search_ok 5
+daemon_ok 35893 http://127.0.0.1:54584
+2026/07/17 12:41:59 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:42:00 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:42:00 Gse dictionary loaded finished.
+2026/07/17 12:42:01 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:42:01 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:42:02 Gse dictionary loaded finished.
+2026/07/17 12:42:02 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:42:03 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:42:03 Gse dictionary loaded finished.
+ok auto 2
+ok auto 5
+ok auto 7
+ok required 5
+2026/07/17 12:42:14 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:42:14 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:42:14 Gse dictionary loaded finished.
+2026/07/17 12:42:15 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:42:16 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:42:16 Gse dictionary loaded finished.
+generation_ok g-1784263313762689000-9e363216a8c6b801a16578cf 05328257f5ecfa866174ad59c5d17c1e7b1ed75b65bd18c037d2923ef5cd33b6
+generation_ok g-1784263313870160000-20eebcf1a61b92938d0b9f98 05328257f5ecfa866174ad59c5d17c1e7b1ed75b65bd18c037d2923ef5cd33b6
+[e2e] phase positive passed
+[e2e] phase fault: injection and recovery
+ok  	github.com/nickdu2009/worktrail/internal/semantic/daemon	1.789s
+ok  	github.com/nickdu2009/worktrail/internal/semantic/generation	1.684s
+2026/07/17 12:42:23 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:42:23 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:42:24 Gse dictionary loaded finished.
+2026/07/17 12:42:27 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:42:28 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:42:28 Gse dictionary loaded finished.
+json_error_ok required search after bundle tamper ['semantic_bundle_missing']
+json_error_ok required search without active generation ['semantic_generation_missing']
+2026/07/17 12:42:36 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:42:36 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:42:37 Gse dictionary loaded finished.
+2026/07/17 12:42:39 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:42:40 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:42:40 Gse dictionary loaded finished.
+2026/07/17 12:42:41 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:42:41 Load the gse dictionary: "/Users/duxiaobo/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:42:42 Gse dictionary loaded finished.
+[e2e] phase fault passed
+[e2e] phase resource: real M1 parity + security/resource gate
+[e2e] preparing gate assets in /Users/duxiaobo/.cache/worktrail-semantic-e2e-gate
+You're using a XLMRobertaTokenizerFast tokenizer. Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to encode the text followed by a call to the `pad` method to get a padded encoding.
+go: downloading modernc.org/sqlite v1.51.0
+go: downloading github.com/klauspost/compress v1.19.0
+go: downloading github.com/yuin/goldmark v1.8.2
+go: downloading github.com/go-ego/gse v1.0.2
+go: downloading golang.org/x/sys v0.42.0
+go: downloading github.com/vcaesar/cedar v0.30.0
+go: downloading modernc.org/libc v1.72.3
+go: downloading github.com/dustin/go-humanize v1.0.1
+go: downloading github.com/ncruces/go-strftime v1.0.0
+go: downloading github.com/google/uuid v1.6.0
+go: downloading github.com/mattn/go-isatty v0.0.20
+go: downloading modernc.org/mathutil v1.7.1
+go: downloading modernc.org/memory v1.11.0
+go: downloading github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec
+2026/07/17 12:43:49 Load the gse dictionary: "/var/folders/sf/ff83t05564q67_f7l5rb2s6h0000gn/T/worktrail-semantic-e2e.ti5kpK/home/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/s_1.txt"
+2026/07/17 12:43:49 Load the gse dictionary: "/var/folders/sf/ff83t05564q67_f7l5rb2s6h0000gn/T/worktrail-semantic-e2e.ti5kpK/home/go/pkg/mod/github.com/go-ego/gse@v1.0.2/data/dict/zh/t_1.txt"
+2026/07/17 12:43:49 Gse dictionary loaded finished.
+resource_ok 1081.031583 17.446834 802992
+[e2e] phase resource passed
+[e2e] phase evidence: summarize and verify cleanup readiness
+source_snapshot_ok 156 088acd8f92f793bb29cdf4167d5063b059a2adf6b4f0a7f3792fd845ca06f26d
+[e2e] phase evidence recorded at /Users/duxiaobo/workspaces/nickdu/worktrail-semantic-recall-v1-llama-app/docs/worktrail-semantic-production-e2e-2026-07-17.md; temp root cleaned via trap
+[e2e] phase all completed successfully

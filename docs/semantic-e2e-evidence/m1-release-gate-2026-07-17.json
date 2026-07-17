@@ -1,0 +1,128 @@
+{
+  "schema": "worktrail.semantic.release-gate.v1",
+  "date": "2026-07-17",
+  "result": "PASS",
+  "record_type": "dirty_tree_engineering_evidence",
+  "release_record": false,
+  "source_snapshot": {
+    "description": "Defined dirty source-tree input captured by run-production-e2e-gate.sh immediately before temporary binaries were built. It consists of HEAD, the filtered working-tree binary diff, and the filtered untracked inventory; gate-generated and gate-overwritten evidence is excluded. This is not a clean-checkout release record.",
+    "captured_at": "2026-07-17T04:38:07Z",
+    "complete_inventory_file": "docs/semantic-e2e-evidence/m1-release-gate-2026-07-17-source-snapshot.json",
+    "verification_file": "docs/semantic-e2e-evidence/m1-release-gate-2026-07-17-source-snapshot-verification.json",
+    "verification": "PASS: the current checkout recomputed every recorded input hash after evidence generation.",
+    "head": "91907b1a7a6bdce0f8fd6f3ca3c3d91205f8eac4",
+    "working_tree": "dirty",
+    "status_porcelain_v1_z_sha256": "14dceaa4428375de839594ebc04c3dd844b1606da6bef7ad7573a055447e5e2a",
+    "tracked_diff_head_sha256": "827ff09422a112f4e05464a1d86b74c16f7105f426cf81a172ba8d4bfd14459f",
+    "excluded_pathspecs": [
+      "docs/semantic-e2e-evidence/**",
+      "docs/worktrail-semantic-production-e2e-*.md",
+      "docs/worktrail-semantic-m1-release-evidence-*.md"
+    ],
+    "untracked": {
+      "algorithm": "worktrail-untracked-inventory.v1: git ls-files --others --exclude-standard -z; exclude the documented gate evidence pathspecs; byte-sort paths; regular files hash raw bytes; symlinks hash symlink NUL plus raw target bytes; inventory SHA-256 hashes the version marker and path, kind, size_bytes, and content_sha256 fields separated by NUL/newline bytes.",
+      "count": 156,
+      "inventory_sha256": "088acd8f92f793bb29cdf4167d5063b059a2adf6b4f0a7f3792fd845ca06f26d"
+    }
+  },
+  "platform": {
+    "machine": "Apple M1 Pro",
+    "architecture": "darwin-arm64",
+    "macos": "15.7.3",
+    "m1": "verified",
+    "m2_m5": "experimental; no hardware reports were required or produced"
+  },
+  "commands": [
+    {
+      "command": "WORKTRAIL_E2E_KEEP_TMP=0 bash scripts/semantic/run-production-e2e-gate.sh all",
+      "result": "PASS",
+      "phases": ["offline", "install", "positive", "fault", "resource", "evidence"],
+      "isolation": "temporary HOME, WORKTRAIL_HOME, and WORKTRAIL_PROJECT_ROOT",
+      "log_file": "docs/semantic-e2e-evidence/m1-release-gate-2026-07-17.log"
+    },
+    {
+      "command": "go test ./...",
+      "result": "PASS"
+    },
+    {
+      "command": "go vet ./...",
+      "result": "PASS"
+    },
+    {
+      "command": "go build ./...",
+      "result": "PASS"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "bash scripts/semantic/test-production-e2e-gate-signals.sh",
+      "result": "PASS",
+      "assertions": ["INT exits 130", "TERM exits 143", "temporary root removed"]
+    },
+    {
+      "command": "go test ./internal/semantic/daemon -run TestSupervisorStartRecoversFromEndpointBindRaceAndSavesAuthenticatedDescriptor -count=1",
+      "result": "PASS",
+      "coverage": "controlled daemon endpoint-bind race and recovery"
+    }
+  ],
+  "parity": {
+    "passed": true,
+    "entries": 11,
+    "queries": 5,
+    "min_cosine": 0.9996366062134908,
+    "max_batch_delta": 0.00010470705600591074,
+    "top_k_overlap": 1,
+    "recall_at_k": 1,
+    "mrr": 1,
+    "ndcg_at_k": 1
+  },
+  "retrieval": {
+    "report_file": "docs/semantic-e2e-evidence/retrieval-report.json",
+    "rrf_gate": "Recall@10, MRR, and nDCG@10 must each meet configured floors and match or exceed entry FTS.",
+    "governed_gate": "Recall@10 must meet its configured floor and match or exceed entry FTS; MRR and nDCG@10 are reported but not gated.",
+    "rrf": {
+      "recall_at_k": 1,
+      "mrr": 0.9259259259259258,
+      "ndcg_at_k": 0.9444444444444444,
+      "vs_entry_fts": "ge"
+    },
+    "governed": {
+      "recall_at_k": 1,
+      "mrr": 0.6759259259259259,
+      "ndcg_at_k": 0.754669963802242,
+      "vs_entry_fts": "ge"
+    }
+  },
+  "resource": {
+    "cold_start_ms": 1081.031583,
+    "cold_start_limit_ms": 25000,
+    "warm_embedding_p95_ms": 17.446834,
+    "warm_embedding_p95_limit_ms": 35,
+    "peak_rss_kb": 802992,
+    "peak_rss_limit_kb": 1048576,
+    "authenticated_loopback": true,
+    "unauthenticated_tokenize_status": 401,
+    "offline_sandbox_api_succeeded": true
+  },
+  "cleanup": {
+    "temporary_e2e_root_removed": true,
+    "temporary_daemon_removed": true,
+    "temporary_port_holder_removed": "not applicable: the E2E gate no longer creates an unrelated port-holder",
+    "temporary_runtime_model_and_port_files_removed": true,
+    "durable_seed_cache_retained": "only the pre-existing explicit gate cache under ~/.cache/worktrail-semantic-e2e-gate"
+  },
+  "gate_corrections": {
+    "signal_cleanup": "EXIT cleanup is separate from INT and TERM handlers, is idempotent, and preserves fixed interrupt exits 130 and 143.",
+    "diff_check": "The offline phase now propagates git diff --check failures.",
+    "source_snapshot": "The defined input set excludes evidence outputs from status, tracked diff, and untracked inventory, then the gate re-computes and records a successful verification after evidence generation.",
+    "full_build": "The offline phase actually executes go build ./... before recording its PASS result.",
+    "port_collision": "The E2E gate no longer claims that a random port-holder occupied the daemon endpoint. The controlled daemon test TestSupervisorStartRecoversFromEndpointBindRaceAndSavesAuthenticatedDescriptor covers deterministic bind-race recovery and is executed in the fault phase."
+  },
+  "residual_risk": [
+    "This report verifies Apple M1 only.",
+    "M2-M5 remain experimental with pinned artifacts and installation-time self-check coverage; this report makes no compatibility, performance, privacy, minimum-macOS, or operational-support claim for those variants.",
+    "A clean checkout of a user-authorized candidate commit, tag validation, and any publication remain required for the final v1.0.0 release record."
+  ]
+}

@@ -507,6 +507,16 @@ func ensureSQLiteHealthy(root string) error {
 }
 
 func refreshSQLite(root string, tokenizer Tokenizer) error {
+	return refreshSQLiteWithRefreshTimestamp(root, tokenizer, true)
+}
+
+// refreshSQLiteForRead reconciles source changes before a read-only lookup
+// without recording a timestamp when the index is already current.
+func refreshSQLiteForRead(root string, tokenizer Tokenizer) error {
+	return refreshSQLiteWithRefreshTimestamp(root, tokenizer, false)
+}
+
+func refreshSQLiteWithRefreshTimestamp(root string, tokenizer Tokenizer, recordRefresh bool) error {
 	if tokenizer == nil {
 		tokenizer = defaultTokenizer
 	}
@@ -665,8 +675,10 @@ FROM entries`)
 			return err
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO index_state(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, "last_refresh_at", now.Format(time.RFC3339Nano)); err != nil {
-		return err
+	if changed || recordRefresh {
+		if _, err := tx.Exec(`INSERT INTO index_state(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, "last_refresh_at", now.Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

@@ -1,0 +1,29 @@
+{
+  "schema": "worktrail.semantic.eval.corpus.v1",
+  "queries": [
+    {
+      "id": "query-auth",
+      "text": "How is API authentication configured?",
+      "relevant_ids": ["doc-auth"]
+    },
+    {
+      "id": "query-rebuild",
+      "text": "语义索引如何重建？",
+      "relevant_ids": ["doc-rebuild"]
+    }
+  ],
+  "documents": [
+    {
+      "id": "doc-auth",
+      "text": "The local runtime uses a random API key."
+    },
+    {
+      "id": "doc-rebuild",
+      "text": "运行 worktrail semantic rebuild 重建语义索引。"
+    },
+    {
+      "id": "doc-unrelated",
+      "text": "Candidates require review before promotion."
+    }
+  ]
+}

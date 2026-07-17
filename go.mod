@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/go-ego/gse v1.0.2
+	github.com/klauspost/compress v1.19.0
 	github.com/yuin/goldmark v1.8.2
 	modernc.org/sqlite v1.51.0
 )

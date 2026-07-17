@@ -1,6 +1,6 @@
 # Worktrail Backlog
 
-Last updated: 2026-05-26
+Last updated: 2026-07-15
 
 This backlog tracks follow-up work after the KDD compatibility import,
 agent-assisted distillation dogfood pass, and review/evidence lifecycle
@@ -13,14 +13,20 @@ non-goals, behavior, and acceptance criteria.
 
 Pending items are ordered by dependency and release priority.
 
-- P1: Prepare the `v1.0.0` release package without expanding core functionality
-  after the P0 dogfood blockers are resolved. Add release notes or `CHANGELOG.md`,
-  document what `v1.0.0` means in the README, add a release operation checklist,
-  include the long-term vision discussion, rerun the release gate, and tag
-  `v1.0.0`.
+- P1: Prepare the `v1.0.0` release package with the approved opt-in local
+  semantic-recall scope expansion. Preserve the lexical baseline while adding
+  the pinned BGE-M3 Q8_0/llama.app runtime gate, rebuild-only sqlite-vec
+  generations, hybrid retrieval, explicit degradation, and Context Pack
+  knowledge-only integration. Complete the Proposed-to-Accepted ADR gate,
+  physically validate the verified M1 variant, keep M2-M5 experimental behind
+  their per-chip pinned-artifact and installation-time self-check gates, add
+  release notes or `CHANGELOG.md`, rerun the expanded release gate, and only
+  then tag `v1.0.0`.
   Requirements:
   [worktrail-release-acceptance.md](worktrail-release-acceptance.md) and
   [worktrail-long-term-vision-discussion.md](worktrail-long-term-vision-discussion.md).
+  Architecture:
+  [worktrail-local-semantic-recall-architecture.md](worktrail-local-semantic-recall-architecture.md).
 
 ## Completed
 

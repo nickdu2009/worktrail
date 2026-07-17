@@ -15,7 +15,7 @@ Worktrail 的目标不是再造一个新的知识平台，而是把 AI 编程会
 - 先保留证据，再形成候选知识，最后才进入正式知识
 - review 保持在 Agent 对话里，而不是再引入一个额外 UI
 - 写操作必须经过明确确认，而不是让自动化越过人审
-- 维护尽量低干预，而不是依赖后台服务和隐式自动化
+- 维护尽量低干预，不依赖通用后台服务和隐式治理自动化
 
 这意味着 Worktrail 有意放弃一部分“看起来更自动”“看起来更智能”的功能，换取更清晰的边界、更低的误写风险，以及更稳定的长期可维护性。
 
@@ -104,18 +104,24 @@ Worktrail 不把“自动判断对不对”当成默认前提，而把“明确�
 
 背后的原因很简单：Agent 可以帮助你发现、总结、起草、分组、解释风险，但最终是否采纳一条知识，应该由使用者在明确上下文中做决定。
 
-## 为什么不要额外运行面
-<div class="title-en">Why Worktrail Avoids Extra Runtime Surface</div>
+## 为什么严格限制额外运行面
+<div class="title-en">Why Worktrail Strictly Limits Extra Runtime Surface</div>
 
-Worktrail 明确不做这些东西：
+Worktrail 明确不做这些通用运行面：
 
-- daemon、watcher、后台常驻服务
+- 通用 daemon、watcher、scheduler
 - MCP server
 - Web dashboard
-- embedding / vector database
+- 云 embedding 或独立 vector database
 - custom external command provider
 
 这些能力看起来能提升“自动化程度”，但同时也会放大运行面、权限面和维护成本。
+
+v1.0.0 的本地语义召回是一个受限例外：只有用户显式安装并调用 semantic
+能力时，Worktrail 才管理一个仅监听 loopback、带认证、禁用外联和内容日志
+的 llama.app 进程。向量 generation 只存在于可重建的本地 sqlite-vec
+索引中，不能修改正式知识；删除全部语义资产后，系统恢复到现有 lexical
+行为。该能力必须先通过独立 ADR 和 release gate，不能作为隐式后台功能。
 
 Worktrail 更偏向显式触发：
 

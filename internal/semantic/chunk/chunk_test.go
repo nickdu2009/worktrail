@@ -1,0 +1,254 @@
+package chunk
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+type wordCounter struct{}
+
+func (wordCounter) CountTokens(_ context.Context, value string) (int, error) {
+	return len(strings.Fields(value)), nil
+}
+
+type failingCounter struct{}
+
+func (failingCounter) CountTokens(context.Context, string) (int, error) {
+	return 0, errors.New("counter unavailable")
+}
+
+func TestChunkDocumentBuildsNestedHeadingBreadcrumbs(t *testing.T) {
+	doc := Document{
+		Path: "docs/example.md",
+		Body: "# Root\n\nRoot paragraph.\n\nChild\n-----\n\nChild paragraph.\n",
+	}
+
+	chunks, err := ChunkDocument(context.Background(), doc, wordCounter{})
+	if err != nil {
+		t.Fatalf("ChunkDocument() error = %v", err)
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("len(chunks) = %d, want 2", len(chunks))
+	}
+	if got, want := chunks[0].HeadingBreadcrumb, []string{"Root"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("first breadcrumb = %q, want %q", got, want)
+	}
+	if got, want := chunks[1].HeadingBreadcrumb, []string{"Root", "Child"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("second breadcrumb = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(chunks[1].EmbeddingInput, "path: docs/example.md\n") {
+		t.Errorf("embedding input does not start with stable metadata prefix: %q", chunks[1].EmbeddingInput)
+	}
+}
+
+func TestChunkDocumentKeepsTopLevelListItemsIntact(t *testing.T) {
+	doc := Document{
+		Body: "# Tasks\n\n- first item stays together\n  - nested detail stays with its parent\n- second item stays together\n",
+	}
+	budget := Budget{Target: 12, HardMax: 30, Overlap: 2}
+
+	chunks, err := chunkDocument(context.Background(), doc, wordCounter{}, budget)
+	if err != nil {
+		t.Fatalf("chunkDocument() error = %v", err)
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("len(chunks) = %d, want 2", len(chunks))
+	}
+	if !strings.Contains(chunks[0].Body, "- first item stays together") ||
+		!strings.Contains(chunks[0].Body, "- nested detail stays with its parent") {
+		t.Errorf("first list item was split: %q", chunks[0].Body)
+	}
+	if !strings.Contains(chunks[1].Body, "- second item stays together") {
+		t.Errorf("second list item missing from its chunk: %q", chunks[1].Body)
+	}
+}
+
+func TestChunkDocumentKeepsBoundedFencedCodeBlockIntact(t *testing.T) {
+	doc := Document{
+		Body: "# Example\n\nBefore code.\n\n```go\nfunc main() {\n\tprintln(\"hello\")\n}\n```\n\nAfter code.\n",
+	}
+	budget := Budget{Target: 12, HardMax: 30, Overlap: 2}
+
+	chunks, err := chunkDocument(context.Background(), doc, wordCounter{}, budget)
+	if err != nil {
+		t.Fatalf("chunkDocument() error = %v", err)
+	}
+	var codeChunk *Chunk
+	for i := range chunks {
+		if strings.Contains(chunks[i].Body, "func main()") {
+			codeChunk = &chunks[i]
+			break
+		}
+	}
+	if codeChunk == nil {
+		t.Fatal("no chunk contains the fenced code block")
+	}
+	if !strings.Contains(codeChunk.Body, "```go") || !strings.Contains(codeChunk.Body, "```\n") {
+		t.Errorf("fenced code boundaries were not retained: %q", codeChunk.Body)
+	}
+}
+
+func TestChunkDocumentForcedSplitUsesOverlapAndHardMaximum(t *testing.T) {
+	doc := Document{
+		Body: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen\n",
+	}
+	budget := Budget{Target: 10, HardMax: 15, Overlap: 2}
+
+	chunks, err := chunkDocument(context.Background(), doc, wordCounter{}, budget)
+	if err != nil {
+		t.Fatalf("chunkDocument() error = %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("len(chunks) = %d, want at least 2 forced chunks", len(chunks))
+	}
+	for _, got := range chunks {
+		if got.TokenCount > budget.HardMax {
+			t.Errorf("chunk token count = %d, hard maximum = %d", got.TokenCount, budget.HardMax)
+		}
+	}
+	if !strings.HasPrefix(chunks[1].Body, "seven eight ") {
+		t.Errorf("second forced chunk = %q, want two-token overlap", chunks[1].Body)
+	}
+}
+
+func TestChunkDocumentSourceOffsetsSliceOriginalUTF8Body(t *testing.T) {
+	doc := Document{
+		Body: "# H\n\néclair paragraph.\n\nSecond paragraph.\n",
+	}
+
+	chunks, err := ChunkDocument(context.Background(), doc, wordCounter{})
+	if err != nil {
+		t.Fatalf("ChunkDocument() error = %v", err)
+	}
+	if len(chunks) != 1 {
+		t.Fatalf("len(chunks) = %d, want 1", len(chunks))
+	}
+	for _, got := range chunks {
+		if source := doc.Body[got.SourceStart:got.SourceEnd]; source != got.Body {
+			t.Errorf("body[%d:%d] = %q, chunk body = %q", got.SourceStart, got.SourceEnd, source, got.Body)
+		}
+	}
+}
+
+func TestChunkDocumentIsDeterministicAndLinksNeighbors(t *testing.T) {
+	doc := Document{
+		ID:    "entry-1",
+		Path:  "docs/example.md",
+		Title: "Example",
+		Tags:  []string{"zeta", "alpha"},
+		Body:  "# First\n\nOne.\n\n# Second\n\nTwo.\n",
+	}
+
+	first, err := ChunkDocument(context.Background(), doc, wordCounter{})
+	if err != nil {
+		t.Fatalf("first ChunkDocument() error = %v", err)
+	}
+	second, err := ChunkDocument(context.Background(), doc, wordCounter{})
+	if err != nil {
+		t.Fatalf("second ChunkDocument() error = %v", err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Errorf("ChunkDocument() is not deterministic:\nfirst:  %#v\nsecond: %#v", first, second)
+	}
+	if first[0].NextChunkID != first[1].ChunkID || first[1].PrevChunkID != first[0].ChunkID {
+		t.Errorf("neighbor links = (%q, %q), want %q", first[0].NextChunkID, first[1].PrevChunkID, first[0].ChunkID)
+	}
+	if first[0].EmbeddingHash == "" || first[0].ChunkID == "" {
+		t.Error("deterministic identities must not be empty")
+	}
+}
+
+func TestChunkDocumentScopeSeparatesIdentityAndEmbeddingInput(t *testing.T) {
+	doc := Document{
+		ID:    "entry-1",
+		Path:  "docs/example.md",
+		Body:  "Same document body.\n",
+		Scope: "project",
+	}
+	projectChunks, err := ChunkDocument(context.Background(), doc, wordCounter{})
+	if err != nil {
+		t.Fatalf("project ChunkDocument() error = %v", err)
+	}
+
+	doc.Scope = "user"
+	userChunks, err := ChunkDocument(context.Background(), doc, wordCounter{})
+	if err != nil {
+		t.Fatalf("user ChunkDocument() error = %v", err)
+	}
+	if len(projectChunks) != 1 || len(userChunks) != 1 {
+		t.Fatalf("chunk counts = (%d, %d), want (1, 1)", len(projectChunks), len(userChunks))
+	}
+	if projectChunks[0].Scope != "project" || userChunks[0].Scope != "user" {
+		t.Errorf("chunk scopes = (%q, %q), want (project, user)", projectChunks[0].Scope, userChunks[0].Scope)
+	}
+	if projectChunks[0].ChunkID == userChunks[0].ChunkID {
+		t.Error("same document ID and path in different scopes must not share a chunk ID")
+	}
+	if projectChunks[0].EmbeddingHash == userChunks[0].EmbeddingHash {
+		t.Error("scope must affect the embedding input hash")
+	}
+	if !strings.Contains(projectChunks[0].EmbeddingInput, "scope: project\n") ||
+		!strings.Contains(userChunks[0].EmbeddingInput, "scope: user\n") {
+		t.Errorf("embedding inputs must contain scope: (%q, %q)", projectChunks[0].EmbeddingInput, userChunks[0].EmbeddingInput)
+	}
+}
+
+func TestDefaultBudgetReturnsIndependentValues(t *testing.T) {
+	first := DefaultBudget()
+	first.Target = 1
+	second := DefaultBudget()
+
+	if second.Target != 512 || second.HardMax != 768 || second.Overlap != 64 {
+		t.Errorf("DefaultBudget() = %+v, want 512/768/64", second)
+	}
+}
+
+func TestBudgetRejectsOverlapBeyondHardMaximum(t *testing.T) {
+	_, err := chunkDocument(
+		context.Background(),
+		Document{Body: "paragraph"},
+		wordCounter{},
+		Budget{Target: 1, HardMax: 2, Overlap: 3},
+	)
+	if err == nil || !strings.Contains(err.Error(), "overlap must not exceed the hard maximum") {
+		t.Fatalf("chunkDocument() error = %v, want overlap budget error", err)
+	}
+}
+
+func TestChunkDocumentPropagatesCounterErrors(t *testing.T) {
+	_, err := ChunkDocument(context.Background(), Document{Body: "paragraph"}, failingCounter{})
+	if err == nil || !strings.Contains(err.Error(), "counter unavailable") {
+		t.Fatalf("ChunkDocument() error = %v, want counter error", err)
+	}
+}
+
+func TestChunkDocumentRejectsOversizedTablesWithoutRowSplitting(t *testing.T) {
+	doc := Document{
+		Body: "| A | B |\n|---|---|\n| one two three four five | six seven eight nine ten |\n",
+	}
+	_, err := chunkDocument(context.Background(), doc, wordCounter{}, Budget{Target: 10, HardMax: 11, Overlap: 2})
+	if err == nil || !strings.Contains(err.Error(), "table row splitting is not supported") {
+		t.Fatalf("chunkDocument() error = %v, want explicit table split error", err)
+	}
+}
+
+func TestChunkPackageDoesNotImportDaemonTokenizer(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller() failed")
+	}
+	source, err := os.ReadFile(filepath.Join(filepath.Dir(file), "chunk.go"))
+	if err != nil {
+		t.Fatalf("read chunk.go: %v", err)
+	}
+	if strings.Contains(string(source), "internal/semantic/daemon") ||
+		strings.Contains(string(source), "internal/index") {
+		t.Error("chunk package must depend only on contracts for token counting")
+	}
+}

@@ -45,6 +45,24 @@ worktrail init
 
 这会初始化用户级和项目级 Worktrail 数据。项目级 `.worktrail/` 存在时，安装到用户级的 Worktrail skills 才会在该项目中自动运行常规工作流。
 
+### 可选安装本地语义召回
+<div class="title-en">Optional Local Semantic Recall Installation</div>
+
+核心初始化默认不访问网络，也不会自动下载语义模型或 runtime。只有显式请求
+`worktrail init --semantic` 才会安装本地语义 bundle；`worktrail init
+--no-semantic` 会明确禁用语义安装。安装成功后仍需显式执行
+`worktrail semantic rebuild --scope all` 才会创建索引。
+
+M1 是唯一的 `verified` runtime 变体。M2、M3、M4、M5 是 opt-in
+`experimental` 变体：安装时只能选择当前芯片自己的 pinned official
+artifact，并且必须通过本地 integrity、authenticated-loopback、alias、
+tokenization、embedding shape、CLS pooling 和 L2-normalization self-check
+才能激活。自检失败会拒绝该 bundle，并让 semantic `auto` mode 显式降级到
+lexical；不会尝试其他芯片的 artifact。
+
+实验变体不表示 `compatible` 或 `verified`，也不提供性能、隐私、最低 macOS
+版本或运营支持保证。发布前不要求为每种实验芯片收集 self-check 报告。
+
 ### 只初始化用户级
 <div class="title-en">User Scope Only</div>
 
