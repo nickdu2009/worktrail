@@ -1,0 +1,7 @@
+{
+  "session_id": "cursor-mcp-deny",
+  "tool_name": "Write",
+  "tool_input": {
+    "path": ".worktrail/architecture/blocked-mcp.md"
+  }
+}

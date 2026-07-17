@@ -1,0 +1,5 @@
+{
+  "session_id": "cursor-after-shell",
+  "command": "echo done",
+  "output": "done"
+}

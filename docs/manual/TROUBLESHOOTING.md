@@ -37,6 +37,25 @@ worktrail --help
 
 Agent 集成会调用 `worktrail` 命令，所以 CLI 不可用时，hooks、skills 或 settings 相关能力也会失败。
 
+## Cursor/Codex Hooks 安装或 Doctor 失败
+<div class="title-en">Cursor/Codex Hooks Install or Doctor Failures</div>
+
+### 现象
+<div class="title-en">Symptom</div>
+
+`worktrail install codex --project` 报 `legacy_codex_user_hook_requires_manual_migration`，或 `doctor cursor|codex --project` 提示 managed handler / timeout / legacy scalar 问题。
+
+### 处理
+<div class="title-en">Fix</div>
+
+1. 打开项目 `.codex/hooks.json` / `.cursor/hooks.json`，确认 JSON 合法。
+2. 若 Codex 仍使用非 Worktrail 的旧 scalar（字符串）handler，先手动迁到 matcher-group 数组 schema，再重试 install。
+3. 旧 Worktrail scalar（`worktrail hook codex ...` 字符串）可在 install 时自动升级；失败时用 doctor 查看具体事件。
+4. hooks replace 失败时，Rules/Skills 可能已写入但 hooks 保持原样；按 report 中的 `hooks-replace-failed-retryable` 重试 project install。
+5. Codex 还需在会话中执行 `/hooks` 信任项目 hooks。
+6. Cloud Agent / Plugin 分发不在支持范围；回退时只卸载 Worktrail managed handler，不要删用户 handler。
+7. pending ops intent 或 **claimed**（未 completed）hook receipt 使用 `worktrail doctor ops repair --confirm`：repair 会清理非执行中的 claimed receipt 以便后续 hook 重试，但 **不会** auto-replay 原 effect；仍在执行的 receipt 会保留并在报告中显示，待该 hook 完成后再处理。`worktrail doctor ops` status 与 `doctor cursor|codex --project` 都会报告 claimed receipts。过期 completed receipt / idle binding 可用 `worktrail runtime prune --apply --confirm` 或同一 repair 路径清理。
+
 ## 上下文里没有项目知识
 <div class="title-en">No Project Knowledge in Context</div>
 

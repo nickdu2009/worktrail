@@ -1,7 +1,106 @@
 {
   "hooks": {
-    "SessionStart": "worktrail hook codex SessionStart",
-    "PreCompact": "worktrail hook codex PreCompact",
-    "Stop": "worktrail hook codex Stop"
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "worktrail hook codex SessionStart",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "worktrail hook codex UserPromptSubmit",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "worktrail hook codex PreToolUse",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "worktrail hook codex PermissionRequest",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "worktrail hook codex PostToolUse",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "worktrail hook codex PreCompact",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "worktrail hook codex PostCompact",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "worktrail hook codex SubagentStop",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "worktrail hook codex Stop",
+            "timeout": 2
+          }
+        ]
+      }
+    ]
   }
 }

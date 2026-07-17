@@ -3,22 +3,56 @@
   "hooks": {
     "sessionStart": [
       {
-        "command": "worktrail hook cursor sessionStart"
+        "command": "worktrail hook cursor sessionStart",
+        "timeout": 2
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "worktrail hook cursor beforeShellExecution",
+        "timeout": 1
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "worktrail hook cursor beforeMCPExecution",
+        "timeout": 1
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": "worktrail hook cursor afterShellExecution",
+        "timeout": 2
+      }
+    ],
+    "afterMCPExecution": [
+      {
+        "command": "worktrail hook cursor afterMCPExecution",
+        "timeout": 2
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "worktrail hook cursor afterFileEdit",
+        "timeout": 2
       }
     ],
     "preCompact": [
       {
-        "command": "worktrail hook cursor preCompact"
+        "command": "worktrail hook cursor preCompact",
+        "timeout": 2
       }
     ],
     "stop": [
       {
-        "command": "worktrail hook cursor stop"
+        "command": "worktrail hook cursor stop",
+        "timeout": 2
       }
     ],
     "sessionEnd": [
       {
-        "command": "worktrail hook cursor sessionEnd"
+        "command": "worktrail hook cursor sessionEnd",
+        "timeout": 2
       }
     ]
   }

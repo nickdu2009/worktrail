@@ -112,6 +112,56 @@ func TestDoctorOpsConfirmedRepairRemovesAgedOwnerlessLock(t *testing.T) {
 	}
 }
 
+func TestDoctorOpsReportsAndClearsClaimedHookReceipts(t *testing.T) {
+	project := filepath.Join(t.TempDir(), "project")
+	root := filepath.Join(project, ".worktrail")
+	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
+	t.Setenv("WORKTRAIL_HOME", filepath.Join(t.TempDir(), "home"))
+	receiptDir := filepath.Join(root, "ops", "hook-receipts")
+	if err := os.MkdirAll(receiptDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	receiptPath := filepath.Join(receiptDir, "claimed.json")
+	body := `{
+  "schema": "worktrail.hook_receipt.v1",
+  "effect_key": "effect-claimed-doctor",
+  "status": "claimed",
+  "created_at": "2026-01-01T00:00:00Z",
+  "updated_at": "2026-01-01T00:00:00Z"
+}`
+	if err := os.WriteFile(receiptPath, []byte(body+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if err := Run(context.Background(), []string{"doctor", "ops", "--format", "json"}, nil, &out, &errOut); err != nil {
+		t.Fatalf("status: %v stderr=%s", err, errOut.String())
+	}
+	var status opsDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.OK || len(status.ClaimedReceipts) != 1 || status.ClaimedReceipts[0].EffectKey != "effect-claimed-doctor" {
+		t.Fatalf("status report = %+v", status)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if err := Run(context.Background(), []string{"doctor", "ops", "repair", "--confirm", "--format", "json"}, nil, &out, &errOut); err != nil {
+		t.Fatalf("repair: %v stderr=%s", err, errOut.String())
+	}
+	var repaired opsDoctorReport
+	if err := json.Unmarshal(out.Bytes(), &repaired); err != nil {
+		t.Fatal(err)
+	}
+	if !repaired.OK || len(repaired.ClearedReceipts) != 1 || len(repaired.RemainingClaimed) != 0 {
+		t.Fatalf("repair report = %+v", repaired)
+	}
+	if _, err := os.Stat(receiptPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("claimed receipt remains after repair: %v", err)
+	}
+}
+
 func TestDoctorOpsDoesNotTouchForeignOrUnknownLocks(t *testing.T) {
 	tests := []struct {
 		name      string

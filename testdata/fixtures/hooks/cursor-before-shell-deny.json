@@ -1,0 +1,4 @@
+{
+  "session_id": "cursor-session-deny",
+  "command": "echo blocked > .worktrail/architecture/blocked.md"
+}

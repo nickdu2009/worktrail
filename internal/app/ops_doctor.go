@@ -10,23 +10,28 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/nickdu2009/worktrail/internal/hooks"
 	"github.com/nickdu2009/worktrail/internal/ops"
 	"github.com/nickdu2009/worktrail/internal/paths"
 )
 
 type opsDoctorReport struct {
-	Schema      string          `json:"schema"`
-	OK          bool            `json:"ok"`
-	Scope       string          `json:"scope"`
-	Repair      bool            `json:"repair"`
-	Lock        *ops.LockStatus `json:"lock,omitempty"`
-	LockRemoved bool            `json:"lock_removed,omitempty"`
-	Pending     []string        `json:"pending,omitempty"`
-	Replayed    []string        `json:"replayed,omitempty"`
-	Remaining   []string        `json:"remaining,omitempty"`
-	Blocked     bool            `json:"blocked,omitempty"`
-	Message     string          `json:"message,omitempty"`
+	Schema             string                 `json:"schema"`
+	OK                 bool                   `json:"ok"`
+	Scope              string                 `json:"scope"`
+	Repair             bool                   `json:"repair"`
+	Lock               *ops.LockStatus        `json:"lock,omitempty"`
+	LockRemoved        bool                   `json:"lock_removed,omitempty"`
+	Pending            []string               `json:"pending,omitempty"`
+	Replayed           []string               `json:"replayed,omitempty"`
+	Remaining          []string               `json:"remaining,omitempty"`
+	ClaimedReceipts    []hooks.ClaimedReceipt `json:"claimed_receipts,omitempty"`
+	ClearedReceipts    []string               `json:"cleared_receipts,omitempty"`
+	RemainingClaimed   []hooks.ClaimedReceipt `json:"remaining_claimed_receipts,omitempty"`
+	Blocked            bool                   `json:"blocked,omitempty"`
+	Message            string                 `json:"message,omitempty"`
 }
 
 func runDoctorOps(ctx context.Context, env paths.Env, ioctx IO, args []string) error {
@@ -94,6 +99,13 @@ func runDoctorOps(ctx context.Context, env paths.Env, ioctx IO, args []string) e
 	if err != nil {
 		return fail(err)
 	}
+	report.ClaimedReceipts, err = hooks.ListClaimedReceipts(root)
+	if err != nil {
+		return fail(err)
+	}
+	if len(report.ClaimedReceipts) > 0 {
+		report.OK = false
+	}
 	lockStatus, lockErr := ops.InspectLock(root)
 	if lockErr == nil {
 		report.Lock = &lockStatus
@@ -112,6 +124,7 @@ func runDoctorOps(ctx context.Context, env paths.Env, ioctx IO, args []string) e
 				report.Blocked = true
 				report.Message = "operation lock is not safely recoverable on this host; no lock or journal state was changed"
 				report.Remaining = append([]string(nil), report.Pending...)
+				report.RemainingClaimed = append([]hooks.ClaimedReceipt(nil), report.ClaimedReceipts...)
 				return printOpsDoctorReport(ioctx.Out, format, report)
 			}
 		}
@@ -123,6 +136,19 @@ func runDoctorOps(ctx context.Context, env paths.Env, ioctx IO, args []string) e
 		if err != nil {
 			return fail(err)
 		}
+		// Clear claimed hook receipts so later hook calls can retry. Hooks never auto-replay.
+		report.ClearedReceipts, err = hooks.ClearClaimedReceipts(root)
+		if err != nil {
+			return fail(err)
+		}
+		if err := hooks.PruneArtifacts(root, time.Now().UTC()); err != nil {
+			return fail(err)
+		}
+		report.RemainingClaimed, err = hooks.ListClaimedReceipts(root)
+		if err != nil {
+			return fail(err)
+		}
+		report.OK = len(report.Remaining) == 0 && len(report.RemainingClaimed) == 0 && !report.Blocked
 	}
 	return printOpsDoctorReport(ioctx.Out, format, report)
 }
@@ -164,7 +190,8 @@ func printOpsDoctorReport(out io.Writer, format string, report opsDoctorReport) 
 	if format == "json" {
 		return json.NewEncoder(out).Encode(report)
 	}
-	fmt.Fprintf(out, "ops scope=%s mode=%s pending=%d\n", report.Scope, opsDoctorMode(report.Repair), len(report.Pending))
+	fmt.Fprintf(out, "ops scope=%s mode=%s pending=%d claimed_receipts=%d\n",
+		report.Scope, opsDoctorMode(report.Repair), len(report.Pending), len(report.ClaimedReceipts))
 	if report.Lock == nil {
 		fmt.Fprintln(out, "lock=none")
 	} else {
@@ -186,6 +213,15 @@ func printOpsDoctorReport(out io.Writer, format string, report opsDoctorReport) 
 	for _, id := range report.Replayed {
 		fmt.Fprintf(out, "replayed\t%s\n", id)
 	}
+	for _, receipt := range report.ClaimedReceipts {
+		fmt.Fprintf(out, "claimed_receipt\t%s\t%s\n", receipt.EffectKey, receipt.Path)
+	}
+	for _, id := range report.ClearedReceipts {
+		fmt.Fprintf(out, "cleared_receipt\t%s\n", id)
+	}
+	for _, receipt := range report.RemainingClaimed {
+		fmt.Fprintf(out, "remaining_claimed_receipt\t%s\t%s\n", receipt.EffectKey, receipt.Path)
+	}
 	if report.Blocked {
 		fmt.Fprintln(out, "blocked:", report.Message)
 	}
@@ -203,5 +239,6 @@ func printOpsDoctorHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail doctor ops [status] [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out, "       worktrail doctor ops repair --confirm [--scope project|user] [--format text|json]")
 	fmt.Fprintln(out, "       worktrail doctor ops --repair --confirm [--scope project|user] [--format text|json]")
-	fmt.Fprintln(out, "Status is read-only. Repair only clears a recoverable same-host stale lock and replays pending journal operations.")
+	fmt.Fprintln(out, "Status is read-only. Repair clears a recoverable same-host stale lock, replays pending journal operations,")
+	fmt.Fprintln(out, "and clears claimed hook receipts (hooks do not auto-replay). It also prunes aged completed receipts and idle bindings.")
 }

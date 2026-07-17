@@ -95,9 +95,6 @@ func InitProject(env paths.Env) error {
 	if err := EnsureProjectGitignore(env); err != nil {
 		return err
 	}
-	if err := mergeProjectCodexHooks(filepath.Join(env.ProjectRoot, ".codex", "hooks.json")); err != nil {
-		return err
-	}
 	return wlog.Append(env.ProjectWT, "init", "", "cli:init-project", nil)
 }
 
@@ -256,25 +253,4 @@ func writeDefaults(root string, files map[string]string) error {
 		}
 	}
 	return nil
-}
-
-func mergeProjectCodexHooks(path string) error {
-	existing := map[string]any{}
-	if data, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(data, &existing); err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	existing["hooks"] = map[string]any{
-		"SessionStart": "worktrail hook codex SessionStart",
-		"PreCompact":   "worktrail hook codex PreCompact",
-		"Stop":         "worktrail hook codex Stop",
-	}
-	data, err := json.MarshalIndent(existing, "", "  ")
-	if err != nil {
-		return err
-	}
-	return util.AtomicWrite(path, append(data, '\n'), 0o644)
 }

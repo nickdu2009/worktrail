@@ -1,0 +1,7 @@
+{
+  "session_id": "cursor-after-mcp",
+  "tool_name": "Read",
+  "tool_input": {
+    "path": "README.md"
+  }
+}

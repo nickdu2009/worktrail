@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nickdu2009/worktrail/internal/hooks"
 	"github.com/nickdu2009/worktrail/internal/paths"
 	wtruntime "github.com/nickdu2009/worktrail/internal/runtime"
 )
@@ -92,6 +93,10 @@ func runRuntimePrune(ctx context.Context, env paths.Env, ioctx IO, args []string
 			return fail(err)
 		}
 		report.Applied = true
+		// Explicit CLI also prunes aged completed hook receipts and idle bindings.
+		if err := hooks.PruneArtifacts(plan.Root, time.Now().UTC()); err != nil {
+			return fail(err)
+		}
 	}
 	if format == "json" {
 		return json.NewEncoder(ioctx.Out).Encode(report)
@@ -122,4 +127,5 @@ func isHelpArg(arg string) bool {
 func printRuntimeHelp(out io.Writer) {
 	fmt.Fprintln(out, "usage: worktrail runtime prune [--scope project|user] [--apply --confirm] [--format text|json]")
 	fmt.Fprintln(out, "Runtime pruning is a dry-run by default. Deletion requires both --apply and --confirm.")
+	fmt.Fprintln(out, "Apply also prunes aged completed hook receipts and idle session bindings.")
 }

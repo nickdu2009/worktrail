@@ -51,6 +51,23 @@ func TestLatestExplicitIgnoresHookSourceToolStates(t *testing.T) {
 	}
 }
 
+func TestListExplicitActiveWithTaskRequiresNonEmptyTaskID(t *testing.T) {
+	env := testEnv(t)
+	if _, err := Start(env, StartOptions{Scope: "project", TaskID: "task-a", Title: "A"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Start(env, StartOptions{Scope: "project", TaskID: "task-b", Title: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := ListExplicitActiveWithTask(env, "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len=%d want 2", len(items))
+	}
+}
+
 func TestLatestExplicitReturnsNotExistWhenOnlyHookStates(t *testing.T) {
 	env := testEnv(t)
 	if _, err := Start(env, StartOptions{

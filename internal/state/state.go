@@ -815,6 +815,38 @@ func LatestExplicit(env paths.Env, scope string) (Capsule, error) {
 	return Capsule{}, os.ErrNotExist
 }
 
+// ListExplicitActiveWithTask returns only explicit active states that carry a
+// non-empty task ID. Callers that need uniqueness must check len(result).
+func ListExplicitActiveWithTask(env paths.Env, scope string) ([]Capsule, error) {
+	items, err := List(env, ListOptions{Scope: scope, Directory: DirActive})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Capsule, 0, len(items))
+	for _, item := range items {
+		if !isExplicitSession(item) {
+			continue
+		}
+		if strings.TrimSpace(TaskID(item)) == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// StateRevision returns a stable revision token for binding/context refresh.
+func StateRevision(cap Capsule) string {
+	if !cap.UpdatedTime.IsZero() {
+		return cap.UpdatedTime.UTC().Format(time.RFC3339Nano)
+	}
+	meta, err := decodeMetadata(cap.Metadata)
+	if err != nil || meta.UpdatedAt.IsZero() {
+		return cap.State.ID
+	}
+	return meta.UpdatedAt.UTC().Format(time.RFC3339Nano)
+}
+
 func isExplicitSession(cap Capsule) bool {
 	tool := strings.TrimSpace(cap.State.SourceTool)
 	if tool == "" || tool == defaultSourceTool {
