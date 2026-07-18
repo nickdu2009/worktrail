@@ -1,5 +1,10 @@
 # Worktrail 设计审核：移除类似 TUI 的额外复杂面
 
+Status: historical design-audit record (not a current user guide)
+
+现行产品边界以 `docs/manual/DESIGN-PHILOSOPHY.md` 与
+`docs/worktrail-release-acceptance.md` 为准；本文件仅保留审核史。
+
 ## 2026-07-15 语义召回范围修订
 
 本文件保留原始复杂度审核依据，但“完全不做 daemon/vector”的结论已被

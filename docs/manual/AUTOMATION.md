@@ -25,9 +25,8 @@ Worktrail 的自动化目标很克制：
 4. hooks 在特定事件点注入有界 active-task context、做正式知识路径 guard、写入 runtime session/checkpoint 与审计日志的能力
 
 Worktrail 的治理自动化不是“后台一直运行的系统”，而是围绕当前 Agent
-会话按事件点显式触发。计划中的本地语义 runtime 是独立的受限运行面：
-只在显式 semantic 操作需要 tokenization/embedding 时按需恢复，不能执行
-知识写操作。
+会话按事件点显式触发。本地语义 runtime 是独立的受限运行面：只在显式
+semantic 操作需要 tokenization/embedding 时按需恢复，不能执行知识写操作。
 
 ## 自动化从哪里开始生效
 <div class="title-en">When Automation Becomes Active</div>
@@ -168,9 +167,8 @@ Worktrail 明确不做这些自动化：
 
 这些边界不是缺点，而是为了避免自动化越过 review、权限和可解释性边界。
 
-本地语义召回不改变这些治理边界。它必须由显式安装和
-`search/context --semantic` 或 semantic 管理命令触发；runtime 仅监听认证
-loopback，失败时显式降级 lexical，也不会自动构建首次 generation。
+本地语义召回不改变这些治理边界（见上文「受限运行面」与
+[设计理念](DESIGN-PHILOSOPHY.md)）。
 
 ## 什么时候必须人工确认
 <div class="title-en">When Human Confirmation Is Required</div>

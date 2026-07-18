@@ -1,9 +1,9 @@
 schema: worktrail.semantic-bundle.candidate.v1
 status: release_readiness_incomplete
 generated_from:
-  parity_evidence: docs/worktrail-semantic-parity-spike-2026-07-15.md
-  capacity_evidence: docs/worktrail-semantic-sqlite-vec-spike-2026-07-15.md
-  security_resource_evidence: docs/worktrail-semantic-runtime-security-resource-spike-2026-07-16.md
+  parity_evidence: docs/archive/semantic-recall-m1-prep-2026-07/spikes/worktrail-semantic-parity-spike-2026-07-15.md
+  capacity_evidence: docs/archive/semantic-recall-m1-prep-2026-07/spikes/worktrail-semantic-sqlite-vec-spike-2026-07-15.md
+  security_resource_evidence: docs/archive/semantic-recall-m1-prep-2026-07/spikes/worktrail-semantic-runtime-security-resource-spike-2026-07-16.md
 
 # This is release-preparation evidence, not a runtime trust root. The canonical
 # immutable trusted manifest is embedded at

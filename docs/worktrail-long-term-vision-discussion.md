@@ -52,7 +52,8 @@ its separate release gate passes:
 - a user-installed, loopback-only llama.app runtime managed by Worktrail
 - BGE-M3 Q8_0 dense embeddings and rebuild-only local sqlite-vec generations
 - explicit semantic search/context modes with visible lexical degradation
-- semantic support only for physically validated Apple chip variants
+- semantic support with M1 as the only verified Apple chip variant after its
+  full physical gate; M2–M5 remain opt-in experimental without that claim
 
 `v1.0.0` does not commit to:
 

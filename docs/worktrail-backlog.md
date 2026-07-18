@@ -1,10 +1,10 @@
 # Worktrail Backlog
 
-Last updated: 2026-07-15
+Last updated: 2026-07-18
 
 This backlog tracks follow-up work after the KDD compatibility import,
-agent-assisted distillation dogfood pass, and review/evidence lifecycle
-automation work.
+agent-assisted distillation dogfood pass, review/evidence lifecycle
+automation, and the in-tree local semantic-recall merge.
 
 Each pending item links to the current requirements document that defines scope,
 non-goals, behavior, and acceptance criteria.
@@ -13,18 +13,18 @@ non-goals, behavior, and acceptance criteria.
 
 Pending items are ordered by dependency and release priority.
 
-- P1: Prepare the `v1.0.0` release package with the approved opt-in local
-  semantic-recall scope expansion. Preserve the lexical baseline while adding
-  the pinned BGE-M3 Q8_0/llama.app runtime gate, rebuild-only sqlite-vec
-  generations, hybrid retrieval, explicit degradation, and Context Pack
-  knowledge-only integration. Complete the Proposed-to-Accepted ADR gate,
-  physically validate the verified M1 variant, keep M2-M5 experimental behind
-  their per-chip pinned-artifact and installation-time self-check gates, add
-  release notes or `CHANGELOG.md`, rerun the expanded release gate, and only
-  then tag `v1.0.0`.
+- P1: Close the `v1.0.0` release gate for the already-merged opt-in local
+  semantic-recall scope. Remaining work is release packaging, not feature
+  implementation: keep the dirty-tree M1 engineering evidence supplemental,
+  produce a clean-checkout commit-identified release record, confirm the three
+  semantic ADRs remain Accepted and conflict-free, refresh `CHANGELOG.md` /
+  release notes against that record, rerun the expanded release validation
+  checklist, and only then authorize tag/publish of `v1.0.0`.
   Requirements:
   [worktrail-release-acceptance.md](worktrail-release-acceptance.md) and
-  [worktrail-long-term-vision-discussion.md](worktrail-long-term-vision-discussion.md).
+  [worktrail-release-validation-checklist.md](worktrail-release-validation-checklist.md).
+  Evidence index:
+  [worktrail-semantic-m1-release-evidence-2026-07-17.md](worktrail-semantic-m1-release-evidence-2026-07-17.md).
   Architecture:
   [worktrail-local-semantic-recall-architecture.md](worktrail-local-semantic-recall-architecture.md).
 

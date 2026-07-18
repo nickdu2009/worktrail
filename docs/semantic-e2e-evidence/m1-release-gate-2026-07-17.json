@@ -38,7 +38,7 @@
       "result": "PASS",
       "phases": ["offline", "install", "positive", "fault", "resource", "evidence"],
       "isolation": "temporary HOME, WORKTRAIL_HOME, and WORKTRAIL_PROJECT_ROOT",
-      "log_file": "docs/semantic-e2e-evidence/m1-release-gate-2026-07-17.log"
+      "log_file": "docs/archive/semantic-recall-m1-prep-2026-07/logs/m1-release-gate-2026-07-17.log"
     },
     {
       "command": "go test ./...",

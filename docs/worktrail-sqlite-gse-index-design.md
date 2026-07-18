@@ -1,14 +1,14 @@
 # Worktrail SQLite + GSE Index Design
 
-Last updated: 2026-06-06
+Last updated: 2026-07-18
 
-Status: implemented
+Status: implemented (historical design for the lexical index subsystem)
 
 ## Relationship To Local Semantic Recall
 
-This document remains the implemented lexical baseline. Its no-daemon and
-no-vector constraints describe this subsystem, not the complete v1.0.0 product
-after the July 2026 scope revision.
+This document is the implemented lexical baseline. Its no-daemon and
+no-vector constraints describe **this lexical subsystem only**, not the
+complete v1.0.0 product after the July 2026 semantic-recall scope revision.
 
 The opt-in semantic subsystem defined in
 `worktrail-local-semantic-recall-architecture.md` does not alter this entry
@@ -19,16 +19,16 @@ lexical path when unavailable.
 
 ## Summary
 
-This document proposes the long-term replacement for Worktrail's current JSON
-index with a local SQLite-backed index that supports Chinese search through a
-Go-side token pipeline built on `gse`.
+This document records the implemented replacement of Worktrail's former JSON
+index with a local SQLite-backed lexical index that supports Chinese search
+through a Go-side token pipeline built on `gse`.
 
-The design preserves current product boundaries:
+For this lexical subsystem, the design preserves:
 
 - Markdown and JSON frontmatter remain the only source of truth.
 - The index remains rebuildable acceleration data.
-- No daemon, watcher, Web UI, TUI, vector store, or background service is
-  introduced.
+- This subsystem introduces no daemon, watcher, Web UI, TUI, vector store, or
+  background service.
 - Search quality improves through application-side tokenization rather than
   SQLite-specific Chinese tokenizer extensions.
 
@@ -72,11 +72,15 @@ model.
 
 ## Non-Goals
 
-- No embedding or vector similarity search.
-- No background indexing process.
+These non-goals apply to the lexical index subsystem described here. Opt-in
+local semantic recall is specified separately in
+`worktrail-local-semantic-recall-architecture.md`.
+
+- No embedding or vector similarity search in this lexical path.
+- No background indexing process for this lexical path.
 - No SQLite custom tokenizer extension requirement.
 - No change to Markdown as source of truth.
-- No fully automatic semantic ranking that overrides governance metadata.
+- No fully automatic ranking that overrides governance metadata.
 - No cross-machine sync changes in this design.
 
 ## Design Principles

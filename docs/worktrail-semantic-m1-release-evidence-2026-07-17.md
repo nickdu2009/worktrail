@@ -73,15 +73,24 @@ reported diagnostic values, not governed release thresholds.
 
 ## M1 resource envelope
 
+Machine JSON is authoritative for these numbers
+(`docs/semantic-e2e-evidence/m1-release-gate-2026-07-17.json` and
+`docs/semantic-e2e-evidence/runtime-resource-report.json`). This table is a
+human index only.
+
 | Measurement | Observed | Release limit | Result |
 | --- | ---: | ---: | --- |
-| Cold readiness | 1086.924708 ms | 25000 ms | PASS |
-| Warm single-input embedding P95 | 12.265667 ms | 35 ms | PASS |
-| Peak RSS | 829568 KiB | 1048576 KiB | PASS |
+| Cold readiness | 1081.031583 ms | 25000 ms | PASS |
+| Warm single-input embedding P95 | 17.446834 ms | 35 ms | PASS |
+| Peak RSS | 802992 KiB | 1048576 KiB | PASS |
 
 The full dated summary and copied raw reports are
 `docs/worktrail-semantic-production-e2e-2026-07-17.md` and
-`docs/semantic-e2e-evidence/`.
+`docs/semantic-e2e-evidence/`. The raw gate log is archived at
+`docs/archive/semantic-recall-m1-prep-2026-07/logs/m1-release-gate-2026-07-17.log`
+(structured PASS/FAIL results remain in the gate JSON). Process spikes and the
+superseded 2026-07-16 E2E write-up live under
+`docs/archive/semantic-recall-m1-prep-2026-07/`.
 
 ## Variant classification and remaining release work
 

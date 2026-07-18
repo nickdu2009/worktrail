@@ -53,15 +53,15 @@ worktrail init
 --no-semantic` 会明确禁用语义安装。安装成功后仍需显式执行
 `worktrail semantic rebuild --scope all` 才会创建索引。
 
-M1 是唯一的 `verified` runtime 变体。M2、M3、M4、M5 是 opt-in
-`experimental` 变体：安装时只能选择当前芯片自己的 pinned official
-artifact，并且必须通过本地 integrity、authenticated-loopback、alias、
-tokenization、embedding shape、CLS pooling 和 L2-normalization self-check
-才能激活。自检失败会拒绝该 bundle，并让 semantic `auto` mode 显式降级到
-lexical；不会尝试其他芯片的 artifact。
+M1 是唯一的 `verified` runtime 变体。M2–M5 是 opt-in `experimental`
+变体：仅使用当前芯片自己的 pinned official artifact，并在安装时通过本地
+integrity、authenticated-loopback、alias、tokenization、embedding shape、
+CLS pooling 和 L2-normalization self-check 后才能激活。自检失败会拒绝该
+bundle；`auto` mode 显式降级到 lexical，不会回退到其他芯片 artifact。
 
-实验变体不表示 `compatible` 或 `verified`，也不提供性能、隐私、最低 macOS
-版本或运营支持保证。发布前不要求为每种实验芯片收集 self-check 报告。
+`experimental` 不表示 `compatible` 或 `verified`，也不承诺性能、隐私、
+最低 macOS 或运营支持。支持层级与发行门禁见
+[`docs/worktrail-release-acceptance.md`](../worktrail-release-acceptance.md)。
 
 ### 只初始化用户级
 <div class="title-en">User Scope Only</div>

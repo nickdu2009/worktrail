@@ -72,46 +72,27 @@ push, or release.
 
 ## Semantic Recall Requirement Map
 
-- `REQ-SEM-001`: canonical immutable manifest embedded in the formal Worktrail
-  release as the sole v1 runtime trust root; content-addressed bundle ID;
-  M1-verified and M2-M5-experimental variant classification; and startup/reuse
-  rejection tests for manifest identity, the selected local-chip
-  model/runtime/license/attribution artifacts, sizes, SHA-256 values, and chip
-  variant. Ordinary release tag and binary-distribution integrity remains
-  independently evidenced.
-- `REQ-SEM-002`: init tests proving plain core init remains network-free,
-  `--semantic` is the only semantic-download entry point, `--no-semantic`
-  explicitly disables it, semantic-install failure preserves core init, no
-  implicit generation occurs, and rebuild guidance is shown.
-- `REQ-SEM-003`: authenticated loopback runtime lifecycle, endpoint-race,
-  unknown-process, offline, logging, and permission tests; plus visible warning
-  and stable-reason coverage for bundle/profile/generation/daemon identity
-  mismatches, with `auto` lexical degradation and `required` failure.
-- `REQ-SEM-004`: chunk golden fixtures, profile hashes, sqlite-vec smoke,
-  source catch-up, read-only active database, lease, and atomic activation tests.
-- `REQ-SEM-005`: labeled retrieval evaluation plus text/JSON v1 regression and
-  JSON v2 schema fixtures.
-- `REQ-SEM-006`: Context Pack fixtures proving deterministic sections and
-  evidence controls remain unchanged.
-- `REQ-SEM-007`: activation/lease tests proving automatic replaced-generation
-  deletion and absence of rollback behavior.
-- `REQ-SEM-008`: one physical report per verified Apple chip variant (M1);
-  M2-M5 each have a pinned official artifact and installation-time local
-  self-check coverage for integrity, authenticated loopback, alias,
-  tokenization, embedding shape, CLS pooling, and L2 normalization, with no
-  cross-chip fallback. Pre-release per-chip self-check reports are not a gate
-  for experimental variants; evidence must not imply compatible or verified,
-  performance, privacy, minimum-macOS, or operational-support guarantees.
-  Unsupported behavior is covered for A18, non-Darwin, and other unlisted
-  targets.
-- `REQ-SEM-009`: fake/no-network default CI plus bounded, explicit real-runtime
-  workflow and privacy-safe dated evidence.
-- `REQ-SEM-010`: active-set evidence showing all three semantic ADRs are current,
-  Accepted, and conflict-free before production integration or release.
-- `REQ-SEM-011`: verified M1 host test on macOS 15.7.3 or later, recording cold
-  readiness, warm single-input embedding P95, and peak RSS against the
-  25 s / 35 ms / 1 GiB release envelope; experimental variants have no
-  inherited resource or minimum-macOS claim.
+Requirement text for `REQ-SEM-001` … `REQ-SEM-011` lives only in
+[worktrail-release-acceptance.md](worktrail-release-acceptance.md). This
+checklist tracks evidence types and execution status:
+
+| Requirement | Evidence type |
+| --- | --- |
+| `REQ-SEM-001` | Trusted-manifest / bundle identity tests; M1 verified vs M2–M5 experimental classification |
+| `REQ-SEM-002` | Init network-free / `--semantic` / `--no-semantic` / no implicit generation tests |
+| `REQ-SEM-003` | Loopback lifecycle, identity mismatch, `auto` degrade / `required` fail tests |
+| `REQ-SEM-004` | Chunk, profile, sqlite-vec, lease, activation tests |
+| `REQ-SEM-005` | Labeled retrieval + text/JSON v1 / JSON v2 fixtures |
+| `REQ-SEM-006` | Context Pack section/evidence fixtures |
+| `REQ-SEM-007` | Replaced-generation cleanup / no-rollback tests |
+| `REQ-SEM-008` | Verified M1 physical report; experimental self-check coverage (no cross-chip fallback) |
+| `REQ-SEM-009` | Fake/no-network CI + dated privacy-safe real-runtime evidence |
+| `REQ-SEM-010` | Three semantic ADRs Accepted and conflict-free |
+| `REQ-SEM-011` | M1 resource envelope (cold / warm P95 / peak RSS); experimental has no inherited claim |
+
+Current engineering evidence index:
+[worktrail-semantic-m1-release-evidence-2026-07-17.md](worktrail-semantic-m1-release-evidence-2026-07-17.md)
+(dirty-tree; not a clean-checkout release record).
 
 ## Release Gate Commands
 

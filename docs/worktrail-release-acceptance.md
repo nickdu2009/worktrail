@@ -1,8 +1,8 @@
 # Worktrail Release Acceptance Requirements
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
-Status: proposed
+Status: active requirements (lexical baseline accepted; semantic scope defined, v1.0.0 release not closed)
 
 ## Summary
 
@@ -11,9 +11,12 @@ maintenance hints, agent distillation guidance, batch review planning,
 confirmed `review apply-plan`, evidence lifecycle planning, and a maintenance
 skill.
 
-The May 2026 requirements remain the release baseline. The July 2026 scope
-revision adds opt-in local semantic recall to v1.0.0, subject to separate
-runtime, model, release-evidence, and support-tier gates.
+The May 2026 lexical requirements remain the accepted release baseline. The
+July 2026 scope revision adds opt-in local semantic recall to v1.0.0. Semantic
+implementation is in-tree, but the formal release remains subject to separate
+runtime, model, release-evidence, and support-tier gates. This document is the
+requirements authority for those gates; it is not itself a completed release
+certificate.
 
 ## Goals
 
@@ -42,7 +45,7 @@ runtime, model, release-evidence, and support-tier gates.
 
 ## V1.0.0 Local Semantic Recall Scope Revision
 
-The accepted release direction now includes an opt-in local semantic recall
+The defined release direction now includes an opt-in local semantic recall
 capability described by
 `docs/worktrail-local-semantic-recall-architecture.md`. This does not replace
 the existing lexical baseline or knowledge governance:

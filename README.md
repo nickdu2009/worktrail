@@ -16,26 +16,14 @@ Hard boundaries:
 
 Formal knowledge is Markdown with JSON frontmatter. Local indexes are rebuildable acceleration data, not source of truth.
 
-The v1.0.0 release scope includes an opt-in local semantic-recall capability,
-subject to the gates in
-[`docs/worktrail-local-semantic-recall-architecture.md`](docs/worktrail-local-semantic-recall-architecture.md).
+Opt-in local semantic recall is in-tree for v1.0.0 (formal release still gated).
 Its only runtime exception is an explicitly installed, authenticated,
-loopback-only llama.app process started for semantic operations. Its sqlite-vec
-generations are local derived data. M1 is the only `verified` runtime variant.
-M2–M5 are opt-in `experimental` variants: each uses its own pinned official
-artifact and must pass installation-time local self-checks before activation,
-without fallback to a different chip artifact. Experimental variants do not
-claim compatibility or verification, performance, privacy, minimum-macOS, or
-operational support guarantees; they do not require pre-release per-chip
-self-check reports. The lexical SQLite + FTS5 path remains available whenever
-semantic recall is not installed or cannot run.
-
-Install local semantic recall only with the explicit
-`worktrail init --semantic` flag. Plain `worktrail init` performs core
-initialization without network access by default; `worktrail init --no-semantic`
-explicitly disables semantic installation. A successful semantic installation
-does not create an index: run `worktrail semantic rebuild --scope all`
-explicitly when you want to build one.
+loopback-only llama.app process. M1 is `verified`; M2–M5 are opt-in
+`experimental`. When semantic recall is unavailable, lexical SQLite + FTS5
+remains the path. Install with `worktrail init --semantic`, then
+`worktrail semantic rebuild --scope all`. See
+[`docs/manual/INSTALLATION.md`](docs/manual/INSTALLATION.md) and
+[`docs/worktrail-local-semantic-recall-architecture.md`](docs/worktrail-local-semantic-recall-architecture.md).
 
 Search and context use a SQLite + FTS5 index at `.worktrail/index/index.sqlite` (or the user-scope equivalent) with application-layer Chinese tokenization via `gse`. Markdown remains the only source of truth; delete a corrupted `index.sqlite` and run `worktrail index rebuild` when search or context reports index health issues.
 

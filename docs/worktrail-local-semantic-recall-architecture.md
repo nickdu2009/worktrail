@@ -1,8 +1,8 @@
 # Worktrail Local Semantic Recall Architecture
 
-Last updated: 2026-07-15
+Last updated: 2026-07-18
 
-Status: proposed; design direction agreed, implementation not started
+Status: implemented in-tree; formal v1.0.0 release still gated
 
 Architecture scale: subsystem
 
