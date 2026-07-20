@@ -943,7 +943,15 @@ func validateGeneratedRef(name, scope, kind string, ref *model.Ref) error {
 }
 
 func generatedSafetyText(meta model.HandoffMetaV2, body string) string {
-	values := []string{meta.Title, meta.Summary, body, meta.SourceTool, meta.Actor, meta.Worktree.Branch, meta.MigratedFrom}
+	values := []string{
+		meta.Title,
+		meta.Summary,
+		body,
+		meta.SourceTool,
+		meta.Actor,
+		meta.Worktree.Branch,
+		normalizeTimestampedLegacyPathForSafety(meta.MigratedFrom),
+	}
 	values = append(values, meta.Tags...)
 	for _, ref := range []*model.Ref{meta.SourceState, meta.PreviousHandoff, meta.PublishedFrom} {
 		if ref != nil {
@@ -951,6 +959,20 @@ func generatedSafetyText(meta model.HandoffMetaV2, body string) string {
 		}
 	}
 	return strings.Join(values, "\n")
+}
+
+func normalizeTimestampedLegacyPathForSafety(value string) string {
+	value = filepath.ToSlash(strings.TrimSpace(value))
+	slash := strings.LastIndex(value, "/")
+	dir, base := value[:slash+1], value[slash+1:]
+	match := legacyTimestampedFilenamePattern.FindStringSubmatch(base)
+	if len(match) != 4 {
+		return value
+	}
+	if _, err := time.Parse("20060102-150405", match[1]+"-"+match[2]); err != nil {
+		return value
+	}
+	return dir + "[LEGACY_TIMESTAMP]-" + match[3]
 }
 
 func validateOpaqueIdentity(name, value string) error {
@@ -1357,9 +1379,10 @@ func timeValue(value any, fallback time.Time) time.Time {
 }
 
 var (
-	markdownHeadingPattern    = regexp.MustCompile(`^(#{1,6})[ \t]+(.+?)\s*$`)
-	legacyAbsolutePathPattern = regexp.MustCompile(`(?m)(^|[[:space:]\(\[\{=:])(/[[:alnum:]_.~@%+,\-]+(?:/[[:alnum:]_.~@%+,\-]+)+)`)
-	opaqueIdentifierPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$`)
+	markdownHeadingPattern           = regexp.MustCompile(`^(#{1,6})[ \t]+(.+?)\s*$`)
+	legacyAbsolutePathPattern        = regexp.MustCompile(`(?m)(^|[[:space:]\(\[\{=:])(/[[:alnum:]_.~@%+,\-]+(?:/[[:alnum:]_.~@%+,\-]+)+)`)
+	legacyTimestampedFilenamePattern = regexp.MustCompile(`^(\d{8})-(\d{6})-(.+)$`)
+	opaqueIdentifierPattern          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$`)
 )
 
 func sanitizeLegacyField(value string) (string, error) {
@@ -1446,11 +1469,29 @@ func stripSnapshotAndTranscriptSections(body string) (string, bool) {
 	lines := strings.Split(body, "\n")
 	out := make([]string, 0, len(lines))
 	skipLevel := 0
+	skipNestedStateCapsule := false
 	removed := false
 	for _, line := range lines {
 		match := markdownHeadingPattern.FindStringSubmatch(strings.TrimSpace(line))
 		if skipLevel > 0 {
-			if len(match) == 3 && len(match[1]) <= skipLevel {
+			level, title := 0, ""
+			if len(match) == 3 {
+				level = len(match[1])
+				title = strings.ToLower(strings.TrimSpace(match[2]))
+			}
+			if skipNestedStateCapsule {
+				if level == skipLevel && title == "previous handoff" {
+					skipLevel = 0
+					skipNestedStateCapsule = false
+				} else {
+					removed = true
+					continue
+				}
+			} else if level > 0 && level < skipLevel && strings.HasPrefix(title, "state capsule") {
+				skipNestedStateCapsule = true
+				removed = true
+				continue
+			} else if level > 0 && level <= skipLevel {
 				skipLevel = 0
 			} else {
 				removed = true

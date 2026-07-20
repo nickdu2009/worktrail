@@ -179,6 +179,7 @@ func TestRunSearchRequiredJSONV2WritesJSONErrorEnvelope(t *testing.T) {
 func TestRunSearchJSONV2ErrorsUseCLIEnvelope(t *testing.T) {
 	project := t.TempDir()
 	home := t.TempDir()
+	t.Setenv("HOME", home)
 	t.Setenv("WORKTRAIL_PROJECT_ROOT", project)
 	t.Setenv("WORKTRAIL_HOME", home)
 

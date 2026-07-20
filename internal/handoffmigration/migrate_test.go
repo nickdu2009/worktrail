@@ -525,6 +525,97 @@ func TestMigrationSanitizesBodyBoundsSizeAndMarksUncertainTask(t *testing.T) {
 	}
 }
 
+func TestMigrationAcceptsTimestampedSourcePathAndPreservesMigratedFrom(t *testing.T) {
+	root := migrationRoot(t)
+	const sourcePath = "handoffs/20260514-002407-cross-machine-handoff.md"
+	writeLegacyDocument(t, filepath.Join(root, filepath.FromSlash(sourcePath)), nil,
+		"# Timestamped\n\nContact owner@example.com, call +1 (415) 555-2671, or inspect /Users/alice/private/repo.")
+
+	report, err := Run(Options{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK || report.Summary.Planned != 1 || report.Summary.Invalid != 0 {
+		t.Fatalf("timestamped source dry-run = %+v", report)
+	}
+	item := itemBySource(t, report.Items, sourcePath)
+	doc, err := store.ParseMarkdown(item.targetData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stringValue(doc.Meta["migrated_from"]); got != sourcePath {
+		t.Fatalf("migrated_from = %q, want %q", got, sourcePath)
+	}
+	for _, forbidden := range []string{"owner@example.com", "+1 (415) 555-2671", "/Users/alice/private/repo"} {
+		if strings.Contains(doc.Body, forbidden) {
+			t.Fatalf("timestamped migration retained %q:\n%s", forbidden, doc.Body)
+		}
+	}
+}
+
+func TestMigrationRemovesNestedStateCapsuleUntilPreviousHandoff(t *testing.T) {
+	root := migrationRoot(t)
+	const sourcePath = "handoffs/nested-state-snapshot.md"
+	body := `# Legacy Plan
+
+Retained introduction.
+
+## State Snapshot
+
+# State Capsule: captured session
+
+## Original Intent
+
+Nested intent must be removed.
+
+## Evidence
+
+conversation_id: nested-runtime-id
+
+## Next Step
+
+Nested next step must be removed.
+
+## Previous Handoff
+
+- Handoff ID: prior-handoff
+
+## Next Step
+
+Retained outer next step.
+`
+	writeLegacyDocument(t, filepath.Join(root, filepath.FromSlash(sourcePath)), nil, body)
+
+	report, err := Run(Options{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.OK || report.Summary.Planned != 1 {
+		t.Fatalf("nested snapshot dry-run = %+v", report)
+	}
+	item := itemBySource(t, report.Items, sourcePath)
+	doc, err := store.ParseMarkdown(item.targetData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"State Capsule", "Original Intent", "nested-runtime-id", "Nested next step"} {
+		if strings.Contains(doc.Body, forbidden) {
+			t.Fatalf("nested snapshot retained %q:\n%s", forbidden, doc.Body)
+		}
+	}
+	for _, retained := range []string{"Retained introduction.", "## Previous Handoff", "prior-handoff", "Retained outer next step."} {
+		if !strings.Contains(doc.Body, retained) {
+			t.Fatalf("nested snapshot dropped %q:\n%s", retained, doc.Body)
+		}
+	}
+	if count := strings.Count(doc.Body, "## Next Step"); count != 1 {
+		t.Fatalf("next-step heading count = %d, want 1:\n%s", count, doc.Body)
+	}
+	if !hasDiagnostic(item.Diagnostics, "legacy_recursive_snapshot_removed") {
+		t.Fatalf("nested snapshot diagnostics = %+v", item.Diagnostics)
+	}
+}
+
 func TestDefaultBackupIsExternalIgnoredAndManifestVerified(t *testing.T) {
 	root := migrationRoot(t)
 	writeLegacyDocument(t, filepath.Join(root, "handoffs", "backup.md"), nil, "# Backup\n\nBody.")
