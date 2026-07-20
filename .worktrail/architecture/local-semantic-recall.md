@@ -1,3 +1,16 @@
+---worktrail
+{
+  "schema": "worktrail.knowledge.v1",
+  "id": "worktrail-local-semantic-recall-architecture",
+  "scope": "project",
+  "type": "architecture",
+  "title": "Worktrail Local Semantic Recall Architecture",
+  "status": "active",
+  "lifecycle": "current",
+  "topic": "semantic-recall"
+}
+---
+
 # Worktrail Local Semantic Recall Architecture
 
 Last updated: 2026-07-20
@@ -2232,6 +2245,6 @@ already implemented in-tree. The remaining table-hardening order is:
 ## Related Documents
 
 - `docs/worktrail-sqlite-gse-index-design.md`
-- [`Product Direction and Version Boundaries`](../.worktrail/requirements/product-direction-and-version-boundaries.md)
+- `docs/worktrail-long-term-vision-discussion.md`
 - `.worktrail/rules/knowledge-boundaries-and-write-safety.md`
 - `.worktrail/workflows/low-intervention-knowledge-lifecycle.md`

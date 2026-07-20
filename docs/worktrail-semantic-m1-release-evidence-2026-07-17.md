@@ -86,11 +86,11 @@ human index only.
 
 The full dated summary and copied raw reports are
 `docs/worktrail-semantic-production-e2e-2026-07-17.md` and
-`docs/semantic-e2e-evidence/`. The raw gate log is archived at
-`docs/archive/semantic-recall-m1-prep-2026-07/logs/m1-release-gate-2026-07-17.log`
-(structured PASS/FAIL results remain in the gate JSON). Process spikes and the
-superseded 2026-07-16 E2E write-up live under
-`docs/archive/semantic-recall-m1-prep-2026-07/`.
+`docs/semantic-e2e-evidence/`. The raw gate log and superseded 2026-07-16 E2E
+write-up remain recoverable from Git history; structured PASS/FAIL results
+remain in the gate JSON. The parity, runtime/resource, and sqlite-vec process
+spikes are also retained through Git history, with provenance recorded in the
+accepted semantic ADRs.
 
 ## Variant classification and remaining release work
 

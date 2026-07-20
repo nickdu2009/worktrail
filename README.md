@@ -27,6 +27,9 @@ remains the path. Install with `worktrail init --semantic`, then
 
 Search and context use a SQLite + FTS5 index at `.worktrail/index/index.sqlite` (or the user-scope equivalent) with application-layer Chinese tokenization via `gse`. Markdown remains the only source of truth; delete a corrupted `index.sqlite` and run `worktrail index rebuild` when search or context reports index health issues.
 
+Documentation governance and the full inventory live in
+[`docs/README.md`](docs/README.md).
+
 ## User Manual
 
 - [`docs/manual/README.md`](docs/manual/README.md) - `Worktrail 使用手册`
@@ -247,8 +250,6 @@ worktrail review
 `worktrail migrate kdd` is a dry-run by default. `--write-candidates` creates pending candidates only; it does not promote or merge formal knowledge. Candidate `target_path` values are relative to the Worktrail scope root, for example `architecture/system.md` for project knowledge.
 
 `docs/knowledge-driven-development/local/**` migrates to user-scope pending candidates only. Category README files such as `project/architecture/README.md` are skipped by default because they are usually directory guidance rather than durable project knowledge. `active-knowledge-log.md` files migrate as `migration_source` evidence and must be distilled before formal knowledge is promoted or merged. Migration is complete only after `worktrail doctor migration` passes and the legacy KDD root is removed with explicit cleanup.
-
-See [docs/kdd-import-dogfood-acceptance.md](docs/kdd-import-dogfood-acceptance.md) for the delivery-experts dogfood acceptance record.
 
 ## Restore vs retire
 

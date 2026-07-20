@@ -1,5 +1,6 @@
 ---worktrail
 {
+  "created_at": "2026-07-20T06:51:10.764306Z",
   "id": "ADR-20260715-rebuild-only-semantic-generation",
   "lifecycle": "current",
   "schema": "worktrail.knowledge.v1",
@@ -7,7 +8,8 @@
   "stage": "decision",
   "status": "accepted",
   "title": "Use Rebuild-Only Immutable Semantic Generations",
-  "type": "decision"
+  "type": "decision",
+  "updated_at": "2026-07-20T06:51:10.764306Z"
 }
 ---
 
@@ -52,4 +54,5 @@ The bounded M1 capacity Gate shows sqlite-vec v0.1.9 exact cosine query P95 of 1
 
 - Related: docs/worktrail-local-semantic-recall-architecture.md
 - Related: docs/worktrail-sqlite-gse-index-design.md
-- Evidence: docs/worktrail-semantic-sqlite-vec-spike-2026-07-15.md
+- Evidence: docs/worktrail-semantic-m1-release-evidence-2026-07-17.md
+- Historical evidence provenance: sqlite-vec capacity spike dated 2026-07-15 at `docs/archive/semantic-recall-m1-prep-2026-07/spikes/worktrail-semantic-sqlite-vec-spike-2026-07-15.md`; after source consolidation, the record remains recoverable from Git history.

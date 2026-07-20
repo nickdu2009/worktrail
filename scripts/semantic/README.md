@@ -99,8 +99,9 @@ It verifies the pinned candidate files, starts an authenticated loopback-only
 runtime, captures FlagEmbedding and local API vectors, runs the parity
 comparison, records the Python environment, and terminates the child process.
 It does not publish, install a Worktrail bundle, modify `PATH`, or retain a
-generation. The 2026-07-15 M1 result is recorded in
-`docs/archive/semantic-recall-m1-prep-2026-07/spikes/worktrail-semantic-parity-spike-2026-07-15.md`.
+generation. The 2026-07-15 M1 result is summarized in the
+[M1 engineering evidence index](../../docs/worktrail-semantic-m1-release-evidence-2026-07-17.md);
+the detailed process spike remains recoverable from Git history.
 
 `run-runtime-security-resource-gate.sh` validates the fixed local M1 runtime
 under macOS `sandbox-exec` with outbound networking denied. It records cold
@@ -112,5 +113,6 @@ bash scripts/semantic/run-runtime-security-resource-gate.sh "$TMPDIR/worktrail-s
 ```
 
 It is a release-validation harness, not production process supervision. The
-2026-07-16 result is recorded in
-`docs/archive/semantic-recall-m1-prep-2026-07/spikes/worktrail-semantic-runtime-security-resource-spike-2026-07-16.md`.
+2026-07-16 result is summarized in the
+[M1 engineering evidence index](../../docs/worktrail-semantic-m1-release-evidence-2026-07-17.md);
+the detailed process spike remains recoverable from Git history.

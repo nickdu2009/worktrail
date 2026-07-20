@@ -1,6 +1,0 @@
-machine_type	Apple M1 Pro
-uname_m	arm64
-macos	15.7.3
-git_revision	91907b1a7a6bdce0f8fd6f3ca3c3d91205f8eac4
-started_at	2026-07-17T04:38:08Z
-platform_scope	M1-only; M2-M5 unverified

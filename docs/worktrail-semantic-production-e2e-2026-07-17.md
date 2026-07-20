@@ -6,7 +6,7 @@
 - machine: Apple M1 Pro
 - finished_at: 2026-07-17T04:44:03Z
 - result: PASS
-- source_snapshot_verification: /Users/duxiaobo/workspaces/nickdu/worktrail-semantic-recall-v1-llama-app/docs/semantic-e2e-evidence/m1-release-gate-2026-07-17-source-snapshot-verification.json
+- source_snapshot_verification: semantic-e2e-evidence/m1-release-gate-2026-07-17-source-snapshot-verification.json
 
 ## Command versions
 
