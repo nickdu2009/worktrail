@@ -1,3 +1,16 @@
+---worktrail
+{
+  "schema": "worktrail.knowledge.v1",
+  "id": "worktrail-sqlite-gse-index-design",
+  "scope": "project",
+  "type": "architecture",
+  "title": "Worktrail SQLite and GSE Index Design",
+  "status": "active",
+  "lifecycle": "current",
+  "topic": "search-architecture"
+}
+---
+
 # Worktrail SQLite + GSE Index Design
 
 Last updated: 2026-07-18
@@ -648,3 +661,8 @@ Adopt a dual-scope SQLite index with FTS5 and a Go-side token pipeline built on
 The index remains rebuildable local acceleration data. Chinese segmentation and
 technical term normalization live in Go, not in SQLite extensions. Structured
 metadata and governance semantics continue to shape final result quality.
+
+
+## Migration provenance
+
+Distilled from `docs/worktrail-sqlite-gse-index-design.md`. The source remains in `docs/` until this candidate is promoted and inbound references are repaired.

@@ -61,7 +61,7 @@ bundle；`auto` mode 显式降级到 lexical，不会回退到其他芯片 artif
 
 `experimental` 不表示 `compatible` 或 `verified`，也不承诺性能、隐私、
 最低 macOS 或运营支持。支持层级与发行门禁见
-[`docs/worktrail-release-acceptance.md`](../worktrail-release-acceptance.md)。
+[`.worktrail/requirements/release-acceptance.md`](../worktrail-release-acceptance.md)。
 
 ### 只初始化用户级
 <div class="title-en">User Scope Only</div>

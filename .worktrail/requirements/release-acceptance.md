@@ -1,3 +1,16 @@
+---worktrail
+{
+  "schema": "worktrail.knowledge.v1",
+  "id": "worktrail-release-acceptance",
+  "scope": "project",
+  "type": "requirement",
+  "title": "Worktrail Release Acceptance Requirements",
+  "status": "active",
+  "lifecycle": "current",
+  "topic": "release"
+}
+---
+
 # Worktrail Release Acceptance Requirements
 
 Last updated: 2026-07-18
@@ -47,7 +60,7 @@ certificate.
 
 The defined release direction now includes an opt-in local semantic recall
 capability described by
-`docs/worktrail-local-semantic-recall-architecture.md`. This does not replace
+`architecture/local-semantic-recall.md`. This does not replace
 the existing lexical baseline or knowledge governance:
 
 - Markdown and frontmatter remain the source of truth.
@@ -1030,3 +1043,8 @@ catalog are either validated or explicitly listed as release blockers.
 - Decide whether remaining issues block release or become post-release backlog.
 - Confirm `REQ-APPLY-*`, including `REQ-APPLY-002A`, remains satisfied after any
   scope or UX changes.
+
+
+## Migration provenance
+
+Distilled from `docs/worktrail-release-acceptance.md`. The source remains in `docs/` until this candidate is promoted and inbound references are repaired.

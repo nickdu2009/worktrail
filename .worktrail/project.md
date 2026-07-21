@@ -108,4 +108,4 @@ This project profile aligns with conventions recorded in:
 - `.worktrail/index.md`
 - `.worktrail/architecture/cursor-codex-local-hooks.md`
 - `.worktrail/workflows/cursor-codex-local-hooks-implementation.md`
-- `docs/README.md`
+- `.worktrail/index.md`

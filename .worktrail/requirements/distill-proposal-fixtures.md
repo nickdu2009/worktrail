@@ -19,7 +19,7 @@ Provide copyable, privacy-safe proposal examples for users and agents and isolat
 
 ## Requirements
 
-- Keep user-facing examples under `docs/examples/distill/` and automated fixtures under `internal/testdata/distill/`; tests must not depend on prose examples.
+- Keep user-facing examples under `examples/distill/` and automated fixtures under `internal/testdata/distill/`; tests must not depend on prose examples.
 - All fixture data is synthetic and excludes real transcripts, credentials, local paths, private identifiers, and external project knowledge.
 - Each automated case contains its proposal and expected stable report fields; optional seed candidates, existing candidates, formal targets, and expected candidates reproduce the required initial state.
 - Fixture layouts mirror real candidate and formal-knowledge paths in a temporary Worktrail repository, rather than adding test-only schemas.

@@ -15,10 +15,10 @@ not close `REQ-REL-001`, authorize a commit or tag, or authorize publication.
 The gate captured its defined source input at `2026-07-17T04:38:07Z` before
 building temporary binaries. The complete 156-entry untracked inventory, every
 entry's content digest, and the algorithm are in
-`docs/semantic-e2e-evidence/m1-release-gate-2026-07-17-source-snapshot.json`.
+`evidence/semantic-m1/reports/m1-release-gate-2026-07-17-source-snapshot.json`.
 The gate then recomputed every input field from the current checkout after
 writing evidence; the successful result is in
-`docs/semantic-e2e-evidence/m1-release-gate-2026-07-17-source-snapshot-verification.json`.
+`evidence/semantic-m1/reports/m1-release-gate-2026-07-17-source-snapshot-verification.json`.
 
 | Snapshot field | Value |
 | --- | --- |
@@ -30,7 +30,7 @@ writing evidence; the successful result is in
 The source set is exactly `HEAD`, the working-tree binary diff from `HEAD`, and
 untracked files. The gate excludes its own generated or overwritten evidence
 from all three snapshot components:
-`docs/semantic-e2e-evidence/**`,
+`evidence/semantic-m1/reports/**`,
 `docs/worktrail-semantic-production-e2e-*.md`, and
 `docs/worktrail-semantic-m1-release-evidence-*.md`.
 
@@ -65,7 +65,7 @@ its runtime, model, daemon descriptor, and any temporary port files.
 
 ## Retrieval gates
 
-The raw report is `docs/semantic-e2e-evidence/retrieval-report.json`. RRF met
+The raw report is `evidence/semantic-m1/reports/retrieval-report.json`. RRF met
 its Recall@10/MRR/nDCG@10 floors and matched or exceeded entry FTS on all three
 metrics. Governed retrieval met only its specified gate: Recall@10 at least
 0.9 and no worse than entry FTS. Its MRR (`0.6759`) and nDCG@10 (`0.7547`) are
@@ -74,8 +74,8 @@ reported diagnostic values, not governed release thresholds.
 ## M1 resource envelope
 
 Machine JSON is authoritative for these numbers
-(`docs/semantic-e2e-evidence/m1-release-gate-2026-07-17.json` and
-`docs/semantic-e2e-evidence/runtime-resource-report.json`). This table is a
+(`evidence/semantic-m1/reports/m1-release-gate-2026-07-17.json` and
+`evidence/semantic-m1/reports/runtime-resource-report.json`). This table is a
 human index only.
 
 | Measurement | Observed | Release limit | Result |
@@ -85,8 +85,8 @@ human index only.
 | Peak RSS | 802992 KiB | 1048576 KiB | PASS |
 
 The full dated summary and copied raw reports are
-`docs/worktrail-semantic-production-e2e-2026-07-17.md` and
-`docs/semantic-e2e-evidence/`. The raw gate log and superseded 2026-07-16 E2E
+`evidence/semantic-m1/production-e2e-2026-07-17.md` and
+`evidence/semantic-m1/reports/`. The raw gate log and superseded 2026-07-16 E2E
 write-up remain recoverable from Git history; structured PASS/FAIL results
 remain in the gate JSON. The parity, runtime/resource, and sqlite-vec process
 spikes are also retained through Git history, with provenance recorded in the

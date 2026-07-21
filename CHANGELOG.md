@@ -20,4 +20,4 @@
   privacy, minimum macOS, or operational support.
 - Current M1 evidence is dirty-tree engineering evidence, not a clean-checkout
   release record. Tagging and publishing v1.0.0 remain separate authorized
-  steps. See `docs/worktrail-release-acceptance.md`.
+  steps. See `.worktrail/requirements/release-acceptance.md`.

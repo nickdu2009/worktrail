@@ -23,12 +23,12 @@ loopback-only llama.app process. M1 is `verified`; M2–M5 are opt-in
 remains the path. Install with `worktrail init --semantic`, then
 `worktrail semantic rebuild --scope all`. See
 [`docs/manual/INSTALLATION.md`](docs/manual/INSTALLATION.md) and
-[`docs/worktrail-local-semantic-recall-architecture.md`](docs/worktrail-local-semantic-recall-architecture.md).
+[`.worktrail/architecture/local-semantic-recall.md`](.worktrail/architecture/local-semantic-recall.md).
 
 Search and context use a SQLite + FTS5 index at `.worktrail/index/index.sqlite` (or the user-scope equivalent) with application-layer Chinese tokenization via `gse`. Markdown remains the only source of truth; delete a corrupted `index.sqlite` and run `worktrail index rebuild` when search or context reports index health issues.
 
-Documentation governance and the full inventory live in
-[`docs/README.md`](docs/README.md).
+Formal project knowledge entry points live in
+[`.worktrail/index.md`](.worktrail/index.md).
 
 ## User Manual
 
@@ -220,7 +220,7 @@ Proposal JSON uses schema `worktrail.distill.proposal.v1`:
 
 `distill apply` creates pending semantic candidates only. It never promotes, merges, discards, restores, or retires knowledge. JSON output remains the stable machine contract; default text output summarizes created, skipped, blocked, and error items without printing candidate bodies or local proposal paths.
 
-Copyable proposal examples live under `docs/examples/distill/`. Test fixtures live under `internal/testdata/distill/` and use only synthetic candidates.
+Copyable proposal examples live under `examples/distill/`. Test fixtures live under `internal/testdata/distill/` and use only synthetic candidates.
 
 ## Evidence lifecycle
 

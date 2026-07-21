@@ -9,7 +9,7 @@
   "status": "accepted",
   "title": "Preserve Worktrail Contracts with Explicit Hybrid Recall",
   "type": "decision",
-  "updated_at": "2026-07-20T06:49:22.318911Z"
+  "updated_at": "2026-07-21T02:43:49.394422Z"
 }
 ---
 
@@ -52,7 +52,7 @@ The M1 model/runtime Gate confirms the candidate embedding profile retains the c
 
 ## Links
 
-- Related: docs/worktrail-local-semantic-recall-architecture.md
-- Related: docs/worktrail-release-acceptance.md
-- Evidence: docs/worktrail-semantic-m1-release-evidence-2026-07-17.md
+- Related: architecture/local-semantic-recall.md
+- Related: requirements/release-acceptance.md
+- Evidence: evidence/semantic-m1/release-evidence-2026-07-17.md
 - Historical evidence provenance: parity spike dated 2026-07-15 at `docs/archive/semantic-recall-m1-prep-2026-07/spikes/worktrail-semantic-parity-spike-2026-07-15.md`; after source consolidation, the record remains recoverable from Git history.

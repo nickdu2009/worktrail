@@ -20,12 +20,9 @@ specified below remain pending; formal v1.0.0 release still gated
 
 Architecture scale: subsystem
 
-This design is maintained on two synchronized surfaces:
-`docs/worktrail-local-semantic-recall-architecture.md` is the published
-repository document, while `architecture/local-semantic-recall.md` is the
-formal Worktrail project-knowledge artifact used for agent recall. Their design
-body must remain equivalent; divergence is a maintenance defect and blocks
-promotion of a replacement Worktrail candidate.
+This formal Worktrail architecture is the project-knowledge artifact used for
+agent recall. It supersedes the former published documentation copy; its source
+remains recoverable from Git history after promotion.
 
 ## Summary
 
@@ -75,7 +72,7 @@ The compatibility boundary is intentionally narrow:
 
 ## Relationship To Existing Architecture
 
-The implemented `docs/worktrail-sqlite-gse-index-design.md` remains the
+The implemented `architecture/sqlite-gse-index-design.md` remains the
 deterministic lexical and metadata baseline. It explicitly excluded vector
 search and background services from its original scope.
 
@@ -874,7 +871,7 @@ title: Worktrail Local Semantic Recall Architecture
 type: architecture
 topic: recall
 section: Chunking Design > Boundary Rules
-path: docs/worktrail-local-semantic-recall-architecture.md
+path: architecture/local-semantic-recall.md
 
 <chunk body>
 ```
@@ -2244,7 +2241,12 @@ already implemented in-tree. The remaining table-hardening order is:
 
 ## Related Documents
 
-- `docs/worktrail-sqlite-gse-index-design.md`
+- `architecture/sqlite-gse-index-design.md`
 - `docs/worktrail-long-term-vision-discussion.md`
 - `.worktrail/rules/knowledge-boundaries-and-write-safety.md`
 - `.worktrail/workflows/low-intervention-knowledge-lifecycle.md`
+
+
+## Migration provenance
+
+Distilled from `docs/worktrail-local-semantic-recall-architecture.md`. The source remains in `docs/` until this candidate is promoted and inbound references are repaired.

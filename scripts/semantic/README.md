@@ -21,10 +21,10 @@ or `all` (default).
 
 At startup, the gate writes a complete dirty-tree source snapshot to its
 temporary evidence root and the `all` phase copies it to
-`docs/semantic-e2e-evidence/m1-release-gate-2026-07-17-source-snapshot.json`.
+`evidence/semantic-m1/reports/m1-release-gate-2026-07-17-source-snapshot.json`.
 Its input set is exactly: `HEAD`, the working-tree binary diff from `HEAD`, and
 all untracked files. It excludes gate-generated or gate-overwritten evidence:
-`docs/semantic-e2e-evidence/**`,
+`evidence/semantic-m1/reports/**`,
 `docs/worktrail-semantic-production-e2e-*.md`, and
 `docs/worktrail-semantic-m1-release-evidence-*.md`. The same exclusions apply
 to the porcelain status digest, tracked diff, and untracked inventory.
@@ -36,7 +36,7 @@ byte-sorts the remaining paths, records each regular file's raw-byte SHA-256
 NUL-delimited sequence of path, kind, size, and content digest. Before the
 gate completes, it re-computes the snapshot against the current checkout and
 records the result in
-`docs/semantic-e2e-evidence/m1-release-gate-2026-07-17-source-snapshot-verification.json`.
+`evidence/semantic-m1/reports/m1-release-gate-2026-07-17-source-snapshot-verification.json`.
 The snapshot identifies the dirty gate input; it is not a clean-checkout
 release record.
 
@@ -100,7 +100,7 @@ runtime, captures FlagEmbedding and local API vectors, runs the parity
 comparison, records the Python environment, and terminates the child process.
 It does not publish, install a Worktrail bundle, modify `PATH`, or retain a
 generation. The 2026-07-15 M1 result is summarized in the
-[M1 engineering evidence index](../../docs/worktrail-semantic-m1-release-evidence-2026-07-17.md);
+[M1 engineering evidence index](../../evidence/semantic-m1/release-evidence-2026-07-17.md);
 the detailed process spike remains recoverable from Git history.
 
 `run-runtime-security-resource-gate.sh` validates the fixed local M1 runtime
@@ -114,5 +114,5 @@ bash scripts/semantic/run-runtime-security-resource-gate.sh "$TMPDIR/worktrail-s
 
 It is a release-validation harness, not production process supervision. The
 2026-07-16 result is summarized in the
-[M1 engineering evidence index](../../docs/worktrail-semantic-m1-release-evidence-2026-07-17.md);
+[M1 engineering evidence index](../../evidence/semantic-m1/release-evidence-2026-07-17.md);
 the detailed process spike remains recoverable from Git history.

@@ -23,7 +23,7 @@ release gate。M1 是唯一 `verified` 变体；M2–M5 为 opt-in
 到 lexical；严格模式返回稳定失败原因。
 
 安装与 rebuild 步骤见[安装说明](INSTALLATION.md)。架构与支持层级细节见
-[`docs/worktrail-local-semantic-recall-architecture.md`](../worktrail-local-semantic-recall-architecture.md)。
+[`.worktrail/architecture/local-semantic-recall.md`](../worktrail-local-semantic-recall-architecture.md)。
 
 ## 用户级 scope 和项目级 scope 有什么区别？
 <div class="title-en">User Scope vs Project Scope</div>

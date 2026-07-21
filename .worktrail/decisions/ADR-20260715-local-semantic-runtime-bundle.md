@@ -9,7 +9,7 @@
   "status": "accepted",
   "title": "Use a Worktrail-Managed llama.app BGE-M3 Q8 Bundle",
   "type": "decision",
-  "updated_at": "2026-07-20T06:50:41.33462Z"
+  "updated_at": "2026-07-21T02:43:50.4689Z"
 }
 ---
 
@@ -52,9 +52,9 @@ Semantic operations may start llama serve as a detached current-user process. It
 
 ## Links
 
-- Related: docs/worktrail-local-semantic-recall-architecture.md
-- Related: docs/worktrail-release-acceptance.md
-- Related: docs/worktrail-release-validation-checklist.md
-- Evidence: docs/worktrail-semantic-m1-release-evidence-2026-07-17.md
-- Evidence: docs/worktrail-semantic-production-e2e-2026-07-17.md
+- Related: architecture/local-semantic-recall.md
+- Related: requirements/release-acceptance.md
+- Related: validation/release-validation-checklist.md
+- Evidence: evidence/semantic-m1/release-evidence-2026-07-17.md
+- Evidence: evidence/semantic-m1/production-e2e-2026-07-17.md
 - Historical evidence provenance: parity and runtime/security spikes dated 2026-07-15 and 2026-07-16 at `docs/archive/semantic-recall-m1-prep-2026-07/spikes/`; after source consolidation, the records remain recoverable from Git history.

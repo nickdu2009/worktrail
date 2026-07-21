@@ -121,14 +121,14 @@ import hashlib,json,os,stat,subprocess,sys
 root,output=sys.argv[1:]
 
 excluded_pathspecs=(
-    "docs/semantic-e2e-evidence/**",
+    "evidence/semantic-m1/reports/**",
     "docs/worktrail-semantic-production-e2e-*.md",
     "docs/worktrail-semantic-m1-release-evidence-*.md",
 )
 
 def is_excluded(path):
     return (
-        path.startswith("docs/semantic-e2e-evidence/")
+        path.startswith("evidence/semantic-m1/reports/")
         or (
             path.startswith("docs/worktrail-semantic-production-e2e-")
             and path.endswith(".md")

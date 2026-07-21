@@ -143,6 +143,5 @@ Their original content remains recoverable from Git history:
 
 Aligned with retained project knowledge:
 
-- `docs/README.md`
 - `.worktrail/architecture/cursor-codex-local-hooks.md`
 - `.worktrail/workflows/cursor-codex-local-hooks-implementation.md`

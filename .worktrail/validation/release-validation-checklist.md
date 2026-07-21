@@ -1,3 +1,16 @@
+---worktrail
+{
+  "schema": "worktrail.knowledge.v1",
+  "id": "worktrail-release-validation-checklist",
+  "scope": "project",
+  "type": "validation",
+  "title": "Worktrail Release Validation Checklist",
+  "status": "active",
+  "lifecycle": "current",
+  "topic": "release"
+}
+---
+
 # Worktrail Release Validation Checklist
 
 Last updated: 2026-07-17
@@ -7,7 +20,7 @@ Status: in progress
 Previous baseline commit: `448b133` (passed on 2026-05-15)
 
 This checklist maps the release acceptance requirements in
-`docs/worktrail-release-acceptance.md` to validation evidence. The dated release
+`requirements/release-acceptance.md` to validation evidence. The dated release
 validation record should update the Evidence column with exact commands and
 results.
 
@@ -73,7 +86,7 @@ push, or release.
 ## Semantic Recall Requirement Map
 
 Requirement text for `REQ-SEM-001` … `REQ-SEM-011` lives only in
-[worktrail-release-acceptance.md](worktrail-release-acceptance.md). This
+[Release acceptance](../requirements/release-acceptance.md). This
 checklist tracks evidence types and execution status:
 
 | Requirement | Evidence type |
@@ -122,3 +135,8 @@ WORKTRAIL_PROJECT_ROOT="$TMPDIR/worktrail-release-smoke/project" \
 
 The dated validation record should include the full smoke sequence and results,
 not private transcript content or local machine paths.
+
+
+## Migration provenance
+
+Distilled from `docs/worktrail-release-validation-checklist.md`. The source remains in `docs/` until this candidate is promoted and inbound references are repaired.

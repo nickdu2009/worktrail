@@ -1,3 +1,16 @@
+---worktrail
+{
+  "schema": "worktrail.knowledge.v1",
+  "id": "semantic-m1-trusted-manifest-boundary",
+  "scope": "project",
+  "type": "architecture",
+  "title": "M1-M5 Trusted Manifest Runtime Boundary",
+  "status": "active",
+  "lifecycle": "current",
+  "topic": "semantic-runtime"
+}
+---
+
 # M1–M5 canonical embedded-manifest runtime trust boundary
 
 ## Embedded input
@@ -74,3 +87,8 @@ tag and binary-distribution integrity continues to apply.
 - M4 runtime distribution: https://huggingface.co/buckets/ggml-org/install.sh/resolve/b9986/aarch64/macos/metal/m4/llama-app.zst
 - M5 runtime distribution: https://huggingface.co/buckets/ggml-org/install.sh/resolve/b9986/aarch64/macos/metal/m5/llama-app.zst
 - llama.cpp MIT license: https://github.com/ggml-org/llama.cpp/blob/master/LICENSE
+
+
+## Migration provenance
+
+Distilled from `docs/worktrail-semantic-m1-trusted-manifest-boundary.md`. The source remains in `docs/` until this candidate is promoted and inbound references are repaired.

@@ -18,16 +18,27 @@ Formal knowledge entry points for the **worktrail** CLI repository.
 ## Entry points
 
 - [Project overview](project.md)
-- [Documentation governance](../docs/README.md)
 
 ## Architecture
 
 - [Cursor and Codex local hooks](architecture/cursor-codex-local-hooks.md)
+- [Local semantic recall](architecture/local-semantic-recall.md)
+- [M1-M5 trusted manifest runtime boundary](architecture/semantic-m1-trusted-manifest-boundary.md)
+- [SQLite and GSE index design](architecture/sqlite-gse-index-design.md)
+
+## Requirements
+
+- [Product direction and version boundaries](requirements/product-direction-and-version-boundaries.md)
+- [Release acceptance](requirements/release-acceptance.md)
 
 ## Workflows
 
 - [Low-Intervention Knowledge Lifecycle](workflows/low-intervention-knowledge-lifecycle.md)
 - [Cursor and Codex local hooks implementation](workflows/cursor-codex-local-hooks-implementation.md)
+
+## Validation
+
+- [Release validation checklist](validation/release-validation-checklist.md)
 
 ## Rules
 
