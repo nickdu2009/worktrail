@@ -213,13 +213,17 @@ def source_content_digest(root: Path) -> str:
 def run_wt(binary: Path, root: Path, args: list[str], output: Path) -> None:
     env = os.environ.copy()
     env["WORKTRAIL_PROJECT_ROOT"] = str(root)
-    with output.open("w", encoding="utf-8") as handle:
+    # Keep gse/runtime logs off stdout so JSON reports stay parseable.
+    err_path = output.with_suffix(output.suffix + ".stderr")
+    with output.open("w", encoding="utf-8") as handle, err_path.open(
+        "w", encoding="utf-8"
+    ) as err_handle:
         proc = subprocess.run(
             [str(binary), *args],
             cwd=str(root),
             env=env,
             stdout=handle,
-            stderr=subprocess.STDOUT,
+            stderr=err_handle,
             text=True,
             check=False,
         )

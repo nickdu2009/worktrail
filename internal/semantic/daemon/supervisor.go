@@ -433,6 +433,9 @@ func (s *Supervisor) command(address string) Command {
 			"--embedding",
 			"--pooling", "cls",
 			"--embd-normalize", "2",
+			// Physical ubatch must cover production HardMax (768). llama.app
+			// defaults to 512 and rejects larger single embedding inputs with HTTP 500.
+			"--ubatch-size", "1024",
 		},
 		Dir: s.config.Runtime.WorkingDir,
 	}

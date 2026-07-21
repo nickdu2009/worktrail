@@ -250,6 +250,7 @@ func TestSupervisorCommandUsesOwnedKeyFileAndFixedRuntimeFlags(t *testing.T) {
 		"--embedding",
 		"--pooling", "cls",
 		"--embd-normalize", "2",
+		"--ubatch-size", "1024",
 	}
 	if !reflect.DeepEqual(command.Args, want) {
 		t.Fatalf("runtime args = %#v, want fixed security/runtime flags", command.Args)
