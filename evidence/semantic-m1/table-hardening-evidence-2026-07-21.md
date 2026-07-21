@@ -172,3 +172,10 @@ reasons; both are intentional contract/corpus updates, not gate-script bugs.
    `/var/folders/...` to `/private/var/folders/...`, which previously bypassed
    the temp-dir reject list. Gate now blocks both prefixes so a polluted
    `HOME` cannot stage a "PASS" archive under disposable paths.
+
+## Clean M1 E2E (step 7)
+
+- Tip validated by production E2E gate: `18ba60e0abe145277a8591b4ec3f902270ab88b3`
+- Release archive: `${XDG_DATA_HOME:-$HOME/.local/share}/worktrail/release-archive/18ba60e0abe145277a8591b4ec3f902270ab88b3`
+- `RELEASE-RECORD.json` result: PASS
+- Merged to `main` via `--no-ff` as `1e49030` (docs layout from `d8cb4fd` retained; this evidence file lives under `evidence/semantic-m1/`)

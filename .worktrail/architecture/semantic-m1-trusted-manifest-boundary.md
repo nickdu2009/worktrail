@@ -94,4 +94,4 @@ tag and binary-distribution integrity continues to apply.
 
 ## Migration provenance
 
-Distilled from `docs/worktrail-semantic-m1-trusted-manifest-boundary.md`. The source remains in `docs/` until this candidate is promoted and inbound references are repaired.
+Promoted from the former `docs/worktrail-semantic-m1-trusted-manifest-boundary.md` path during the docs-layout cleanup; this `.worktrail/architecture/` file is canonical.

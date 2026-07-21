@@ -20,7 +20,7 @@ Status: in progress
 Previous baseline commit: `448b133` (passed on 2026-05-15)
 
 Table-hardening offline/dogfood engineering evidence:
-[worktrail-semantic-table-hardening-evidence-2026-07-21.md](worktrail-semantic-table-hardening-evidence-2026-07-21.md)
+[table-hardening-evidence-2026-07-21.md](../../evidence/semantic-m1/table-hardening-evidence-2026-07-21.md)
 (does not replace the clean-checkout M1 release record required by step 7).
 
 This checklist maps the release acceptance requirements in
@@ -110,7 +110,7 @@ checklist tracks evidence types and execution status:
 Current engineering evidence indexes:
 [worktrail-semantic-m1-release-evidence-2026-07-17.md](worktrail-semantic-m1-release-evidence-2026-07-17.md)
 (dirty-tree; not a clean-checkout release record);
-[worktrail-semantic-table-hardening-evidence-2026-07-21.md](worktrail-semantic-table-hardening-evidence-2026-07-21.md)
+[table-hardening-evidence-2026-07-21.md](../../evidence/semantic-m1/table-hardening-evidence-2026-07-21.md)
 (table-hardening offline gates + privacy-safe dogfood; not a clean M1 release record).
 
 ## Release Gate Commands
@@ -145,4 +145,4 @@ not private transcript content or local machine paths.
 
 ## Migration provenance
 
-Distilled from `docs/worktrail-release-validation-checklist.md`. The source remains in `docs/` until this candidate is promoted and inbound references are repaired.
+Canonical validation checklist for release acceptance evidence mapping.
