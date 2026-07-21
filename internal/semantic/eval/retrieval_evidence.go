@@ -241,7 +241,8 @@ func scoreEvidence(
 			metrics.RowKeyQueries++
 			found := 0
 			for _, key := range rowKeys {
-				if evidenceHasRowKey(evidenceByEntry, key) {
+				if evidenceHasRowKey(evidenceByEntry, key) ||
+					evidenceCoversLabeledRowKey(query.RequiredEvidence, evidenceByEntry, key) {
 					found++
 				}
 			}
@@ -368,6 +369,20 @@ func evidenceHasRowKey(evidence map[string][]RankedEvidenceChunk, rowKey string)
 			if chunk.RowKey == rowKey && chunk.Primary.valid() {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// evidenceCoversLabeledRowKey accepts live collect-retrieval evidence that omits
+// chunk.row_key but still covers the labeled primary/context span for that key.
+func evidenceCoversLabeledRowKey(required []RequiredEvidence, evidence map[string][]RankedEvidenceChunk, rowKey string) bool {
+	for _, item := range required {
+		if item.RowKey != rowKey {
+			continue
+		}
+		if evidenceSatisfies(item, evidence[scopedKey(item.Scope, item.EntryID)]) {
+			return true
 		}
 	}
 	return false

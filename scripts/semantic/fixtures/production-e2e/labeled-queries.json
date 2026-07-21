@@ -122,11 +122,11 @@
             "match",
             "neighbor"
           ],
-          "start_byte": 820,
-          "end_byte": 917,
+          "start_byte": 4875,
+          "end_byte": 9070,
           "row_key": "512:768:80",
           "require_neighbor": true,
-          "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39"
+          "structural_group_id": "6688d474f5d15853ec3a3611014b959cdd4f9f5a49ac8d687ce9bbb3498644c3"
         }
       ]
     },
@@ -150,7 +150,7 @@
           ],
           "start_byte": 632,
           "end_byte": 721,
-          "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39"
+          "structural_group_id": "6688d474f5d15853ec3a3611014b959cdd4f9f5a49ac8d687ce9bbb3498644c3"
         }
       ]
     },
@@ -173,8 +173,8 @@
             "match"
           ],
           "start_byte": 632,
-          "end_byte": 1718,
-          "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39"
+          "end_byte": 42024,
+          "structural_group_id": "6688d474f5d15853ec3a3611014b959cdd4f9f5a49ac8d687ce9bbb3498644c3"
         }
       ]
     }

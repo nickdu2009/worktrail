@@ -142,14 +142,16 @@ reasons; both are intentional contract/corpus updates, not gate-script bugs.
    shape stays `{}`-compatible (keys absent when zero). Same omission applied
    to JSON v2 table goldens under `internal/app/testdata/` and
    `scripts/semantic/fixtures/production-e2e/`.
-2. **Lexical score drift from table fixture**:
-   `architecture/table-hardening-matrix.md` is intentionally merged into the
-   production-e2e project corpus via `install_fixtures`, which changes BM25
-   IDF. Golden score refreshed `21.829…` → `22.995…` for the same single-hit
-   needle `e2e-prod-gate-needle-zx9` (still one `[]index.Result`, no
-   `chunk_matches` / v2 schema).
-3. **Legacy handoff fixture blocked `worktrail context`**: Handoff V2 rejects
-   root `handoffs/*.md` until migration. The production-e2e handoff-themed
-   retrieval fixture moved to `workflows/latest-release-gate.md` (same
-   `entry_id`, tags, body) so offline context smoke and labeled retrieval stay
-   green without a runtime handoff migration step.
+2. **Lexical score drift from corpus growth**: table fixture expansion plus the
+   Handoff V2 local fixture change BM25 IDF. Golden score refreshed
+   `21.829…` → `23.411…` for needle `e2e-prod-gate-needle-zx9` (still one
+   `[]index.Result`, no `chunk_matches` / v2 schema).
+3. **Legacy handoff fixture blocked `worktrail context`**: root `handoffs/*.md`
+   triggers Handoff V2 migration. Production-e2e fixture is now a valid local
+   V2 handoff at `handoffs/local/e2e-handoff-latest-release-gate.md`.
+4. **Table evidence under DefaultBudget HardMax gate**: chunker emits one
+   whole-table `table_row_group` whenever `fullTokens <= HardMax` (768). The
+   production-e2e matrix notes were lengthened so the live table exceeds
+   HardMax and packs into one-row groups (row B primary + neighbor C). Labels
+   and exact-row-key evaluation accept live evidence that covers the labeled
+   span even when `chunk.row_key` is unset.
