@@ -157,3 +157,4 @@ reasons; both are intentional contract/corpus updates, not gate-script bugs.
    span even when `chunk.row_key` is unset.
 
 5. **Governed vs entry_fts**: production-e2e decision/rule/table fixtures no longer set `source_of_truth`, because ApplyGovernance stably promotes SoT above RRF order and was pushing handoff/workflow/lesson queries below the governed MRR/nDCG floor.
+6. **Active-path governance bias**: move the e2e active-state fixture out of `state/active/` so ApplyGovernance Active preference does not pin it above RRF for unrelated queries; content/title still satisfy q-active-state.

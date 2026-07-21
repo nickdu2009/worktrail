@@ -25,7 +25,7 @@
     },
     {
       "id": "q-zh-en",
-      "text": "\u8bed\u4e49\u7d22\u5f15 rebuild-only immutable generation",
+      "text": "语义索引 rebuild-only immutable generation",
       "category": "zh_en_mixed",
       "relevant_ids": [
         {
@@ -122,11 +122,11 @@
             "match",
             "neighbor"
           ],
-          "start_byte": 2281,
-          "end_byte": 3885,
+          "start_byte": 2254,
+          "end_byte": 3859,
           "row_key": "512:768:80",
           "require_neighbor": true,
-          "structural_group_id": "ece7b50a9b671cf55b5ea78748c247931c2459707b815a8ecd77d5c8269d7854"
+          "structural_group_id": "ac7bbb623592eae097836254c5b2696ebf88b51f5218c23c6095d5a7594c2224"
         }
       ]
     },
@@ -148,9 +148,9 @@
           "allowed_evidence_roles": [
             "match"
           ],
-          "start_byte": 632,
-          "end_byte": 721,
-          "structural_group_id": "ece7b50a9b671cf55b5ea78748c247931c2459707b815a8ecd77d5c8269d7854"
+          "start_byte": 605,
+          "end_byte": 694,
+          "structural_group_id": "ac7bbb623592eae097836254c5b2696ebf88b51f5218c23c6095d5a7594c2224"
         }
       ]
     },
@@ -172,9 +172,9 @@
           "allowed_evidence_roles": [
             "match"
           ],
-          "start_byte": 632,
-          "end_byte": 16244,
-          "structural_group_id": "ece7b50a9b671cf55b5ea78748c247931c2459707b815a8ecd77d5c8269d7854"
+          "start_byte": 605,
+          "end_byte": 16217,
+          "structural_group_id": "ac7bbb623592eae097836254c5b2696ebf88b51f5218c23c6095d5a7594c2224"
         }
       ]
     }
