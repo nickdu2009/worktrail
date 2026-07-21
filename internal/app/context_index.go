@@ -181,7 +181,7 @@ func runSearchWithSemantic(ctx context.Context, env paths.Env, ioctx IO, args []
 			response = semanticSearchErrorDiagnostics(scope)
 		}
 		response = normalizeSemanticSearchDiagnostics(response, scope)
-		if semanticSearchDegraded(response) {
+		if semanticSearchDegraded(response) && len(response.Results) == 0 {
 			results, err := runLexicalSearch(env, flags, query)
 			if err != nil {
 				return failSearchCommand(ioctx, args, err)
@@ -383,7 +383,7 @@ func runContextPackWithSemanticSearcher(ctx context.Context, env paths.Env, ioct
 			Mode:  semantic.Mode,
 			Limit: searchResultLimit,
 		})
-		if searchErr != nil || semanticSearchDegraded(response) {
+		if searchErr != nil || (semanticSearchDegraded(response) && len(response.Results) == 0) {
 			reason := contextSemanticReason(searchErr)
 			if searchErr == nil {
 				reason = firstSemanticReason(response)
@@ -411,9 +411,10 @@ func semanticContextRankings(results []index.Result) []selection.Ranking {
 	rankings := make([]selection.Ranking, 0, len(results))
 	for i, result := range results {
 		rankings = append(rankings, selection.Ranking{
-			Scope: result.Entry.Scope,
-			Path:  result.Entry.Path,
-			Rank:  i + 1,
+			Scope:   result.Entry.Scope,
+			EntryID: result.Entry.ID,
+			Path:    result.Entry.Path,
+			Rank:    i + 1,
 		})
 	}
 	return rankings

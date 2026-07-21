@@ -5,7 +5,6 @@
   "type": "rule",
   "title": "Rebuild Only Semantic Generation",
   "topic": "semantic-generation",
-  "source_of_truth": true,
   "updated_at": "2026-07-15T01:00:00Z",
   "tags": ["semantic", "rebuild-only", "e2e-prod-gate"]
 }

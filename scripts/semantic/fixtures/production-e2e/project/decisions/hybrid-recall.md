@@ -6,7 +6,6 @@
   "title": "Hybrid Recall Context Contract",
   "stage": "decision",
   "topic": "semantic-recall",
-  "source_of_truth": true,
   "status": "accepted",
   "updated_at": "2026-07-15T00:00:00Z",
   "tags": ["semantic", "hybrid", "e2e-prod-gate"]

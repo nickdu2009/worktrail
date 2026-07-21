@@ -33,3 +33,29 @@ func TestNormalizeTextCollapsesWhitespace(t *testing.T) {
 		t.Fatalf("normalizeText() = %q", got)
 	}
 }
+
+func TestNewTokenizerIsIsolatedFromDefault(t *testing.T) {
+	defaultTok := DefaultTokenizer()
+	isolated := NewTokenizer()
+	other := NewTokenizer()
+	if isolated == defaultTok || other == defaultTok || isolated == other {
+		t.Fatal("NewTokenizer() must return independent instances")
+	}
+	before := defaultTok.TokenizeQuery("索引 rebuild")
+	custom := "语义隔离专有词"
+	if err := isolated.LoadProjectDictionary([]string{custom}); err != nil {
+		t.Fatalf("LoadProjectDictionary() error = %v", err)
+	}
+	isolatedQuery := isolated.TokenizeQuery(custom + " 索引")
+	if !strings.Contains(strings.Join(isolatedQuery.Terms, " "), custom) {
+		t.Fatalf("isolated tokenizer missing project term: %+v", isolatedQuery.Terms)
+	}
+	after := defaultTok.TokenizeQuery("索引 rebuild")
+	if strings.Join(before.Terms, " ") != strings.Join(after.Terms, " ") {
+		t.Fatalf("DefaultTokenizer changed: before=%v after=%v", before.Terms, after.Terms)
+	}
+	defaultProject := defaultTok.TokenizeQuery(custom)
+	if strings.Contains(strings.Join(defaultProject.Terms, " "), custom) {
+		t.Fatalf("DefaultTokenizer unexpectedly gained isolation term: %+v", defaultProject.Terms)
+	}
+}

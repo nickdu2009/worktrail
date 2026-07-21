@@ -26,7 +26,7 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: worktrail-semantic-eval <parity|vec|retrieval-report|collect-retrieval|decompress-zstd> [flags]")
+		return errors.New("usage: worktrail-semantic-eval <parity|vec|retrieval-report|collect-retrieval|budget-matrix|refill-benchmark|decompress-zstd> [flags]")
 	}
 	switch args[0] {
 	case "parity":
@@ -37,10 +37,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runRetrievalReport(args[1:], stdout, stderr)
 	case "collect-retrieval":
 		return runCollectRetrieval(ctx, args[1:], stdout, stderr)
+	case "budget-matrix":
+		return runBudgetMatrix(ctx, args[1:], stdout, stderr)
+	case "refill-benchmark":
+		return runRefillBenchmark(ctx, args[1:], stdout, stderr)
 	case "decompress-zstd":
 		return runDecompressZstd(args[1:], stderr)
 	default:
-		return fmt.Errorf("unknown command %q; use parity, vec, retrieval-report, collect-retrieval, or decompress-zstd", args[0])
+		return fmt.Errorf("unknown command %q; use parity, vec, retrieval-report, collect-retrieval, budget-matrix, refill-benchmark, or decompress-zstd", args[0])
 	}
 }
 
@@ -122,11 +126,14 @@ func runRetrievalReport(args []string, stdout, stderr io.Writer) error {
 	rankingsPath := flags.String("rankings", "", "path to explicit lane ranking JSON")
 	flags.IntVar(&thresholds.K, "k", thresholds.K, "metric cutoff")
 	flags.BoolVar(&thresholds.RRF.RequireVsEntryFTS, "require-rrf-vs-entry-fts", thresholds.RRF.RequireVsEntryFTS, "require RRF recall, MRR, and nDCG@k to meet entry FTS")
-	flags.BoolVar(&thresholds.Governed.RequireRecallVsEntryFTS, "require-governed-recall-vs-entry-fts", thresholds.Governed.RequireRecallVsEntryFTS, "require governed recall@k to meet entry FTS; governed MRR/nDCG@k are reported, not gated")
+	flags.BoolVar(&thresholds.Governed.RequireVsEntryFTS, "require-governed-vs-entry-fts", thresholds.Governed.RequireVsEntryFTS, "require governed recall, MRR, and nDCG@k to meet entry FTS")
 	flags.Float64Var(&thresholds.RRF.MinRecallAtK, "min-rrf-recall-at-k", thresholds.RRF.MinRecallAtK, "minimum RRF recall at k")
 	flags.Float64Var(&thresholds.RRF.MinMRR, "min-rrf-mrr", thresholds.RRF.MinMRR, "minimum RRF mean reciprocal rank")
 	flags.Float64Var(&thresholds.RRF.MinNDCGAtK, "min-rrf-ndcg-at-k", thresholds.RRF.MinNDCGAtK, "minimum RRF nDCG at k")
-	flags.Float64Var(&thresholds.Governed.MinRecallAtK, "min-governed-recall-at-k", thresholds.Governed.MinRecallAtK, "minimum governed recall at k; governed MRR/nDCG@k remain informational")
+	flags.Float64Var(&thresholds.Governed.MinRecallAtK, "min-governed-recall-at-k", thresholds.Governed.MinRecallAtK, "minimum governed recall at k")
+	flags.Float64Var(&thresholds.Governed.MinMRR, "min-governed-mrr", thresholds.Governed.MinMRR, "minimum governed mean reciprocal rank")
+	flags.Float64Var(&thresholds.Governed.MinNDCGAtK, "min-governed-ndcg-at-k", thresholds.Governed.MinNDCGAtK, "minimum governed nDCG at k")
+	flags.Float64Var(&thresholds.Evidence.MinEvidenceRecallAtK, "min-evidence-recall-at-k", thresholds.Evidence.MinEvidenceRecallAtK, "minimum governed evidence recall at k")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}

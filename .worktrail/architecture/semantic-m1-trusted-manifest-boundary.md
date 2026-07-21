@@ -17,7 +17,7 @@
 
 `internal/semantic/bundle/assets/trusted-manifest-m1.json` is a pinned,
 multi-variant input to the bundle package. Its canonical bundle ID is
-`60e883f9f5fb62d0f6986d24df30ad8f129f3485a8a19b691eeb2662a438d4d2`.
+`3625d27700727578d7694ab04d19291efce45095aa57daba66d692a37a51be58`.
 It records the locally verified M1 envelope:
 
 - Apple M1 Pro on macOS 15.7.3;
@@ -59,19 +59,22 @@ support a future ADR decision to change its tier.
 
 A18 and non-Darwin remain unsupported, rather than experimental candidates.
 
-## V1 runtime trust boundary
+## Runtime trust boundary
 
 When this canonical immutable manifest is embedded in a formal Worktrail
-release, it is the sole v1 runtime trust root. No independent
-release-attestation, signature, or verifier is required to authorize startup or
-production installation.
+release, it is the sole runtime trust root for the table-aware profile
+(`generation_schema_version: 2`, `chunker-v2`, `worktrail-fts5-gse-v2`). No
+independent release-attestation, signature, or verifier is required to authorize
+startup or production installation.
 
 Before startup and runtime reuse, Worktrail must revalidate the installed
 bundle's manifest identity; model, selected current-chip runtime, license, and
 attribution artifact types, sizes, and SHA-256 values. A complete
 match authorizes semantic runtime; every bundle, profile, generation, or daemon
 identity mismatch must surface a warning and stable reason, degrade `auto` to
-lexical, and fail `required` stably.
+lexical, and fail `required` stably. Missing or old bundles point operators to
+`worktrail init --semantic`; a current bundle with a v1 generation points to a
+scoped `worktrail semantic rebuild`.
 
 M1 remains the only bounded `verified` input. M2–M5 use production installer
 integration and local self-checks as `experimental` variants. Normal Worktrail

@@ -5,10 +5,15 @@ runtime gate. It is not part of normal `worktrail` execution and must never
 publish, rehost, or install artifacts into a user's Worktrail cache.
 
 `run-offline-gate.sh` is the default no-network check. It uses only committed
-fixture captures and deterministic synthetic vectors:
+fixture captures and deterministic synthetic vectors, plus the table-hardening
+fixture retrieval gate, a small fake refill capacity matrix (1000/2000/5000),
+and JSON v2 table golden schema checks. Full 10k/50k/100k refill capacity and
+clean-checkout M1 E2E remain step-7 release gates.
 
 ```bash
 bash scripts/semantic/run-offline-gate.sh
+python3 -m unittest discover -s scripts/semantic -p 'test_release_record.py'
+bash scripts/semantic/test-production-e2e-archive-retry.sh
 ```
 
 `run-production-e2e-gate.sh` is the isolated M1 production E2E release gate. It
@@ -45,19 +50,44 @@ bash scripts/semantic/run-production-e2e-gate.sh harness   # offline harness onl
 bash scripts/semantic/run-production-e2e-gate.sh all       # full M1 gate
 bash scripts/semantic/test-production-e2e-gate-signals.sh  # EXIT/INT/TERM cleanup
 bash scripts/semantic/test-archive-safety-scan.sh          # archive privacy checks
+bash scripts/semantic/test-production-e2e-archive-retry.sh # staging/reuse/no-clobber
 ```
 
-The offline phase runs `go test ./...`, `go vet ./...`, `go build ./...`, and
-`git diff --check`. The fault phase executes the controlled daemon unit tests;
+The `all` phase prechecks the commit-named release archive under
+`${XDG_DATA_HOME:-~/.local/share}/worktrail/release-archive/<commit>/` before
+expensive resource work. A complete PASS archive with matching HEAD, allowlist,
+and SHA256SUMS may be reused; an incomplete or illegal existing directory fails
+immediately and is never overwritten. New archives are written to a 0700
+staging directory, safety-scanned, checksummed, then atomically renamed.
+Process traps remove only that staging directory.
+
+The offline phase records `table hardening retrieval gate` and
+`refill capacity matrix` into the release command ledger, validates
+`search-json-v2-table.golden`, and runs `go test ./...`, `go vet ./...`,
+`go build ./...`, and `git diff --check`. The fault phase executes the
+controlled daemon unit tests;
 `TestSupervisorStartRecoversFromEndpointBindRaceAndSavesAuthenticatedDescriptor`
 exercises a deterministic endpoint-bind race and recovery. The E2E gate does
 not claim that an unrelated random port-holder occupied the daemon's actual
 ephemeral endpoint.
 
+`run-table-dogfood.sh` drives privacy-safe rebuild/query dogfood from a private
+manifest and 32-byte HMAC key under
+`${XDG_DATA_HOME:-~/.local/share}/worktrail/validation/<candidate-commit>/`.
+Neither the manifest nor the key is committed. Public evidence emits only opaque
+query IDs, the manifest HMAC, pass/count/timing, and project aliases.
+
+```bash
+bash scripts/semantic/run-table-dogfood.sh \
+  --manifest "$HOME/.local/share/worktrail/validation/<commit>/dogfood-manifest.json" \
+  --worktrail-binary /absolute/path/to/worktrail
+```
+
 The `all` clean-checkout release gate writes one commit-named archive to
 `${XDG_DATA_HOME:-~/.local/share}/worktrail/release-archive/<commit>/`; it
-rejects temporary archive roots, a dirty checkout, and attempts to reuse an
-existing archive. The archive contains only `SUMMARY.md`,
+rejects temporary archive roots and a dirty checkout. A complete PASS archive
+for the same HEAD may be reused; incomplete or illegal existing directories fail
+without overwrite. The archive contains only `SUMMARY.md`,
 `RELEASE-RECORD.json`, `SAFETY-SCAN.json`, and `SHA256SUMS`; it never exports
 raw logs, API-key files, environment dumps, or full reports. The archive safety
 scan rejects unexpected members, local absolute-path prefixes, common credential

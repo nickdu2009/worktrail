@@ -202,16 +202,16 @@ func TestGenerationAdaptersMapHitsAndKeepActiveOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FTS adapter SearchChunks() error = %v", err)
 	}
-	if want := (LaneHit{ChunkID: "chunk-1", EntryID: "entry-1", Rank: 1}); len(ftsHits) != 1 || ftsHits[0] != want {
-		t.Fatalf("FTS adapter hits = %#v, want %#v", ftsHits, want)
+	if len(ftsHits) != 1 || ftsHits[0].ChunkID != "chunk-1" || ftsHits[0].EntryID != "entry-1" || ftsHits[0].Rank != 1 || ftsHits[0].DocumentType != "rule" {
+		t.Fatalf("FTS adapter hits = %#v", ftsHits)
 	}
 
 	vectorHits, err := (GenerationVectorKNN{Active: active}).SearchChunks(context.Background(), []float32{1, 0}, 1)
 	if err != nil {
 		t.Fatalf("vector adapter SearchChunks() error = %v", err)
 	}
-	if want := (LaneHit{ChunkID: "chunk-1", EntryID: "entry-1", Rank: 1}); len(vectorHits) != 1 || vectorHits[0] != want {
-		t.Fatalf("vector adapter hits = %#v, want %#v", vectorHits, want)
+	if len(vectorHits) != 1 || vectorHits[0].ChunkID != "chunk-1" || vectorHits[0].EntryID != "entry-1" || vectorHits[0].Rank != 1 || vectorHits[0].DocumentType != "rule" {
+		t.Fatalf("vector adapter hits = %#v", vectorHits)
 	}
 
 	if _, err := active.ChunkFTS("needle", 1); err != nil {
@@ -317,7 +317,7 @@ func queryableActiveGeneration(t *testing.T) *generation.Active {
 
 	directory := t.TempDir()
 	metadata := generation.Metadata{
-		Schema:     "worktrail.semantic.generation.sqlite.v1",
+		Schema:     "worktrail.semantic.generation.sqlite.v2",
 		Generation: "test-generation",
 		Profile:    "test-profile",
 		ModelSpace: "test-space",
@@ -330,15 +330,23 @@ func queryableActiveGeneration(t *testing.T) *generation.Active {
 		t.Fatalf("CreateCandidate() error = %v", err)
 	}
 	if err := generation.BuildCandidate(context.Background(), candidate, []chunk.Chunk{{
-		ChunkID:        "chunk-1",
-		Scope:          "project",
-		DocumentID:     "entry-1",
-		Path:           "rules/entry-1.md",
-		Body:           "needle",
-		EmbeddingInput: "needle",
-		EmbeddingHash:  "hash-chunk-1",
-		ChunkerVersion: chunk.Version,
-	}}, staticGenerationEmbedder{}); err != nil {
+		ChunkID:           "chunk-1",
+		Scope:             "project",
+		DocumentID:        "entry-1",
+		Path:              "rules/entry-1.md",
+		Type:              "rule",
+		Kind:              chunk.KindText,
+		StructuralGroupID: "group-1",
+		Body:              "needle",
+		MetadataTerms:     "path: rules/entry-1.md",
+		ContextTerms:      "section",
+		EmbeddingInput:    "needle",
+		EmbeddingHash:     "hash-chunk-1",
+		ChunkerVersion:    chunk.Version,
+		SourceStart:       0,
+		SourceEnd:         6,
+		SourceSizeByte:    6,
+	}}, staticGenerationEmbedder{}, index.NewTokenizer()); err != nil {
 		t.Fatalf("BuildCandidate() error = %v", err)
 	}
 	if err := candidate.SealCandidate(); err != nil {
@@ -352,7 +360,7 @@ func queryableActiveGeneration(t *testing.T) *generation.Active {
 			BundleID:        "test-bundle",
 			SnapshotHash:    metadata.Snapshot,
 		}, nil
-	}); err != nil {
+	}, generation.ActivateOptions{}); err != nil {
 		t.Fatalf("Activate() error = %v", err)
 	}
 	active, err := generation.OpenActive(context.Background(), directory, metadata)

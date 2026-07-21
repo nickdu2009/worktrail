@@ -20,7 +20,7 @@ func testIdentity(t *testing.T) Identity {
 		RuntimeVersion: variant.ExecutableVersion,
 		Chip:           variant.Chip,
 	}, SubsystemVersions{
-		ChunkerVersion:   "chunker-v1",
+		ChunkerVersion:   "chunker-v2",
 		IndexingVersion:  "semantic-policy-v1",
 		LexicalVersion:   "gse-v1.0.2",
 		SQLiteVecVersion: "v0.1.9",
@@ -105,7 +105,7 @@ func TestRecallProfileIDChangesWithEveryInput(t *testing.T) {
 		}},
 		{"chip variant", func(profile *RecallProfile) { profile.ChipVariant = "m2" }},
 		{"semantic API version", func(profile *RecallProfile) { profile.SemanticAPIVersion++ }},
-		{"chunker version", func(profile *RecallProfile) { profile.ChunkerVersion = "chunker-v2" }},
+		{"chunker version", func(profile *RecallProfile) { profile.ChunkerVersion = "chunker-v3" }},
 		{"indexing version", func(profile *RecallProfile) { profile.IndexingVersion = "semantic-policy-v2" }},
 		{"lexical version", func(profile *RecallProfile) { profile.LexicalVersion = "gse-v2" }},
 		{"vector metric", func(profile *RecallProfile) { profile.VectorMetric = "l2" }},

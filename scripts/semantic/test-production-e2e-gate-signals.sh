@@ -61,7 +61,8 @@ source=open(gate, encoding="utf-8").read()
 assert 'XDG_DATA_HOME' in source
 assert 'release-archive' in source
 assert 'require_clean_checkout_for_release_record' in source
-assert 'refusing to reuse an existing release archive' in source
+assert 'release archive precheck: reusable PASS archive for HEAD' in source
+assert 'validate_reusable_archive' in source
 assert 'check-archive-safety.py' in source
 assert 'write-release-record.py' in source
 assert 'RELEASE-RECORD.json' in source

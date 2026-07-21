@@ -12,7 +12,7 @@ func trustedManifest(t *testing.T) Manifest {
 		CanonicalManifest: CanonicalManifest{
 			Schema:                  TrustedManifestSchema,
 			SemanticAPIVersion:      1,
-			GenerationSchemaVersion: 1,
+			GenerationSchemaVersion: 2,
 			Embedding: EmbeddingProfile{
 				Dimension:        BGEM3EmbeddingDimension,
 				Tokenizer:        BGEM3Tokenizer,
@@ -151,7 +151,7 @@ func TestEmbeddedTrustedManifestM1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse embedded M1 trusted manifest: %v", err)
 	}
-	if manifest.BundleID != "60e883f9f5fb62d0f6986d24df30ad8f129f3485a8a19b691eeb2662a438d4d2" {
+	if manifest.BundleID != "3625d27700727578d7694ab04d19291efce45095aa57daba66d692a37a51be58" {
 		t.Fatalf("embedded bundle ID = %q", manifest.BundleID)
 	}
 	if manifest.Embedding != (EmbeddingProfile{

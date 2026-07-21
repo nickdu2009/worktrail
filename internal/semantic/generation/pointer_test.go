@@ -49,7 +49,7 @@ func TestActivateValidationFailureLeavesPointerUnchanged(t *testing.T) {
 
 	_, err := Activate(context.Background(), directory, func(context.Context) (ActivationCandidate, error) {
 		return ActivationCandidate{}, errors.New("candidate is invalid")
-	})
+	}, ActivateOptions{})
 	if err == nil {
 		t.Fatal("activate succeeded after validation failure")
 	}

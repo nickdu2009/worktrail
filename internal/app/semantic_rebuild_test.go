@@ -114,6 +114,11 @@ func TestRunSemanticRebuildMapsRequestAndMetadataIdentity(t *testing.T) {
 	if request.GenerationID != "g-test-project" || request.BundleID != "bundle-test-001" {
 		t.Fatalf("request identity = %#v", request)
 	}
+	if request.Policy.Version != composition.DefaultSubsystemVersions().ChunkerVersion ||
+		request.Versions.ChunkerVersion != request.Policy.Version ||
+		request.Versions.LexicalVersion != composition.DefaultSubsystemVersions().LexicalVersion {
+		t.Fatalf("request policy/versions = %#v %#v", request.Policy, request.Versions)
+	}
 	if request.Metadata.Profile != "profile-test-001" || request.Metadata.ModelSpace != "model-test-001" ||
 		request.Metadata.SQLiteVec != "sqlite-vec-test" || request.Metadata.Dimension != 1024 {
 		t.Fatalf("metadata = %#v", request.Metadata)

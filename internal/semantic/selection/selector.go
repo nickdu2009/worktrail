@@ -9,33 +9,43 @@ import (
 )
 
 // Ranking associates a canonical context item identity with its semantic rank.
-// Lower ranks are selected first. Scope and Path together identify a scoped
-// context item. A ranking with an empty Scope is an unscoped fallback for a
-// matching path.
+// Lower ranks are selected first. Prefer (Scope, EntryID) when EntryID is set.
+// Rankings without EntryID match (Scope, Path). Unscoped path rankings never
+// match scoped candidates.
 type Ranking struct {
-	Scope string
-	Path  string
-	Rank  int
+	Scope   string
+	EntryID string
+	Path    string
+	Rank    int
 }
 
 // Selector implements contextpack.Selector using only precomputed rankings.
 type Selector struct {
-	ranksByIdentity map[itemIdentity]int
+	ranksByEntry map[itemIdentity]int
+	ranksByPath  map[itemIdentity]int
 }
 
 var _ contextpack.Selector = (*Selector)(nil)
 
 // New creates a selector from precomputed semantic rankings. If rankings
-// contain the same scope and path more than once, the first ranking wins.
+// contain the same identity more than once, the first ranking wins.
 func New(rankings []Ranking) *Selector {
-	ranksByIdentity := make(map[itemIdentity]int, len(rankings))
+	ranksByEntry := make(map[itemIdentity]int, len(rankings))
+	ranksByPath := make(map[itemIdentity]int, len(rankings))
 	for _, ranking := range rankings {
+		if ranking.EntryID != "" {
+			identity := itemIdentity{scope: ranking.Scope, entryID: ranking.EntryID}
+			if _, exists := ranksByEntry[identity]; !exists {
+				ranksByEntry[identity] = ranking.Rank
+			}
+			continue
+		}
 		identity := itemIdentity{scope: ranking.Scope, path: ranking.Path}
-		if _, exists := ranksByIdentity[identity]; !exists {
-			ranksByIdentity[identity] = ranking.Rank
+		if _, exists := ranksByPath[identity]; !exists {
+			ranksByPath[identity] = ranking.Rank
 		}
 	}
-	return &Selector{ranksByIdentity: ranksByIdentity}
+	return &Selector{ranksByEntry: ranksByEntry, ranksByPath: ranksByPath}
 }
 
 // Select orders ranked candidates by ascending semantic rank, preserving their
@@ -88,11 +98,15 @@ type rankedItem struct {
 }
 
 type itemIdentity struct {
-	scope string
-	path  string
+	scope   string
+	entryID string
+	path    string
 }
 
 func identityForItem(item contextpack.Item) itemIdentity {
+	if item.EntryID != "" {
+		return itemIdentity{scope: item.Scope, entryID: item.EntryID}
+	}
 	return itemIdentity{scope: item.Scope, path: item.Path}
 }
 
@@ -100,14 +114,12 @@ func (s *Selector) rank(item contextpack.Item) (int, bool) {
 	if s == nil {
 		return 0, false
 	}
-	identity := identityForItem(item)
-	if rank, ok := s.ranksByIdentity[identity]; ok {
-		return rank, true
+	if item.EntryID != "" {
+		if rank, ok := s.ranksByEntry[itemIdentity{scope: item.Scope, entryID: item.EntryID}]; ok {
+			return rank, true
+		}
 	}
-	if identity.scope == "" {
-		return 0, false
-	}
-	rank, ok := s.ranksByIdentity[itemIdentity{path: identity.path}]
+	rank, ok := s.ranksByPath[itemIdentity{scope: item.Scope, path: item.Path}]
 	return rank, ok
 }
 

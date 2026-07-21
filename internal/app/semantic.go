@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nickdu2009/worktrail/internal/paths"
+	"github.com/nickdu2009/worktrail/internal/semantic/chunk"
 	"github.com/nickdu2009/worktrail/internal/semantic/composition"
 	"github.com/nickdu2009/worktrail/internal/semantic/contracts"
 	"github.com/nickdu2009/worktrail/internal/semantic/daemon"
@@ -121,9 +122,11 @@ func semanticLifecycleReason(err error) contracts.ReasonCode {
 func semanticLifecycleMessage(code contracts.ReasonCode) string {
 	switch code {
 	case contracts.ReasonBundleMissing:
-		return "semantic bundle is unavailable"
+		return "worktrail init --semantic"
 	case contracts.ReasonPlatformUnsupported:
 		return "semantic runtime is unsupported on this platform"
+	case contracts.ReasonProfileStale, contracts.ReasonGenerationMissing:
+		return "worktrail semantic rebuild --scope all"
 	default:
 		return "semantic runtime is unavailable"
 	}
@@ -370,6 +373,7 @@ func runSemanticRebuild(ctx context.Context, ioctx IO, args []string, deps seman
 		if err != nil {
 			return failSemanticRebuild(ioctx, command.format, args, contracts.ReasonRuntimeUnavailable)
 		}
+		versions := composition.DefaultSubsystemVersions()
 		active, err := deps.rebuild(ctx, generation.RebuildRequest{
 			Scope:        scope,
 			Root:         root,
@@ -377,6 +381,13 @@ func runSemanticRebuild(ctx context.Context, ioctx IO, args []string, deps seman
 			GenerationID: generationID,
 			BundleID:     composed.Runtime.BundleID,
 			Metadata:     metadata,
+			Policy:       chunk.DefaultPolicy(),
+			Versions: generation.SubsystemVersions{
+				ChunkerVersion:   versions.ChunkerVersion,
+				IndexingVersion:  versions.IndexingVersion,
+				LexicalVersion:   versions.LexicalVersion,
+				SQLiteVecVersion: versions.SQLiteVecVersion,
+			},
 			TokenCounter: composed.TokenCounter,
 			Embedder:     composed.Embedder,
 		})
@@ -438,7 +449,7 @@ func semanticRebuildReason(err error) contracts.ReasonCode {
 func semanticRebuildMessage(code contracts.ReasonCode) string {
 	switch code {
 	case contracts.ReasonBundleMissing:
-		return "semantic bundle is unavailable"
+		return "worktrail init --semantic"
 	case contracts.ReasonPlatformUnsupported:
 		return "semantic runtime is unsupported on this platform"
 	case contracts.ReasonProfileStale:

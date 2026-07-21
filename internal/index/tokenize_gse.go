@@ -25,6 +25,13 @@ func DefaultTokenizer() Tokenizer {
 	return defaultTokenizer
 }
 
+// NewTokenizer returns an independent GSE tokenizer that loads only the base
+// dictionary. It never mutates DefaultTokenizer and never loads a project
+// dictionary.
+func NewTokenizer() Tokenizer {
+	return newGSETokenizer()
+}
+
 func (t *gseTokenizer) LoadBaseDictionary(words []string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nickdu2009/worktrail/internal/index"
 	"github.com/nickdu2009/worktrail/internal/paths"
@@ -84,6 +85,15 @@ func TestRunSearchRejectsAmbiguousInvalidAndRepeatedSemanticOptions(t *testing.T
 	}
 }
 
+func TestSemanticRepairNextStepRoutesBundleAndProfile(t *testing.T) {
+	if got := semanticRepairNextStep(contracts.ReasonBundleMissing, "project"); got != "worktrail init --semantic" {
+		t.Fatalf("bundle missing next step = %q", got)
+	}
+	if got := semanticRepairNextStep(contracts.ReasonProfileStale, "user"); got != "worktrail semantic rebuild --scope user" {
+		t.Fatalf("profile stale next step = %q", got)
+	}
+}
+
 func TestRunSearchAutoFallbackPreservesLexicalJSONAndReportsNextStep(t *testing.T) {
 	env := semanticSearchTestEnv(t)
 	var lexicalOut, fallbackOut, fallbackErr bytes.Buffer
@@ -122,7 +132,7 @@ func TestRunSearchJSONV2EnvelopeForSuccessAndDegradedFallback(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		searcher := &semanticSearchStub{response: SemanticSearchResponse{
 			Results: []index.Result{{Entry: index.Entry{Scope: "project", Type: "rule", Title: "Semantic hit"}, Score: 3}},
-			Policy:  "semantic-retrieve-v1",
+			Policy:  "semantic-retrieve-v2",
 			Profile: "bge-m3",
 			Lanes:   []SemanticSearchLane{{Name: "chunk_fts"}, {Name: "vector_knn"}},
 		}}
@@ -134,7 +144,7 @@ func TestRunSearchJSONV2EnvelopeForSuccessAndDegradedFallback(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 			t.Fatalf("unmarshal JSON v2: %v stdout=%s", err, out.String())
 		}
-		if report.Schema != semanticSearchResultSchema || report.Policy != "semantic-retrieve-v1" || report.Profile != "bge-m3" || len(report.Results) != 1 || report.Results[0].Entry.Title != "Semantic hit" || len(report.Lanes) != 2 {
+		if report.Schema != semanticSearchResultSchema || report.Policy != "semantic-retrieve-v2" || report.Profile != "bge-m3" || len(report.Results) != 1 || report.Results[0].Entry.Title != "Semantic hit" || len(report.Lanes) != 2 {
 			t.Fatalf("JSON v2 report = %#v", report)
 		}
 		if errw.Len() != 0 {
@@ -145,7 +155,7 @@ func TestRunSearchJSONV2EnvelopeForSuccessAndDegradedFallback(t *testing.T) {
 	t.Run("degraded fallback", func(t *testing.T) {
 		env := semanticSearchTestEnv(t)
 		searcher := &semanticSearchStub{response: SemanticSearchResponse{
-			Policy:          "semantic-retrieve-v1",
+			Policy:          "semantic-retrieve-v2",
 			Degraded:        true,
 			DegradedReasons: []contracts.ReasonCode{contracts.ReasonProfileStale},
 			NextSteps:       []string{"worktrail semantic rebuild --scope project"},
@@ -220,11 +230,24 @@ func TestCLIErrorCodesFallbackForEmptySemanticSearchCode(t *testing.T) {
 }
 
 func TestRunSearchExplainUsesOnlyStderr(t *testing.T) {
+	lexical := 1
+	semantic := 2
 	searcher := &semanticSearchStub{response: SemanticSearchResponse{
-		Results: []index.Result{{Entry: index.Entry{Title: "Semantic hit"}, Score: 1}},
-		Policy:  "semantic-retrieve-v1",
+		Results: []index.Result{{Entry: index.Entry{ID: "entry-1", Scope: "project", Title: "Semantic hit"}, Score: 1}},
+		Details: []SemanticSearchResultDetail{{
+			Ranks: SemanticSearchRanks{Lexical: &lexical, Semantic: &semantic, Final: 1},
+			ChunkMatches: []SemanticChunkMatch{{
+				ChunkID:           "chunk-1",
+				ChunkKind:         "table_row_group",
+				StructuralGroupID: "group-1",
+				EvidenceRole:      "match",
+				Lanes:             []string{"chunk_fts"},
+				PrimarySourceRange: SemanticByteRange{StartByte: 10, EndByte: 20},
+			}},
+		}},
+		Policy:  "semantic-retrieve-v2",
 		Profile: "bge-m3",
-		Lanes:   []SemanticSearchLane{{Name: "chunk_fts"}, {Name: "vector_knn"}},
+		Lanes:   []SemanticSearchLane{{Name: "chunk_fts", RawHits: 3}, {Name: "vector_knn", RawHits: 2}},
 	}}
 	var out, errw bytes.Buffer
 	if err := runSearchWithSemantic(context.Background(), paths.Env{}, IO{Out: &out, Err: &errw}, []string{"--semantic", "--explain", "--format=json", "needle"}, searcher); err != nil {
@@ -237,11 +260,136 @@ func TestRunSearchExplainUsesOnlyStderr(t *testing.T) {
 	if len(results) != 1 || results[0].Entry.Title != "Semantic hit" {
 		t.Fatalf("JSON v1 explain results = %#v", results)
 	}
-	for _, want := range []string{"policy: semantic-retrieve-v1", "profile: bge-m3", "lane: chunk_fts", "lane: vector_knn"} {
-		if !strings.Contains(errw.String(), want) {
-			t.Fatalf("explain stderr missing %q:\n%s", want, errw.String())
+	stderr := errw.String()
+	for _, want := range []string{
+		"policy: semantic-retrieve-v2",
+		"profile: bge-m3",
+		"lane: chunk_fts",
+		"lane: vector_knn",
+		"result: 1 scope=project entry_id=entry-1 final=1",
+		"match chunk_id=chunk-1",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("explain stderr missing %q:\n%s", want, stderr)
 		}
 	}
+	for _, forbidden := range []string{"needle", "embedding_input", "\"body\""} {
+		if strings.Contains(stderr, forbidden) {
+			t.Fatalf("explain stderr leaked raw content %q:\n%s", forbidden, stderr)
+		}
+	}
+}
+
+func TestRunSearchJSONV2TableGoldenAndEvidenceNotOnIndexResult(t *testing.T) {
+	lexical := 1
+	semantic := 2
+	searcher := &semanticSearchStub{response: SemanticSearchResponse{
+		Results: []index.Result{{
+			Entry: index.Entry{
+				Schema:    "worktrail.index.entry.v1",
+				ID:        "table-entry",
+				Scope:     "project",
+				Type:      "architecture",
+				Path:      "architecture/table.md",
+				Title:     "Table Hardening",
+				Lifecycle: "current",
+				UpdatedAt: mustParseTime(t, "2026-07-20T00:00:00Z"),
+			},
+			Score: 0.032,
+		}},
+		Details: []SemanticSearchResultDetail{{
+			Ranks: SemanticSearchRanks{Lexical: &lexical, Semantic: &semantic, Final: 1},
+			ChunkMatches: []SemanticChunkMatch{
+				{
+					ChunkID:           "chunk-match",
+					ChunkKind:         "table_row_group",
+					StructuralGroupID: "table-1",
+					HeadingBreadcrumb: []string{"Architecture", "Runtime"},
+					EvidenceRole:      "match",
+					Lanes:             []string{"chunk_fts", "vector_knn"},
+					BestChunkRanks:    map[string]int{"chunk_fts": 3, "vector_knn": 7},
+					PrimarySourceRange: SemanticByteRange{StartByte: 120, EndByte: 360},
+					ContextSourceRange: &SemanticByteRange{StartByte: 40, EndByte: 119},
+					StructuralGroupSourceRange: &SemanticByteRange{StartByte: 40, EndByte: 980},
+				},
+				{
+					ChunkID:           "chunk-neighbor",
+					ChunkKind:         "table_row_group",
+					StructuralGroupID: "table-1",
+					HeadingBreadcrumb: []string{"Architecture", "Runtime"},
+					EvidenceRole:      "neighbor",
+					PrimarySourceRange: SemanticByteRange{StartByte: 360, EndByte: 480},
+				},
+			},
+		}},
+		Policy:  "semantic-retrieve-v2",
+		Profile: "bge-m3",
+		Lanes: []SemanticSearchLane{{
+			Scope: "project", Name: "chunk_fts", RawHits: 80, FilterRejections: 4,
+			EligibleEntries: 10, RefillRounds: 2, HardCap: 200,
+		}},
+	}}
+	var out bytes.Buffer
+	if err := runSearchWithSemantic(context.Background(), paths.Env{}, IO{Out: &out}, []string{"--semantic=required", "--format=json-v2", "table"}, searcher); err != nil {
+		t.Fatalf("run JSON v2 golden: %v", err)
+	}
+	goldenPath := filepath.Join("testdata", "search-json-v2-table.golden")
+	if os.Getenv("WRITE_GOLDEN") == "1" {
+		if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(goldenPath, out.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("wrote %s", goldenPath)
+		return
+	}
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	if out.String() != string(want) {
+		t.Fatalf("JSON v2 golden mismatch\ngot:\n%s\nwant:\n%s", out.String(), want)
+	}
+
+	raw, _ := json.Marshal(searcher.response.Results[0])
+	if strings.Contains(string(raw), "chunk_matches") || strings.Contains(string(raw), "chunk-match") {
+		t.Fatalf("index.Result unexpectedly carries chunk evidence: %s", raw)
+	}
+	var roundTrip index.Result
+	if err := json.Unmarshal(raw, &roundTrip); err != nil {
+		t.Fatalf("round-trip index.Result: %v", err)
+	}
+	if roundTrip.Entry.ID != "table-entry" {
+		t.Fatalf("round-trip entry = %#v", roundTrip)
+	}
+}
+
+func TestProductionSearchJSONV1GoldenRemainsReadableBaseline(t *testing.T) {
+	goldenPath := filepath.Join("..", "..", "scripts", "semantic", "fixtures", "production-e2e", "search-json-v1.golden")
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("read production JSON v1 golden: %v", err)
+	}
+	var results []index.Result
+	if err := json.Unmarshal(want, &results); err != nil {
+		t.Fatalf("production JSON v1 golden is not valid index.Result JSON: %v", err)
+	}
+	if len(results) != 1 || results[0].Entry.ID != "e2e-decision-hybrid-recall" {
+		t.Fatalf("production JSON v1 golden unexpected: %#v", results)
+	}
+	if strings.Contains(string(want), "chunk_matches") || strings.Contains(string(want), "worktrail.search.results.v2") {
+		t.Fatal("production JSON v1 golden was altered toward v2")
+	}
+}
+
+func mustParseTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }
 
 type semanticSearchStub struct {

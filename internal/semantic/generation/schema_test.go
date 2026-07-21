@@ -77,7 +77,7 @@ func TestOpenSealedRejectsMetadataMismatches(t *testing.T) {
 		change func(*Metadata)
 		want   string
 	}{
-		{"schema", func(m *Metadata) { m.Schema = "other-schema" }, "schema mismatch"},
+		{"schema", func(m *Metadata) { m.Schema = "other-schema" }, "unsupported generation schema"},
 		{"profile", func(m *Metadata) { m.Profile = "other-profile" }, "profile mismatch"},
 		{"snapshot", func(m *Metadata) { m.Snapshot = "other-snapshot" }, "snapshot mismatch"},
 		{"dimension", func(m *Metadata) { m.Dimension = 7 }, "dimension mismatch"},
@@ -95,6 +95,24 @@ func TestOpenSealedRejectsMetadataMismatches(t *testing.T) {
 				t.Fatalf("OpenSealed() error = %q, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestOpenSealedRejectsV1Schema(t *testing.T) {
+	path := t.TempDir() + "/candidate.sqlite"
+	expected := testMetadata()
+	candidate, err := CreateCandidate(path, expected)
+	if err != nil {
+		t.Fatalf("CreateCandidate() error = %v", err)
+	}
+	if _, err := candidate.db.Exec(`UPDATE meta SET schema = ?`, "worktrail.semantic.generation.sqlite.v1"); err != nil {
+		t.Fatalf("force v1 schema: %v", err)
+	}
+	if err := candidate.SealCandidate(); err != nil {
+		t.Fatalf("SealCandidate() error = %v", err)
+	}
+	if _, err := OpenSealed(path, expected); err == nil || !strings.Contains(err.Error(), "schema mismatch") {
+		t.Fatalf("OpenSealed() error = %v, want schema mismatch", err)
 	}
 }
 
@@ -161,24 +179,30 @@ func insertDeterministicChunks(t *testing.T, candidate *Candidate) {
 		{"chunk-2", []float32{0, 1, 0, 0, 0, 0, 0, 0}},
 	} {
 		if _, err := tx.Exec(`INSERT INTO chunks (
-			chunk_id, scope, document_id, path, chunk_order, heading_breadcrumb,
-			source_start, source_end, body, embedding_input, token_count, embedding_hash,
+			chunk_id, scope, document_id, path, document_type, document_topic, chunk_order,
+			chunk_kind, structural_group_id, fragment_ordinal, heading_breadcrumb,
+			source_byte_length, source_start, source_end, context_start, context_end,
+			group_start, group_end, body, embedding_input, token_count, embedding_hash,
 			prev_chunk_id, next_chunk_id, chunker_version
-		) VALUES (?, 'project', 'doc-1', 'docs/test.md', ?, '[]', 0, 1, ?, ?, 1, ?, '', '', 'chunker-v1')`,
+		) VALUES (?, 'project', 'doc-1', 'docs/test.md', 'rule', 'testing', ?, 'text', ?, 0, '[]',
+			8, 0, 1, NULL, NULL, 0, 8, ?, ?, 1, ?, '', '', ?)`,
 			value.id,
 			rowID,
+			"group-"+value.id,
 			"value "+value.id,
 			"input "+value.id,
 			"hash-"+value.id,
+			"chunker-v2",
 		); err != nil {
 			_ = tx.Rollback()
 			t.Fatalf("insert chunk %d error = %v", rowID, err)
 		}
 		if _, err := tx.Exec(
-			`INSERT INTO chunk_fts (rowid, chunk_id, embedding_input, body) VALUES (?, ?, ?, ?)`,
+			`INSERT INTO chunk_fts (rowid, chunk_id, metadata_terms, context_terms, body_terms) VALUES (?, ?, ?, ?, ?)`,
 			rowID+1,
 			value.id,
-			"input "+value.id,
+			"doc test",
+			"section",
 			"value "+value.id,
 		); err != nil {
 			_ = tx.Rollback()

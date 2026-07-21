@@ -2,6 +2,7 @@ package generation
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -50,47 +51,65 @@ func newQueryError(kind QueryErrorKind, operation string, err error) error {
 // ChunkHit is one chunk returned from a lexical or vector generation query.
 // EntryID is the source document identifier retained in the generation.
 type ChunkHit struct {
-	ChunkID     string
-	EntryID     string
-	Path        string
-	ChunkOrder  int
-	PrevChunkID string
-	NextChunkID string
-	Rank        int
-	Score       float64
-	Distance    float64
+	ChunkID       string
+	EntryID       string
+	Path          string
+	DocumentType  string
+	DocumentTopic string
+	ChunkOrder    int
+	PrevChunkID   string
+	NextChunkID   string
+	Rank          int
+	Score         float64
+	Distance      float64
+}
+
+// ChunkFilters are exact metadata predicates pushed into generation SQL when
+// supported. Empty fields are ignored.
+type ChunkFilters struct {
+	Type  string
+	Topic string
+	Tag   string
 }
 
 // ChunkFTS performs an exact FTS5 term query against the already-open active
-// generation. It never falls back to substring matching or a writable index.
+// generation. Prefer ChunkFTSTerms when the caller already holds a tokenizer.
 func (a *Active) ChunkFTS(query string, limit int) ([]ChunkHit, error) {
-	match, err := chunkFTSMatch(query)
+	return a.ChunkFTSFiltered(query, ChunkFilters{}, limit)
+}
+
+// ChunkFTSFiltered performs an exact FTS5 term query with optional SQL filters.
+func (a *Active) ChunkFTSFiltered(query string, filters ChunkFilters, limit int) ([]ChunkHit, error) {
+	match, err := chunkFTSMatch(strings.Fields(query))
 	if err != nil {
 		return nil, newQueryError(QueryErrorInvalidInput, "chunk FTS", err)
 	}
+	return a.chunkFTSMatchLimit(match, filters, limit)
+}
+
+// ChunkFTSTerms performs an exact FTS5 term query using pre-tokenized terms.
+func (a *Active) ChunkFTSTerms(terms []string, limit int) ([]ChunkHit, error) {
+	return a.ChunkFTSTermsFiltered(terms, ChunkFilters{}, limit)
+}
+
+// ChunkFTSTermsFiltered performs an exact FTS5 term query with optional SQL filters.
+func (a *Active) ChunkFTSTermsFiltered(terms []string, filters ChunkFilters, limit int) ([]ChunkHit, error) {
+	match, err := chunkFTSMatch(terms)
+	if err != nil {
+		return nil, newQueryError(QueryErrorInvalidInput, "chunk FTS", err)
+	}
+	return a.chunkFTSMatchLimit(match, filters, limit)
+}
+
+func (a *Active) chunkFTSMatchLimit(match string, filters ChunkFilters, limit int) ([]ChunkHit, error) {
 	if err := validateSearchLimit(limit); err != nil {
 		return nil, newQueryError(QueryErrorInvalidInput, "chunk FTS", err)
 	}
 
+	query, args := chunkFTSStatement(match, filters, limit)
 	var hits []ChunkHit
-	err = a.withReadOnlyDB(func(db *sql.DB) error {
-		rows, err := db.Query(`
-			SELECT
-				chunks.chunk_id,
-				chunks.document_id,
-				chunks.path,
-				chunks.chunk_order,
-				chunks.prev_chunk_id,
-				chunks.next_chunk_id,
-				bm25(chunk_fts)
-			FROM chunk_fts
-			JOIN chunks ON chunks.rowid = chunk_fts.rowid
-			WHERE chunk_fts MATCH ?
-			ORDER BY bm25(chunk_fts) ASC, chunks.chunk_id ASC
-			LIMIT ?`,
-			match,
-			limit,
-		)
+	err := a.withReadOnlyDB(func(db *sql.DB) error {
+		rows, err := db.Query(query, args...)
 		if err != nil {
 			return newQueryError(QueryErrorQuery, "chunk FTS", err)
 		}
@@ -102,6 +121,8 @@ func (a *Active) ChunkFTS(query string, limit int) ([]ChunkHit, error) {
 				&hit.ChunkID,
 				&hit.EntryID,
 				&hit.Path,
+				&hit.DocumentType,
+				&hit.DocumentTopic,
 				&hit.ChunkOrder,
 				&hit.PrevChunkID,
 				&hit.NextChunkID,
@@ -121,6 +142,45 @@ func (a *Active) ChunkFTS(query string, limit int) ([]ChunkHit, error) {
 		return nil, err
 	}
 	return hits, nil
+}
+
+func chunkFTSStatement(match string, filters ChunkFilters, limit int) (string, []any) {
+	var b strings.Builder
+	b.WriteString(`
+			SELECT
+				chunks.chunk_id,
+				chunks.document_id,
+				chunks.path,
+				chunks.document_type,
+				chunks.document_topic,
+				chunks.chunk_order,
+				chunks.prev_chunk_id,
+				chunks.next_chunk_id,
+				bm25(chunk_fts, 0.0, 5.0, 1.0, 3.0)
+			FROM chunk_fts
+			JOIN chunks ON chunks.rowid = chunk_fts.rowid
+			WHERE chunk_fts MATCH ?`)
+	args := []any{match}
+	if typeFilter := strings.TrimSpace(filters.Type); typeFilter != "" {
+		b.WriteString(` AND chunks.document_type = ?`)
+		args = append(args, typeFilter)
+	}
+	if topicFilter := strings.TrimSpace(filters.Topic); topicFilter != "" {
+		b.WriteString(` AND chunks.document_topic = ?`)
+		args = append(args, topicFilter)
+	}
+	if tagFilter := strings.TrimSpace(filters.Tag); tagFilter != "" {
+		b.WriteString(` AND EXISTS (
+			SELECT 1 FROM chunk_tags
+			WHERE chunk_tags.chunk_id = chunks.chunk_id AND chunk_tags.tag = ?
+		)`)
+		args = append(args, tagFilter)
+	}
+	b.WriteString(`
+			ORDER BY bm25(chunk_fts, 0.0, 5.0, 1.0, 3.0) ASC, chunks.chunk_id ASC
+			LIMIT ?`)
+	args = append(args, limit)
+	return b.String(), args
 }
 
 // VectorKNN performs an exact cosine KNN query against the already-open active
@@ -155,6 +215,8 @@ func (a *Active) VectorKNN(embedding []float32, limit int) ([]ChunkHit, error) {
 				&hit.ChunkID,
 				&hit.EntryID,
 				&hit.Path,
+				&hit.DocumentType,
+				&hit.DocumentTopic,
 				&hit.ChunkOrder,
 				&hit.PrevChunkID,
 				&hit.NextChunkID,
@@ -176,11 +238,189 @@ func (a *Active) VectorKNN(embedding []float32, limit int) ([]ChunkHit, error) {
 	return hits, nil
 }
 
+// ChunkEvidenceRecord is one sealed chunk's ranking-independent evidence fields.
+// Ranges use zero-based, half-open UTF-8 byte offsets in the original source.
+type ChunkEvidenceRecord struct {
+	ChunkID            string
+	EntryID            string
+	Path               string
+	ChunkOrder         int
+	ChunkKind          string
+	StructuralGroupID  string
+	FragmentOrdinal    int
+	HeadingBreadcrumb  []string
+	SourceByteLength   int
+	PrimaryStart       int
+	PrimaryEnd         int
+	ContextStart       *int
+	ContextEnd         *int
+	GroupStart         *int
+	GroupEnd           *int
+	PrevChunkID        string
+	NextChunkID        string
+}
+
+// ChunksByIDs loads evidence metadata for the requested chunk IDs. Missing IDs
+// are omitted. Results are ordered by the first occurrence of each requested ID.
+func (a *Active) ChunksByIDs(chunkIDs []string) ([]ChunkEvidenceRecord, error) {
+	unique := uniqueNonEmpty(chunkIDs)
+	if len(unique) == 0 {
+		return []ChunkEvidenceRecord{}, nil
+	}
+
+	placeholders := make([]string, len(unique))
+	args := make([]any, len(unique))
+	for i, id := range unique {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := `
+		SELECT
+			chunk_id,
+			document_id,
+			path,
+			chunk_order,
+			chunk_kind,
+			structural_group_id,
+			fragment_ordinal,
+			heading_breadcrumb,
+			source_byte_length,
+			source_start,
+			source_end,
+			context_start,
+			context_end,
+			group_start,
+			group_end,
+			prev_chunk_id,
+			next_chunk_id
+		FROM chunks
+		WHERE chunk_id IN (` + strings.Join(placeholders, ",") + `)`
+
+	byID := make(map[string]ChunkEvidenceRecord, len(unique))
+	err := a.withReadOnlyDB(func(db *sql.DB) error {
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			return newQueryError(QueryErrorQuery, "chunk evidence", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				rec                                ChunkEvidenceRecord
+				breadcrumbJSON                     string
+				contextStart, contextEnd           sql.NullInt64
+				groupStart, groupEnd               sql.NullInt64
+			)
+			if err := rows.Scan(
+				&rec.ChunkID,
+				&rec.EntryID,
+				&rec.Path,
+				&rec.ChunkOrder,
+				&rec.ChunkKind,
+				&rec.StructuralGroupID,
+				&rec.FragmentOrdinal,
+				&breadcrumbJSON,
+				&rec.SourceByteLength,
+				&rec.PrimaryStart,
+				&rec.PrimaryEnd,
+				&contextStart,
+				&contextEnd,
+				&groupStart,
+				&groupEnd,
+				&rec.PrevChunkID,
+				&rec.NextChunkID,
+			); err != nil {
+				return newQueryError(QueryErrorQuery, "chunk evidence", err)
+			}
+			if err := json.Unmarshal([]byte(breadcrumbJSON), &rec.HeadingBreadcrumb); err != nil {
+				return newQueryError(QueryErrorQuery, "chunk evidence", fmt.Errorf("decode heading breadcrumb for %q: %w", rec.ChunkID, err))
+			}
+			if rec.HeadingBreadcrumb == nil {
+				rec.HeadingBreadcrumb = []string{}
+			}
+			rec.ContextStart, rec.ContextEnd = nullIntPair(contextStart, contextEnd)
+			rec.GroupStart, rec.GroupEnd = nullIntPair(groupStart, groupEnd)
+			byID[rec.ChunkID] = rec
+		}
+		if err := rows.Err(); err != nil {
+			return newQueryError(QueryErrorQuery, "chunk evidence", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]ChunkEvidenceRecord, 0, len(unique))
+	for _, id := range unique {
+		if rec, ok := byID[id]; ok {
+			out = append(out, rec)
+		}
+	}
+	return out, nil
+}
+
+func nullIntPair(start, end sql.NullInt64) (*int, *int) {
+	if !start.Valid && !end.Valid {
+		return nil, nil
+	}
+	if !start.Valid || !end.Valid {
+		return nil, nil
+	}
+	startValue := int(start.Int64)
+	endValue := int(end.Int64)
+	return &startValue, &endValue
+}
+
+// EntryTagSets loads distinct tags for the requested entry IDs from the sealed
+// generation. Missing entries are omitted so callers can detect them.
+func (a *Active) EntryTagSets(entryIDs []string) (map[string][]string, error) {
+	unique := uniqueNonEmpty(entryIDs)
+	if len(unique) == 0 {
+		return map[string][]string{}, nil
+	}
+
+	placeholders := make([]string, len(unique))
+	args := make([]any, len(unique))
+	for i, id := range unique {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := `
+		SELECT chunks.document_id, chunk_tags.tag
+		FROM chunks
+		JOIN chunk_tags ON chunk_tags.chunk_id = chunks.chunk_id
+		WHERE chunks.document_id IN (` + strings.Join(placeholders, ",") + `)
+		ORDER BY chunks.document_id ASC, chunk_tags.tag ASC`
+
+	out := make(map[string][]string, len(unique))
+	err := a.withReadOnlyDB(func(db *sql.DB) error {
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			return newQueryError(QueryErrorQuery, "entry tags", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var entryID, tag string
+			if err := rows.Scan(&entryID, &tag); err != nil {
+				return newQueryError(QueryErrorQuery, "entry tags", err)
+			}
+			out[entryID] = append(out[entryID], tag)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 const vectorKNNQuery = `
 	SELECT
 		chunks.chunk_id,
 		chunks.document_id,
 		chunks.path,
+		chunks.document_type,
+		chunks.document_topic,
 		chunks.chunk_order,
 		chunks.prev_chunk_id,
 		chunks.next_chunk_id,
@@ -210,14 +450,10 @@ func validateSearchLimit(limit int) error {
 	return nil
 }
 
-func chunkFTSMatch(query string) (string, error) {
-	terms := strings.Fields(query)
-	if len(terms) == 0 {
-		return "", errors.New("search query is required")
-	}
-
+func chunkFTSMatch(terms []string) (string, error) {
 	parts := make([]string, 0, len(terms))
 	for _, term := range terms {
+		term = strings.TrimSpace(term)
 		term = strings.ReplaceAll(term, `"`, "")
 		if term != "" {
 			parts = append(parts, `"`+term+`"`)
@@ -242,4 +478,21 @@ func sealedDimension(db *sql.DB) (int, error) {
 		return 0, fmt.Errorf("sealed metadata dimension is %d", dimension)
 	}
 	return dimension, nil
+}
+
+func uniqueNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }

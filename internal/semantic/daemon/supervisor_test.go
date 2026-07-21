@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -248,6 +250,7 @@ func TestSupervisorCommandUsesOwnedKeyFileAndFixedRuntimeFlags(t *testing.T) {
 		"--embedding",
 		"--pooling", "cls",
 		"--embd-normalize", "2",
+		"--ubatch-size", "1024",
 	}
 	if !reflect.DeepEqual(command.Args, want) {
 		t.Fatalf("runtime args = %#v, want fixed security/runtime flags", command.Args)
@@ -316,9 +319,10 @@ func TestSupervisorStopSignalsOnlyVerifiedProcess(t *testing.T) {
 	process := &fakeProcess{identity: identity}
 	factory := &fakeFactory{opened: process}
 	verifier := &fakeRuntimeVerifier{}
+	locker := &fakeLocker{}
 	supervisor := testSupervisor(t, store, &scriptedClient{responses: map[string][]readinessResult{
 		"http://127.0.0.1:41271": {{identity: runtimeIdentity()}},
-	}}, verifier, &fakeLocker{}, factory, &fakeAllocator{})
+	}}, verifier, locker, factory, &fakeAllocator{})
 
 	report, err := supervisor.Stop(context.Background())
 	if err != nil {
@@ -330,14 +334,117 @@ func TestSupervisorStopSignalsOnlyVerifiedProcess(t *testing.T) {
 	if verifier.calls != 1 || verifier.runtime != testRuntime() {
 		t.Fatalf("VerifyRuntime() = %d calls with %#v, want one call for %#v", verifier.calls, verifier.runtime, testRuntime())
 	}
-	if len(process.signals) != 1 || process.signals[0] != terminateSignal || !process.released {
-		t.Fatalf("verified process stop = signals:%#v released:%v", process.signals, process.released)
+	if locker.calls != 1 {
+		t.Fatalf("Stop() locks = %d, want 1 per-bundle lock", locker.calls)
+	}
+	if len(process.signals) != 1 || process.signals[0] != terminateSignal || process.waitCalls != 1 || !process.released {
+		t.Fatalf("verified process stop = signals:%#v wait:%d released:%v", process.signals, process.waitCalls, process.released)
 	}
 	if _, err := store.Load(); !errors.Is(err, ErrDescriptorNotFound) {
 		t.Fatalf("Stop() retained descriptor: %v", err)
 	}
 	if _, err := os.Stat(store.APIKeyPath()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Stop() retained API key: %v", err)
+	}
+}
+
+func TestSupervisorStopWaitsForDelayedExitBeforeRemovingDescriptor(t *testing.T) {
+	store := testStore(t)
+	identity := testIdentity(72)
+	saveDescriptor(t, store, identity, "http://127.0.0.1:41272")
+	process := &fakeProcess{identity: identity, exitAfter: 40 * time.Millisecond}
+	factory := &fakeFactory{opened: process}
+	supervisor := testSupervisor(t, store, &scriptedClient{responses: map[string][]readinessResult{
+		"http://127.0.0.1:41272": {{identity: runtimeIdentity()}},
+	}}, &fakeRuntimeVerifier{}, &fakeLocker{}, factory, &fakeAllocator{})
+	supervisor.config.StopWait = 200 * time.Millisecond
+
+	if _, err := supervisor.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if process.waitCalls != 1 {
+		t.Fatalf("WaitExited calls = %d, want 1", process.waitCalls)
+	}
+	if _, err := store.Load(); !errors.Is(err, ErrDescriptorNotFound) {
+		t.Fatalf("Stop() retained descriptor after delayed exit: %v", err)
+	}
+}
+
+func TestSupervisorStopTreatsPIDReuseAsExit(t *testing.T) {
+	store := testStore(t)
+	identity := testIdentity(73)
+	saveDescriptor(t, store, identity, "http://127.0.0.1:41273")
+	process := &fakeProcess{identity: identity, reuseAfterSignal: true}
+	factory := &fakeFactory{opened: process}
+	supervisor := testSupervisor(t, store, &scriptedClient{responses: map[string][]readinessResult{
+		"http://127.0.0.1:41273": {{identity: runtimeIdentity()}},
+	}}, &fakeRuntimeVerifier{}, &fakeLocker{}, factory, &fakeAllocator{})
+
+	if _, err := supervisor.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if _, err := store.Load(); !errors.Is(err, ErrDescriptorNotFound) {
+		t.Fatalf("Stop() retained descriptor after PID reuse: %v", err)
+	}
+}
+
+func TestSupervisorStopRetainsDescriptorWhenProcessNeverExits(t *testing.T) {
+	store := testStore(t)
+	identity := testIdentity(74)
+	saveDescriptor(t, store, identity, "http://127.0.0.1:41274")
+	process := &fakeProcess{identity: identity, neverExit: true}
+	factory := &fakeFactory{opened: process}
+	supervisor := testSupervisor(t, store, &scriptedClient{responses: map[string][]readinessResult{
+		"http://127.0.0.1:41274": {{identity: runtimeIdentity()}},
+	}}, &fakeRuntimeVerifier{}, &fakeLocker{}, factory, &fakeAllocator{})
+	supervisor.config.StopWait = 30 * time.Millisecond
+
+	_, err := supervisor.Stop(context.Background())
+	if err == nil {
+		t.Fatal("Stop() error = nil, want wait timeout")
+	}
+	if _, loadErr := store.Load(); loadErr != nil {
+		t.Fatalf("Stop() removed descriptor despite wait failure: %v", loadErr)
+	}
+	if _, keyErr := os.Stat(store.APIKeyPath()); keyErr != nil {
+		t.Fatalf("Stop() removed API key despite wait failure: %v", keyErr)
+	}
+}
+
+func TestSupervisorStopHoldsBundleLockUntilWaitCompletes(t *testing.T) {
+	store := testStore(t)
+	identity := testIdentity(75)
+	saveDescriptor(t, store, identity, "http://127.0.0.1:41275")
+	process := &fakeProcess{identity: identity, exitAfter: 80 * time.Millisecond}
+	locker := &holdLocker{}
+	factory := &fakeFactory{opened: process}
+	supervisor := testSupervisor(t, store, &scriptedClient{responses: map[string][]readinessResult{
+		"http://127.0.0.1:41275": {{identity: runtimeIdentity()}},
+	}}, &fakeRuntimeVerifier{}, locker, factory, &fakeAllocator{})
+	supervisor.config.StopWait = 200 * time.Millisecond
+
+	stopErr := make(chan error, 1)
+	go func() {
+		_, err := supervisor.Stop(context.Background())
+		stopErr <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if !locker.holding.Load() {
+		t.Fatal("Stop() released bundle lock before WaitExited completed")
+	}
+	blocked, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if unlock, err := locker.Lock(blocked, testRuntime().BundleID); err == nil {
+		unlock()
+		t.Fatal("second Lock acquired while Stop still waiting for exit")
+	} else if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second Lock error = %v, want deadline exceeded", err)
+	}
+	if err := <-stopErr; err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if locker.holding.Load() {
+		t.Fatal("Stop() retained bundle lock after completion")
 	}
 }
 
@@ -489,6 +596,35 @@ func (f *fakeLocker) Lock(context.Context, string) (func(), error) {
 	return func() {}, nil
 }
 
+type holdLocker struct {
+	mu      sync.Mutex
+	holding atomic.Bool
+	calls   int
+}
+
+func (l *holdLocker) Lock(ctx context.Context, _ string) (func(), error) {
+	acquired := make(chan struct{})
+	go func() {
+		l.mu.Lock()
+		close(acquired)
+	}()
+	select {
+	case <-ctx.Done():
+		go func() {
+			<-acquired
+			l.mu.Unlock()
+		}()
+		return nil, ctx.Err()
+	case <-acquired:
+	}
+	l.calls++
+	l.holding.Store(true)
+	return func() {
+		l.holding.Store(false)
+		l.mu.Unlock()
+	}, nil
+}
+
 type fakeFactory struct {
 	next      []Identity
 	processes []*fakeProcess
@@ -524,11 +660,16 @@ func (f *fakeFactory) Open(identity Identity) (Process, error) {
 }
 
 type fakeProcess struct {
-	identity Identity
-	started  bool
-	released bool
-	signals  []os.Signal
-	err      error
+	identity         Identity
+	started          bool
+	released         bool
+	signals          []os.Signal
+	err              error
+	waitCalls        int
+	exitAfter        time.Duration
+	neverExit        bool
+	reuseAfterSignal bool
+	signaledAt       time.Time
 }
 
 func (f *fakeProcess) Start(context.Context) error {
@@ -537,7 +678,7 @@ func (f *fakeProcess) Start(context.Context) error {
 }
 
 func (f *fakeProcess) Identity() (Identity, error) {
-	if !f.started {
+	if !f.started && f.identity.PID == 0 {
 		return Identity{}, errors.New("process has not started")
 	}
 	return f.identity, nil
@@ -545,7 +686,33 @@ func (f *fakeProcess) Identity() (Identity, error) {
 
 func (f *fakeProcess) Signal(signal os.Signal) error {
 	f.signals = append(f.signals, signal)
+	f.signaledAt = time.Now()
+	if f.reuseAfterSignal {
+		f.identity.StartedAt = f.identity.StartedAt.Add(time.Second)
+	}
 	return nil
+}
+
+func (f *fakeProcess) WaitExited(ctx context.Context) error {
+	f.waitCalls++
+	if f.neverExit {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	if f.reuseAfterSignal {
+		return nil
+	}
+	if f.exitAfter <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(f.exitAfter)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (f *fakeProcess) Release() error {

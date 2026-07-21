@@ -1,6 +1,8 @@
 worktrail
 *.test
 .DS_Store
+__pycache__/
+*.py[cod]
 
 # BEGIN WORKTRAIL MANAGED BLOCK
 # Worktrail local integration installs. These are generated per developer.

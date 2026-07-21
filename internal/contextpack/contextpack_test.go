@@ -788,6 +788,88 @@ func reverseStrings(values []string) {
 	}
 }
 
+
+func TestBuildScopeQualifiedSupersessionAndEntryID(t *testing.T) {
+	tmp := t.TempDir()
+	env := paths.Env{
+		UserRoot:  filepath.Join(tmp, "user"),
+		ProjectWT: filepath.Join(tmp, "project", ".worktrail"),
+	}
+	if err := os.MkdirAll(env.ProjectWT, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.ProjectWT, "config.json"), []byte(`{"project_id":"dual-scope"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Same relative path and same entry ID across scopes, with different supersession.
+	writePackDoc(t, filepath.Join(env.ProjectWT, "rules", "shared.md"), map[string]any{
+		"id": "shared-id", "scope": "project", "type": "rule", "title": "Project Shared",
+		"supersedes": []string{"rules/old.md"},
+	}, "project shared")
+	writePackDoc(t, filepath.Join(env.ProjectWT, "rules", "old.md"), map[string]any{
+		"id": "project-old", "scope": "project", "type": "rule", "title": "Project Old",
+		"lifecycle": "historical",
+	}, "project old")
+	writePackDoc(t, filepath.Join(env.UserRoot, "rules", "shared.md"), map[string]any{
+		"id": "shared-id", "scope": "user", "type": "rule", "title": "User Shared",
+	}, "user shared")
+	writePackDoc(t, filepath.Join(env.UserRoot, "rules", "old.md"), map[string]any{
+		"id": "user-old", "scope": "user", "type": "rule", "title": "User Old",
+	}, "user old")
+
+	pack, err := Build(env, Options{Task: "dual scope", Limit: 10, IncludeLifecycle: []string{"current", "historical"}})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	rules := section(pack, "Rules")
+	var projectOld, userOld, projectShared, userShared Item
+	for _, item := range rules.Items {
+		switch item.Scope + ":" + item.Title {
+		case "project:Project Old":
+			projectOld = item
+		case "user:User Old":
+			userOld = item
+		case "project:Project Shared":
+			projectShared = item
+		case "user:User Shared":
+			userShared = item
+		}
+	}
+	if projectShared.EntryID != "shared-id" || userShared.EntryID != "shared-id" {
+		t.Fatalf("EntryID not populated: project=%q user=%q", projectShared.EntryID, userShared.EntryID)
+	}
+	if len(projectOld.SupersededBy) != 1 || projectOld.SupersededBy[0] != "rules/shared.md" {
+		t.Fatalf("project old supersession = %#v", projectOld.SupersededBy)
+	}
+	if len(userOld.SupersededBy) != 0 {
+		t.Fatalf("user old unexpectedly superseded across scope: %#v", userOld.SupersededBy)
+	}
+
+	selector := &fakeSelector{selectFn: func(request SelectionRequest) ([]Item, error) {
+		// Prefer the user item with same entry id over project via ranking identity.
+		out := make([]Item, 0, len(request.Candidates))
+		for _, item := range request.Candidates {
+			if item.Scope == "user" && item.EntryID == "shared-id" {
+				out = append([]Item{item}, out...)
+				continue
+			}
+			out = append(out, item)
+		}
+		if len(out) > request.Limit {
+			out = out[:request.Limit]
+		}
+		return out, nil
+	}}
+	pack, err = Build(env, Options{Task: "dual scope", Limit: 2, Selector: selector, IncludeLifecycle: []string{"current", "historical"}})
+	if err != nil {
+		t.Fatalf("Build with selector: %v", err)
+	}
+	rules = section(pack, "Rules")
+	if len(rules.Items) == 0 || rules.Items[0].Scope != "user" || rules.Items[0].EntryID != "shared-id" {
+		t.Fatalf("selector did not prefer (scope,entry_id): %#v", rules.Items)
+	}
+}
+
 func writePackDoc(t *testing.T, path string, meta any, body string) {
 	t.Helper()
 	b, err := store.RenderMarkdown(meta, body)

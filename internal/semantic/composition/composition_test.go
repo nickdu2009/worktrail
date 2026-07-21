@@ -225,7 +225,7 @@ func TestDefaultSubsystemVersionsUsesApprovedV1Profile(t *testing.T) {
 	want := profile.SubsystemVersions{
 		ChunkerVersion:   chunk.Version,
 		IndexingVersion:  policy.Version,
-		LexicalVersion:   "worktrail-fts5-gse-v1",
+		LexicalVersion:   "worktrail-fts5-gse-v2",
 		SQLiteVecVersion: "sqlite-vec-v0.1.9",
 	}
 
@@ -314,7 +314,7 @@ func testComposition(t *testing.T) (Input, dependencies, *compositionCapture) {
 			Logs:    filepath.Join(base, "logs"),
 		},
 		Versions: profile.SubsystemVersions{
-			ChunkerVersion:   "chunker-v1",
+			ChunkerVersion:   "chunker-v2",
 			IndexingVersion:  "index-v1",
 			LexicalVersion:   "lexical-v1",
 			SQLiteVecVersion: "sqlite-vec-v1",
@@ -441,5 +441,6 @@ func (compositionProcess) Start(context.Context) error { return nil }
 func (compositionProcess) Identity() (daemon.Identity, error) {
 	return daemon.Identity{PID: 1, StartedAt: time.Now()}, nil
 }
-func (compositionProcess) Signal(os.Signal) error { return nil }
-func (compositionProcess) Release() error         { return nil }
+func (compositionProcess) Signal(os.Signal) error      { return nil }
+func (compositionProcess) WaitExited(context.Context) error { return nil }
+func (compositionProcess) Release() error              { return nil }

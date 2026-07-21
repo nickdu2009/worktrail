@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	RetrievalLabelsSchema   = "worktrail.semantic.eval.retrieval-labels.v1"
-	RetrievalRankingsSchema = "worktrail.semantic.eval.retrieval-rankings.v1"
+	RetrievalLabelsSchema   = "worktrail.semantic.eval.retrieval-labels.v2"
+	RetrievalRankingsSchema = "worktrail.semantic.eval.retrieval-rankings.v2"
 	RetrievalReportSchema   = "worktrail.semantic.eval.retrieval-report.v1"
 
 	LaneEntryFTS = "entry_fts"
@@ -20,21 +20,38 @@ const (
 	LaneGoverned = "governed"
 )
 
+// ScopedEntryID is a scope-qualified knowledge identity used by retrieval eval v2.
+type ScopedEntryID struct {
+	Scope   string `json:"scope"`
+	EntryID string `json:"entry_id"`
+}
+
+func (s ScopedEntryID) Key() string {
+	return s.Scope + "\x00" + s.EntryID
+}
+
+func (s ScopedEntryID) valid() bool {
+	return s.Scope != "" && s.EntryID != ""
+}
+
 // RetrievalLabels is the release-engineering labeled query set.
 type RetrievalLabels struct {
 	Schema  string           `json:"schema"`
 	Queries []RetrievalQuery `json:"queries"`
 }
 
-// RetrievalQuery names one labeled query and its relevant entry IDs.
+// RetrievalQuery names one labeled query and its relevant scoped entry IDs.
 type RetrievalQuery struct {
-	ID          string   `json:"id"`
-	Text        string   `json:"text"`
-	Category    string   `json:"category,omitempty"`
-	RelevantIDs []string `json:"relevant_ids"`
+	ID                      string             `json:"id"`
+	Text                    string             `json:"text"`
+	Category                string             `json:"category,omitempty"`
+	RelevantIDs             []ScopedEntryID    `json:"relevant_ids"`
+	RequiredEvidence        []RequiredEvidence `json:"required_evidence,omitempty"`
+	ExactRowKeys            []string           `json:"exact_row_keys,omitempty"`
+	RequireNeighborCoverage bool               `json:"require_neighbor_coverage,omitempty"`
 }
 
-// RetrievalRankings carries explicit per-lane entry ID rankings.
+// RetrievalRankings carries explicit per-lane scoped entry ID rankings.
 // Rankings must be collected from lane APIs; they must not be inferred from
 // public search JSON envelopes.
 type RetrievalRankings struct {
@@ -42,10 +59,12 @@ type RetrievalRankings struct {
 	Queries []RetrievalQueryRankings `json:"queries"`
 }
 
-// RetrievalQueryRankings holds one query's lane rankings as ordered entry IDs.
+// RetrievalQueryRankings holds one query's lane rankings as ordered scoped IDs.
 type RetrievalQueryRankings struct {
-	QueryID string              `json:"query_id"`
-	Lanes   map[string][]string `json:"lanes"`
+	QueryID     string                     `json:"query_id"`
+	Lanes       map[string][]ScopedEntryID `json:"lanes"`
+	Evidence    []RankedEntryEvidence      `json:"evidence,omitempty"`
+	Diagnostics *QueryDiagnostics          `json:"diagnostics,omitempty"`
 }
 
 // RetrievalThresholds configures lane-specific metric gates for the retrieval report.
@@ -53,6 +72,7 @@ type RetrievalThresholds struct {
 	K        int                         `json:"k"`
 	RRF      RRFThresholds               `json:"rrf"`
 	Governed GovernedRetrievalThresholds `json:"governed"`
+	Evidence EvidenceThresholds          `json:"evidence"`
 }
 
 // RRFThresholds require fused ranking quality to preserve every reported
@@ -64,16 +84,16 @@ type RRFThresholds struct {
 	MinNDCGAtK        float64 `json:"min_ndcg_at_k"`
 }
 
-// GovernedRetrievalThresholds intentionally gate recall only. Governance may
-// promote current source-of-truth records and therefore change MRR/nDCG.
-// Those metrics remain reported for diagnosis but are not release thresholds.
+// GovernedRetrievalThresholds gate Recall@K/MRR/nDCG@K against entry FTS for
+// table-hardening release freeze, matching the RRF entry-lane contract.
 type GovernedRetrievalThresholds struct {
-	RequireRecallVsEntryFTS bool    `json:"require_recall_vs_entry_fts"`
-	MinRecallAtK            float64 `json:"min_recall_at_k"`
-	MRRAndNDCGPolicy        string  `json:"mrr_and_ndcg_at_k_policy"`
+	RequireVsEntryFTS bool    `json:"require_vs_entry_fts"`
+	MinRecallAtK      float64 `json:"min_recall_at_k"`
+	MinMRR            float64 `json:"min_mrr"`
+	MinNDCGAtK        float64 `json:"min_ndcg_at_k"`
 }
 
-// DefaultRetrievalThresholds returns the initial release gate thresholds.
+// DefaultRetrievalThresholds returns the table-hardening release gate thresholds.
 func DefaultRetrievalThresholds() RetrievalThresholds {
 	return RetrievalThresholds{
 		K: 10,
@@ -84,10 +104,12 @@ func DefaultRetrievalThresholds() RetrievalThresholds {
 			MinNDCGAtK:        0.9,
 		},
 		Governed: GovernedRetrievalThresholds{
-			RequireRecallVsEntryFTS: true,
-			MinRecallAtK:            0.9,
-			MRRAndNDCGPolicy:        "reported_not_gated",
+			RequireVsEntryFTS: true,
+			MinRecallAtK:      0.9,
+			MinMRR:            0.9,
+			MinNDCGAtK:        0.9,
 		},
+		Evidence: DefaultEvidenceThresholds(),
 	}
 }
 
@@ -107,6 +129,7 @@ type RetrievalReport struct {
 	Thresholds     RetrievalThresholds `json:"thresholds"`
 	Queries        int                 `json:"queries"`
 	Lanes          []LaneMetrics       `json:"lanes"`
+	Evidence       EvidenceMetrics     `json:"evidence"`
 	Passed         bool                `json:"passed"`
 	FailureReasons []string            `json:"failure_reasons,omitempty"`
 }
@@ -170,19 +193,20 @@ func ReportRetrieval(labels RetrievalLabels, rankings RetrievalRankings, thresho
 		item := byQuery[query.ID]
 		relevant := make(map[string]bool, len(query.RelevantIDs))
 		for _, id := range query.RelevantIDs {
-			relevant[id] = true
+			relevant[id.Key()] = true
 		}
 		for _, name := range laneNames {
 			ranked := item.Lanes[name]
 			if ranked == nil {
 				return RetrievalReport{}, fmt.Errorf("query %q missing lane %q", query.ID, name)
 			}
-			limit := min(thresholds.K, len(ranked))
-			cutoff := ranked[:limit]
+			keys := scopedKeys(ranked)
+			limit := min(thresholds.K, len(keys))
+			cutoff := keys[:limit]
 			a := accum[name]
 			a.queries++
 			a.recall += recallAtK(cutoff, relevant)
-			a.mrr += reciprocalRank(ranked, relevant)
+			a.mrr += reciprocalRank(keys, relevant)
 			a.ndcg += ndcgAtK(cutoff, relevant)
 		}
 	}
@@ -197,7 +221,6 @@ func ReportRetrieval(labels RetrievalLabels, rankings RetrievalRankings, thresho
 		metrics := metricsFromAccum(name, accum[name])
 		switch name {
 		case LaneRRF:
-			// Fusion must beat or match lexical entry FTS on every ranking metric.
 			if thresholds.RRF.RequireVsEntryFTS {
 				metrics.VsEntryFTS = compareAgainstBaseline(metrics, entry)
 				if metrics.VsEntryFTS != "ge" {
@@ -214,23 +237,31 @@ func ReportRetrieval(labels RetrievalLabels, rankings RetrievalRankings, thresho
 				report.FailureReasons = append(report.FailureReasons, name+"_ndcg_at_k")
 			}
 		case LaneGoverned:
-			// Governance may intentionally prefer active/source-of-truth docs and
-			// reorder MRR/nDCG; still require relevant docs remain in the top-K
-			// at least as often as entry FTS.
-			if thresholds.Governed.RequireRecallVsEntryFTS {
-				if metrics.RecallAtK+1e-12 >= entry.RecallAtK {
-					metrics.VsEntryFTS = "ge"
-				} else {
-					metrics.VsEntryFTS = "lt"
+			if thresholds.Governed.RequireVsEntryFTS {
+				metrics.VsEntryFTS = compareAgainstBaseline(metrics, entry)
+				if metrics.VsEntryFTS != "ge" {
 					report.FailureReasons = append(report.FailureReasons, name+"_below_entry_fts")
 				}
 			}
 			if metrics.RecallAtK < thresholds.Governed.MinRecallAtK {
 				report.FailureReasons = append(report.FailureReasons, name+"_recall_at_k")
 			}
+			if metrics.MRR < thresholds.Governed.MinMRR {
+				report.FailureReasons = append(report.FailureReasons, name+"_mrr")
+			}
+			if metrics.NDCGAtK < thresholds.Governed.MinNDCGAtK {
+				report.FailureReasons = append(report.FailureReasons, name+"_ndcg_at_k")
+			}
 		}
 		report.Lanes = append(report.Lanes, metrics)
 	}
+
+	evidence, evidenceFailures, err := scoreEvidence(labels, rankings, thresholds.K, thresholds.Evidence)
+	if err != nil {
+		return RetrievalReport{}, err
+	}
+	report.Evidence = evidence
+	report.FailureReasons = append(report.FailureReasons, evidenceFailures...)
 	report.Passed = len(report.FailureReasons) == 0
 	return report, nil
 }
@@ -279,8 +310,13 @@ func validateRetrievalLabels(labels RetrievalLabels) error {
 		}
 		seen[query.ID] = true
 		for _, id := range query.RelevantIDs {
-			if id == "" {
-				return fmt.Errorf("query %q has an empty relevant id", query.ID)
+			if !id.valid() {
+				return fmt.Errorf("query %q has an invalid relevant id", query.ID)
+			}
+		}
+		for _, evidence := range query.RequiredEvidence {
+			if err := evidence.valid(); err != nil {
+				return fmt.Errorf("query %q required evidence: %w", query.ID, err)
 			}
 		}
 	}
@@ -305,8 +341,14 @@ func validateRetrievalRankings(rankings RetrievalRankings) error {
 			return fmt.Errorf("query %q has no lanes", item.QueryID)
 		}
 		for _, name := range required {
-			if _, ok := item.Lanes[name]; !ok {
+			ids, ok := item.Lanes[name]
+			if !ok {
 				return fmt.Errorf("query %q missing lane %q", item.QueryID, name)
+			}
+			for _, id := range ids {
+				if !id.valid() {
+					return fmt.Errorf("query %q lane %q has an invalid scoped id", item.QueryID, name)
+				}
 			}
 		}
 	}
@@ -322,15 +364,14 @@ func validateRetrievalThresholds(t RetrievalThresholds) error {
 		t.RRF.MinMRR,
 		t.RRF.MinNDCGAtK,
 		t.Governed.MinRecallAtK,
+		t.Governed.MinMRR,
+		t.Governed.MinNDCGAtK,
 	} {
 		if value < 0 || value > 1 {
 			return errors.New("retrieval quality thresholds must be between zero and one")
 		}
 	}
-	if t.Governed.MRRAndNDCGPolicy != "reported_not_gated" {
-		return errors.New("governed MRR/nDCG policy must be reported_not_gated")
-	}
-	return nil
+	return validateEvidenceThresholds(t.Evidence)
 }
 
 // EncodeJSON writes indented JSON ending with a newline.
@@ -340,7 +381,21 @@ func EncodeJSON(w io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
-// RankedEntryIDs collapses chunk-level hits to first-seen entry IDs.
+// RankedScopedEntryIDs collapses hits to first-seen scope-qualified entry IDs.
+func RankedScopedEntryIDs(ids []ScopedEntryID) []ScopedEntryID {
+	seen := map[string]bool{}
+	out := make([]ScopedEntryID, 0, len(ids))
+	for _, id := range ids {
+		if !id.valid() || seen[id.Key()] {
+			continue
+		}
+		seen[id.Key()] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// RankedEntryIDs collapses unscoped entry IDs for compatibility helpers.
 func RankedEntryIDs(entryIDs []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(entryIDs))
@@ -355,11 +410,19 @@ func RankedEntryIDs(entryIDs []string) []string {
 }
 
 // SortedLaneNames returns a stable lane name order for reports.
-func SortedLaneNames(lanes map[string][]string) []string {
+func SortedLaneNames(lanes map[string][]ScopedEntryID) []string {
 	names := make([]string, 0, len(lanes))
 	for name := range lanes {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
+}
+
+func scopedKeys(ids []ScopedEntryID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.Key()
+	}
+	return out
 }

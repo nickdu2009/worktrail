@@ -111,6 +111,16 @@ func TestFreshSourceSnapshotMatchesFreshSnapshotAndClonesSelectedEntries(t *test
 	if got, want := sourceSnapshot.Records[0].Body, body; got != want {
 		t.Fatalf("source record body = %q, want %q", got, want)
 	}
+	raw, err := os.ReadFile(filepath.Join(root, "rules", "alpha.md"))
+	if err != nil {
+		t.Fatalf("read alpha source: %v", err)
+	}
+	if sourceSnapshot.Records[0].BodyStartByte <= 0 || sourceSnapshot.Records[0].SourceSizeByte != len(raw) {
+		t.Fatalf("source offsets = %+v, file size %d", sourceSnapshot.Records[0], len(raw))
+	}
+	if string(raw[sourceSnapshot.Records[0].BodyStartByte:]) != body {
+		t.Fatalf("BodyStartByte does not slice original file to body")
+	}
 
 	sourceSelectorEntries[0].Content = "mutated"
 	sourceSelectorEntries[0].Tags[0] = "mutated"
@@ -167,6 +177,34 @@ func TestFreshSourceSnapshotAcceptsMarkdownWithoutFrontmatter(t *testing.T) {
 	}
 	if got, want := sourceSnapshot.Records[0].Body, "# Overview\n\nseed body\n"; got != want {
 		t.Fatalf("source body = %q, want %q", got, want)
+	}
+	if sourceSnapshot.Records[0].BodyStartByte != 0 || sourceSnapshot.Records[0].SourceSizeByte != len("# Overview\n\nseed body\n") {
+		t.Fatalf("raw-source offsets = %+v", sourceSnapshot.Records[0])
+	}
+}
+
+func TestFreshSourceSnapshotTracksCRLFBodyStartByte(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rules", "crlf.md")
+	data := []byte("---worktrail\r\n{\"id\":\"crlf\",\"scope\":\"project\",\"type\":\"rule\",\"status\":\"current\"}\r\n---\r\n\r\ncrlf body\r\n")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sourceSnapshot, err := FreshSourceSnapshot(root, "project", "policy-v1", func(entries []Entry) []Entry {
+		return entries
+	})
+	if err != nil {
+		t.Fatalf("FreshSourceSnapshot() error = %v", err)
+	}
+	record := sourceSnapshot.Records[0]
+	if record.Body != "crlf body\r\n" {
+		t.Fatalf("body = %q", record.Body)
+	}
+	if string(data[record.BodyStartByte:]) != record.Body || record.SourceSizeByte != len(data) {
+		t.Fatalf("CRLF offsets = %+v", record)
 	}
 }
 
