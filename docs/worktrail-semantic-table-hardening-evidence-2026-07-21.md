@@ -164,3 +164,7 @@ reasons; both are intentional contract/corpus updates, not gate-script bugs.
    rune token counter. Insert a blank line before the terminator so `---` is a
    thematic break; ParseMarkdown still accepts it. Current v1 golden score after
    subsequent fixture moves: `17.94747070820838`.
+8. **Evidence clean-checkout**: gate Python helpers wrote
+   `scripts/semantic/__pycache__/` mid-run and blocked release-archive write.
+   Ignore `__pycache__` / `*.py[cod]` and set `PYTHONDONTWRITEBYTECODE=1` in the
+   production E2E gate.

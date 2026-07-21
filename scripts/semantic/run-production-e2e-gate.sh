@@ -3,6 +3,9 @@
 # Isolates HOME / WORKTRAIL_HOME / WORKTRAIL_PROJECT_ROOT under a temporary root.
 # Golden files are compared read-only; this script never overwrites them.
 set -euo pipefail
+# Keep the repo checkout clean for release-archive evidence: importing
+# scripts/semantic/*.py must not leave untracked __pycache__ artifacts.
+export PYTHONDONTWRITEBYTECODE=1
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture_root="$repo_root/scripts/semantic/fixtures/production-e2e"
