@@ -228,8 +228,8 @@ func TestDefaultBudgetReturnsIndependentValues(t *testing.T) {
 	first.Target = 1
 	second := DefaultBudget()
 
-	if second.Target != 512 || second.HardMax != 768 || second.Overlap != 64 || second.MinPayload != 80 {
-		t.Errorf("DefaultBudget() = %+v, want 512/768/64/80", second)
+	if second.Target != 640 || second.HardMax != 768 || second.Overlap != 64 || second.MinPayload != 80 {
+		t.Errorf("DefaultBudget() = %+v, want 640/768/64/80", second)
 	}
 	policy := DefaultPolicy()
 	if policy.Version != Version || policy.ConfigHash != ConfigHash(second) {

@@ -1042,7 +1042,7 @@ PY
     --retrieval-report "$evidence_dir/retrieval-report.json" \
     --resource-report "$evidence_dir/runtime-resource-report.json" \
     --refill-capacity-report "$evidence_dir/refill-capacity-matrix.json" \
-    --final-budget "512:768:80"
+    --final-budget "640:768:80"
   python3 "$archive_safety_scan" "$release_archive_staging" \
     --report "$release_archive_staging/SAFETY-SCAN.json" >/dev/null
   (

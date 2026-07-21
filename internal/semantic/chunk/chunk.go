@@ -120,10 +120,11 @@ type chunker struct {
 	chunks  []Chunk
 }
 
-// DefaultBudget returns an independent initial structural-chunking budget.
+// DefaultBudget returns the production structural-chunking budget frozen by the
+// production-gate-assets budget-matrix (Target/HardMax/MinPayload; Overlap 64).
 func DefaultBudget() Budget {
 	return Budget{
-		Target:     512,
+		Target:     640,
 		HardMax:    768,
 		Overlap:    64,
 		MinPayload: 80,

@@ -108,9 +108,9 @@ class ReleaseRecordTests(unittest.TestCase):
             retrieval,
             resource,
             refill_capacity=refill,
-            final_budget="512:768:80",
+            final_budget="640:768:80",
         )
-        self.assertEqual(report["final_chunk_budget"], "512:768:80")
+        self.assertEqual(report["final_chunk_budget"], "640:768:80")
         self.assertEqual(report["refill_capacity_matrix"]["sizes"], [1000, 2000, 5000])
         self.assertEqual(report["evidence"]["evidence_recall_at_k"], 1.0)
 

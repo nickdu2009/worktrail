@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--final-budget",
-        default="512:768:80",
+        default="640:768:80",
         help="final frozen chunk budget Target:HardMax:MinPayload (Overlap fixed at 64)",
     )
     return parser.parse_args()
