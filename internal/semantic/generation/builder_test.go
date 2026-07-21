@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nickdu2009/worktrail/internal/index"
 	"github.com/nickdu2009/worktrail/internal/semantic/chunk"
 )
 
@@ -22,7 +23,7 @@ func TestBuildCandidateWritesChunksFTSVectorsAndEmptyTags(t *testing.T) {
 		builderChunk("chunk-beta", "input beta", "beta body"),
 	}
 
-	if err := BuildCandidate(context.Background(), candidate, chunks, embedder); err != nil {
+	if err := BuildCandidate(context.Background(), candidate, chunks, embedder, index.NewTokenizer()); err != nil {
 		t.Fatalf("BuildCandidate() error = %v", err)
 	}
 	if got, want := embedder.calls, []string{"input alpha", "input beta"}; strings.Join(got, ",") != strings.Join(want, ",") {
@@ -81,7 +82,7 @@ func TestBuildCandidateBatchesInputsInStableOrder(t *testing.T) {
 		singleErr: errors.New("single embedding must not be used"),
 	}
 
-	if err := BuildCandidate(context.Background(), candidate, chunks, embedder); err != nil {
+	if err := BuildCandidate(context.Background(), candidate, chunks, embedder, index.NewTokenizer()); err != nil {
 		t.Fatalf("BuildCandidate() error = %v", err)
 	}
 	if got, want := len(embedder.batchCalls), len(wantBatches); got != want {
@@ -113,7 +114,7 @@ func TestBuildCandidateRejectsMismatchedBatchResponseWithoutWrites(t *testing.T)
 	err := BuildCandidate(context.Background(), candidate, []chunk.Chunk{
 		builderChunk("chunk-alpha", "input alpha", "alpha body"),
 		builderChunk("chunk-beta", "input beta", "beta body"),
-	}, embedder)
+	}, embedder, index.NewTokenizer())
 	if err == nil || !strings.Contains(err.Error(), "response count") {
 		t.Fatalf("BuildCandidate() error = %v, want response count error", err)
 	}
@@ -140,7 +141,7 @@ func TestBuildCandidateRejectsInvalidBatchVectorsWithoutWrites(t *testing.T) {
 			err := BuildCandidate(context.Background(), candidate, []chunk.Chunk{
 				builderChunk("chunk-alpha", "input alpha", "alpha body"),
 				builderChunk("chunk-beta", "input beta", "beta body"),
-			}, embedder)
+			}, embedder, index.NewTokenizer())
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("BuildCandidate() error = %v, want %s error", err, tc.want)
 			}
@@ -164,7 +165,7 @@ func TestBuildCandidateBatchErrorDoesNotWrite(t *testing.T) {
 		failBatchCall: 2,
 	}
 
-	err := BuildCandidate(context.Background(), candidate, chunks, embedder)
+	err := BuildCandidate(context.Background(), candidate, chunks, embedder, index.NewTokenizer())
 	if err == nil || !strings.Contains(err.Error(), "daemon failed") {
 		t.Fatalf("BuildCandidate() error = %v, want daemon failure", err)
 	}
@@ -198,8 +199,7 @@ func TestBuildCandidateRejectsInvalidEmbeddingsWithoutWrites(t *testing.T) {
 				context.Background(),
 				candidate,
 				[]chunk.Chunk{builderChunk("chunk-alpha", "input alpha", "alpha body")},
-				embedder,
-			)
+				embedder, index.NewTokenizer())
 			if err == nil {
 				t.Fatal("BuildCandidate() error = nil")
 			}
@@ -221,7 +221,7 @@ func TestBuildCandidateRollsBackWholeBatch(t *testing.T) {
 	err := BuildCandidate(context.Background(), candidate, []chunk.Chunk{
 		builderChunk("chunk-alpha", "input alpha", "alpha body"),
 		builderChunk("chunk-beta", "input beta", "beta body"),
-	}, embedder)
+	}, embedder, index.NewTokenizer())
 	if err == nil || !strings.Contains(err.Error(), "dimension") {
 		t.Fatalf("BuildCandidate() error = %v, want dimension error", err)
 	}
@@ -238,7 +238,7 @@ func TestBuildCandidateRejectsDuplicateChunkIDs(t *testing.T) {
 	err := BuildCandidate(context.Background(), candidate, []chunk.Chunk{
 		builderChunk("chunk-alpha", "input alpha", "alpha body"),
 		builderChunk("chunk-alpha", "input alpha", "alpha body"),
-	}, embedder)
+	}, embedder, index.NewTokenizer())
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("BuildCandidate() error = %v, want duplicate chunk ID error", err)
 	}
@@ -258,15 +258,14 @@ func TestBuildCandidateDoesNotPartiallyWriteExistingDuplicate(t *testing.T) {
 		context.Background(),
 		candidate,
 		[]chunk.Chunk{builderChunk("chunk-alpha", "input alpha", "alpha body")},
-		embedder,
-	); err != nil {
+		embedder, index.NewTokenizer()); err != nil {
 		t.Fatalf("initial BuildCandidate() error = %v", err)
 	}
 
 	err := BuildCandidate(context.Background(), candidate, []chunk.Chunk{
 		builderChunk("chunk-beta", "input beta", "beta body"),
 		builderChunk("chunk-alpha", "input alpha", "alpha body"),
-	}, embedder)
+	}, embedder, index.NewTokenizer())
 	if err == nil || !strings.Contains(err.Error(), "write chunk") {
 		t.Fatalf("BuildCandidate() error = %v, want duplicate write error", err)
 	}
@@ -295,15 +294,22 @@ func builderChunk(id, input, body string) chunk.Chunk {
 		Scope:             "project",
 		DocumentID:        "document-1",
 		Path:              "docs/example.md",
+		Type:              "rule",
+		Topic:             "testing",
 		Order:             0,
+		Kind:              chunk.KindText,
+		StructuralGroupID: "group-" + id,
 		HeadingBreadcrumb: []string{"Example"},
 		SourceStart:       0,
-		SourceEnd:         len(body),
+		SourceEnd:         max(1, len(body)),
 		Body:              body,
+		MetadataTerms:     "path: docs/example.md",
+		ContextTerms:      "Example",
 		EmbeddingInput:    input,
 		TokenCount:        2,
 		EmbeddingHash:     "hash-" + id,
 		ChunkerVersion:    chunk.Version,
+		SourceSizeByte:    max(1, len(body)),
 	}
 }
 

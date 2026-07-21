@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/nickdu2009/worktrail/internal/semantic/contracts"
@@ -124,7 +125,26 @@ func classifyOpenError(err error) error {
 			Message: "active semantic generation is missing",
 			Err:     err,
 		}
+	case errors.Is(err, ErrSourcesChanged):
+		return &Error{
+			Code:    contracts.ReasonProfileStale,
+			Message: "active semantic generation snapshot is stale",
+			Err:     err,
+		}
 	default:
+		if err != nil {
+			message := err.Error()
+			if strings.Contains(message, "schema mismatch") ||
+				strings.Contains(message, "unsupported generation schema") ||
+				strings.Contains(message, "profile mismatch") ||
+				strings.Contains(message, "snapshot mismatch") {
+				return &Error{
+					Code:    contracts.ReasonProfileStale,
+					Message: "active semantic generation profile is stale",
+					Err:     err,
+				}
+			}
+		}
 		return err
 	}
 }

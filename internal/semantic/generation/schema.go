@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const databaseSchema = "worktrail.semantic.generation.sqlite.v1"
+const databaseSchema = "worktrail.semantic.generation.sqlite.v2"
 
 // Metadata identifies the immutable inputs and format of one candidate
 // database. BuildState is set by CreateCandidate and SealCandidate; callers
@@ -104,22 +104,58 @@ func candidateSchema(dimension int) []string {
 			scope TEXT NOT NULL,
 			document_id TEXT NOT NULL,
 			path TEXT NOT NULL,
+			document_type TEXT NOT NULL,
+			document_topic TEXT NOT NULL,
 			chunk_order INTEGER NOT NULL,
+			chunk_kind TEXT NOT NULL CHECK (chunk_kind IN ('text', 'table_row_group', 'table_cell_fragment')),
+			structural_group_id TEXT NOT NULL,
+			fragment_ordinal INTEGER NOT NULL,
 			heading_breadcrumb TEXT NOT NULL,
+			source_byte_length INTEGER NOT NULL CHECK (source_byte_length >= 0),
 			source_start INTEGER NOT NULL,
 			source_end INTEGER NOT NULL,
+			context_start INTEGER,
+			context_end INTEGER,
+			group_start INTEGER,
+			group_end INTEGER,
 			body TEXT NOT NULL,
 			embedding_input TEXT NOT NULL,
 			token_count INTEGER NOT NULL,
 			embedding_hash TEXT NOT NULL,
 			prev_chunk_id TEXT NOT NULL,
 			next_chunk_id TEXT NOT NULL,
-			chunker_version TEXT NOT NULL
+			chunker_version TEXT NOT NULL,
+			CHECK (source_start >= 0 AND source_start < source_end AND source_end <= source_byte_length),
+			CHECK (
+				(context_start IS NULL AND context_end IS NULL) OR
+				(
+					context_start IS NOT NULL AND context_end IS NOT NULL AND
+					context_start >= 0 AND context_start < context_end AND
+					context_end <= source_byte_length
+				)
+			),
+			CHECK (
+				(group_start IS NULL AND group_end IS NULL) OR
+				(
+					group_start IS NOT NULL AND group_end IS NOT NULL AND
+					group_start >= 0 AND group_start < group_end AND
+					group_end <= source_byte_length
+				)
+			),
+			CHECK (
+				group_start IS NULL OR
+				(source_start >= group_start AND source_end <= group_end)
+			),
+			CHECK (
+				context_start IS NULL OR group_start IS NULL OR
+				(context_start >= group_start AND context_end <= group_end)
+			)
 		)`,
 		`CREATE VIRTUAL TABLE chunk_fts USING fts5(
 			chunk_id UNINDEXED,
-			embedding_input,
-			body,
+			metadata_terms,
+			context_terms,
+			body_terms,
 			tokenize = 'unicode61'
 		)`,
 		`CREATE TABLE chunk_tags (

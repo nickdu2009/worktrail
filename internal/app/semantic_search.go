@@ -123,7 +123,19 @@ func semanticSearchRebuildStep(scope string) string {
 	if scope == "" {
 		scope = "all"
 	}
-	return "worktrail semantic rebuild --scope " + scope
+	return semanticRepairNextStep(contracts.ReasonProfileStale, scope)
+}
+
+func semanticRepairNextStep(reason contracts.ReasonCode, scope string) string {
+	switch reason {
+	case contracts.ReasonBundleMissing:
+		return "worktrail init --semantic"
+	default:
+		if scope == "" {
+			scope = "project"
+		}
+		return "worktrail semantic rebuild --scope " + scope
+	}
 }
 
 func semanticSearchDegraded(response SemanticSearchResponse) bool {
@@ -154,7 +166,11 @@ func normalizeSemanticSearchDiagnostics(response SemanticSearchResponse, scope s
 		}
 	}
 	if len(response.NextSteps) == 0 {
-		response.NextSteps = []string{semanticSearchRebuildStep(scope)}
+		reason := contracts.ReasonProfileStale
+		if len(response.DegradedReasons) > 0 {
+			reason = response.DegradedReasons[0]
+		}
+		response.NextSteps = []string{semanticRepairNextStep(reason, scope)}
 	}
 	return response
 }

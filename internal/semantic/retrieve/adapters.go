@@ -200,12 +200,18 @@ func matchesIndexFilters(entry index.Entry, query index.Query) bool {
 // GenerationChunkFTS adapts one caller-owned active generation to ChunkFTS.
 // It never closes Active: the caller that opened the generation owns its lease.
 type GenerationChunkFTS struct {
-	Active *generation.Active
+	Active    *generation.Active
+	Tokenizer index.Tokenizer
 }
 
 // SearchChunks queries the sealed generation's exact FTS lane.
 func (a GenerationChunkFTS) SearchChunks(_ context.Context, query string, limit int) ([]LaneHit, error) {
-	hits, err := a.Active.ChunkFTS(query, limit)
+	tokenizer := a.Tokenizer
+	if tokenizer == nil {
+		tokenizer = index.NewTokenizer()
+	}
+	terms := tokenizer.TokenizeQuery(query).Terms
+	hits, err := a.Active.ChunkFTSTerms(terms, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search active generation chunk FTS: %w", err)
 	}

@@ -84,6 +84,15 @@ func TestRunSearchRejectsAmbiguousInvalidAndRepeatedSemanticOptions(t *testing.T
 	}
 }
 
+func TestSemanticRepairNextStepRoutesBundleAndProfile(t *testing.T) {
+	if got := semanticRepairNextStep(contracts.ReasonBundleMissing, "project"); got != "worktrail init --semantic" {
+		t.Fatalf("bundle missing next step = %q", got)
+	}
+	if got := semanticRepairNextStep(contracts.ReasonProfileStale, "user"); got != "worktrail semantic rebuild --scope user" {
+		t.Fatalf("profile stale next step = %q", got)
+	}
+}
+
 func TestRunSearchAutoFallbackPreservesLexicalJSONAndReportsNextStep(t *testing.T) {
 	env := semanticSearchTestEnv(t)
 	var lexicalOut, fallbackOut, fallbackErr bytes.Buffer

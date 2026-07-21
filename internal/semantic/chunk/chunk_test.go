@@ -156,11 +156,35 @@ func TestChunkDocumentIsDeterministicAndLinksNeighbors(t *testing.T) {
 	if !reflect.DeepEqual(first, second) {
 		t.Errorf("ChunkDocument() is not deterministic:\nfirst:  %#v\nsecond: %#v", first, second)
 	}
-	if first[0].NextChunkID != first[1].ChunkID || first[1].PrevChunkID != first[0].ChunkID {
-		t.Errorf("neighbor links = (%q, %q), want %q", first[0].NextChunkID, first[1].PrevChunkID, first[0].ChunkID)
+	if first[0].StructuralGroupID == first[1].StructuralGroupID {
+		t.Fatal("distinct text sections must not share a structural group")
+	}
+	if first[0].NextChunkID != "" || first[1].PrevChunkID != "" {
+		t.Errorf("cross-group neighbor links = (%q, %q), want empty", first[0].NextChunkID, first[1].PrevChunkID)
 	}
 	if first[0].EmbeddingHash == "" || first[0].ChunkID == "" {
 		t.Error("deterministic identities must not be empty")
+	}
+}
+
+func TestChunkDocumentLinksNeighborsInsideForcedSplitGroup(t *testing.T) {
+	doc := Document{
+		Body: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen\n",
+	}
+	budget := Budget{Target: 10, HardMax: 15, Overlap: 2}
+
+	chunks, err := chunkDocument(context.Background(), doc, wordCounter{}, budget)
+	if err != nil {
+		t.Fatalf("chunkDocument() error = %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("len(chunks) = %d, want at least 2", len(chunks))
+	}
+	if chunks[0].StructuralGroupID == "" || chunks[0].StructuralGroupID != chunks[1].StructuralGroupID {
+		t.Fatalf("forced-split chunks must share a structural group: %q vs %q", chunks[0].StructuralGroupID, chunks[1].StructuralGroupID)
+	}
+	if chunks[0].NextChunkID != chunks[1].ChunkID || chunks[1].PrevChunkID != chunks[0].ChunkID {
+		t.Errorf("same-group neighbor links = (%q, %q), want linked", chunks[0].NextChunkID, chunks[1].PrevChunkID)
 	}
 }
 
@@ -204,8 +228,12 @@ func TestDefaultBudgetReturnsIndependentValues(t *testing.T) {
 	first.Target = 1
 	second := DefaultBudget()
 
-	if second.Target != 512 || second.HardMax != 768 || second.Overlap != 64 {
-		t.Errorf("DefaultBudget() = %+v, want 512/768/64", second)
+	if second.Target != 512 || second.HardMax != 768 || second.Overlap != 64 || second.MinPayload != 80 {
+		t.Errorf("DefaultBudget() = %+v, want 512/768/64/80", second)
+	}
+	policy := DefaultPolicy()
+	if policy.Version != Version || policy.ConfigHash != ConfigHash(second) {
+		t.Errorf("DefaultPolicy() = %+v, want version %q and matching config hash", policy, Version)
 	}
 }
 
@@ -228,13 +256,34 @@ func TestChunkDocumentPropagatesCounterErrors(t *testing.T) {
 	}
 }
 
-func TestChunkDocumentRejectsOversizedTablesWithoutRowSplitting(t *testing.T) {
+func TestChunkDocumentSplitsOversizedTablesIntoRowGroups(t *testing.T) {
 	doc := Document{
-		Body: "| A | B |\n|---|---|\n| one two three four five | six seven eight nine ten |\n",
+		Path: "docs/table.md",
+		Body: "| A | B |\n|---|---|\n| one two three four five | six seven eight nine ten |\n| eleven twelve thirteen | fourteen fifteen sixteen |\n",
 	}
-	_, err := chunkDocument(context.Background(), doc, wordCounter{}, Budget{Target: 10, HardMax: 11, Overlap: 2})
-	if err == nil || !strings.Contains(err.Error(), "table row splitting is not supported") {
-		t.Fatalf("chunkDocument() error = %v, want explicit table split error", err)
+	chunks, err := chunkDocument(context.Background(), doc, wordCounter{}, Budget{Target: 24, HardMax: 30, Overlap: 2, MinPayload: 3})
+	if err != nil {
+		t.Fatalf("chunkDocument() error = %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("len(chunks) = %d, want split row groups", len(chunks))
+	}
+	for _, got := range chunks {
+		if got.Kind != KindTableRowGroup {
+			t.Errorf("chunk kind = %q, want %q", got.Kind, KindTableRowGroup)
+		}
+		if got.TokenCount > 30 {
+			t.Errorf("token count %d exceeds hard max", got.TokenCount)
+		}
+		if got.StructuralGroupID == "" {
+			t.Error("table chunks require structural group IDs")
+		}
+	}
+	if chunks[0].StructuralGroupID != chunks[1].StructuralGroupID {
+		t.Error("row groups from one table must share a structural group")
+	}
+	if chunks[0].NextChunkID != chunks[1].ChunkID {
+		t.Errorf("same-table neighbors = %q, want %q", chunks[0].NextChunkID, chunks[1].ChunkID)
 	}
 }
 

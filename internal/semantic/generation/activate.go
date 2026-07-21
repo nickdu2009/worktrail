@@ -46,10 +46,19 @@ func PinActive(ctx context.Context, semanticDir string) (*Pin, error) {
 	return &Pin{Pointer: second, lease: lease}, nil
 }
 
+// ActivateOptions configures the lock-in final source check for Activate.
+type ActivateOptions struct {
+	// FinalSnapshot returns the live source snapshot hash that must match the
+	// sealed candidate and ActivationCandidate. When nil, Activate skips the
+	// lock-in source check.
+	FinalSnapshot func(context.Context) (string, error)
+}
+
 // Activate validates a candidate before taking the coordination lock, then
-// atomically publishes it and marks the immediately previous generation for
+// optionally rechecks the live source snapshot under the lock before
+// atomically publishing the pointer and marking the previous generation for
 // retirement. It never selects or restores an older generation itself.
-func Activate(ctx context.Context, semanticDir string, validate CandidateValidator) (Pointer, error) {
+func Activate(ctx context.Context, semanticDir string, validate CandidateValidator, opts ActivateOptions) (Pointer, error) {
 	if validate == nil {
 		return Pointer{}, errors.New("semantic generation candidate validator is required")
 	}
@@ -67,6 +76,22 @@ func Activate(ctx context.Context, semanticDir string, validate CandidateValidat
 		return Pointer{}, fmt.Errorf("lock semantic generation scope: %w", err)
 	}
 	defer coordination.Release()
+
+	if opts.FinalSnapshot != nil {
+		live, err := opts.FinalSnapshot(ctx)
+		if err != nil {
+			return Pointer{}, fmt.Errorf("final source check: %w", err)
+		}
+		if live != candidate.SnapshotHash || live != next.SnapshotHash {
+			return Pointer{}, fmt.Errorf(
+				"%w: sealed %q, pointer %q, live %q",
+				ErrSourcesChanged,
+				candidate.SnapshotHash,
+				next.SnapshotHash,
+				live,
+			)
+		}
+	}
 
 	current, err := ReadActive(semanticDir)
 	switch {

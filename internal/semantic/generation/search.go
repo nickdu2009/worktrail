@@ -62,18 +62,31 @@ type ChunkHit struct {
 }
 
 // ChunkFTS performs an exact FTS5 term query against the already-open active
-// generation. It never falls back to substring matching or a writable index.
+// generation. Prefer ChunkFTSTerms when the caller already holds a tokenizer.
 func (a *Active) ChunkFTS(query string, limit int) ([]ChunkHit, error) {
-	match, err := chunkFTSMatch(query)
+	match, err := chunkFTSMatch(strings.Fields(query))
 	if err != nil {
 		return nil, newQueryError(QueryErrorInvalidInput, "chunk FTS", err)
 	}
+	return a.chunkFTSMatchLimit(match, limit)
+}
+
+// ChunkFTSTerms performs an exact FTS5 term query using pre-tokenized terms.
+func (a *Active) ChunkFTSTerms(terms []string, limit int) ([]ChunkHit, error) {
+	match, err := chunkFTSMatch(terms)
+	if err != nil {
+		return nil, newQueryError(QueryErrorInvalidInput, "chunk FTS", err)
+	}
+	return a.chunkFTSMatchLimit(match, limit)
+}
+
+func (a *Active) chunkFTSMatchLimit(match string, limit int) ([]ChunkHit, error) {
 	if err := validateSearchLimit(limit); err != nil {
 		return nil, newQueryError(QueryErrorInvalidInput, "chunk FTS", err)
 	}
 
 	var hits []ChunkHit
-	err = a.withReadOnlyDB(func(db *sql.DB) error {
+	err := a.withReadOnlyDB(func(db *sql.DB) error {
 		rows, err := db.Query(`
 			SELECT
 				chunks.chunk_id,
@@ -82,11 +95,11 @@ func (a *Active) ChunkFTS(query string, limit int) ([]ChunkHit, error) {
 				chunks.chunk_order,
 				chunks.prev_chunk_id,
 				chunks.next_chunk_id,
-				bm25(chunk_fts)
+				bm25(chunk_fts, 0.0, 5.0, 1.0, 3.0)
 			FROM chunk_fts
 			JOIN chunks ON chunks.rowid = chunk_fts.rowid
 			WHERE chunk_fts MATCH ?
-			ORDER BY bm25(chunk_fts) ASC, chunks.chunk_id ASC
+			ORDER BY bm25(chunk_fts, 0.0, 5.0, 1.0, 3.0) ASC, chunks.chunk_id ASC
 			LIMIT ?`,
 			match,
 			limit,
@@ -210,14 +223,10 @@ func validateSearchLimit(limit int) error {
 	return nil
 }
 
-func chunkFTSMatch(query string) (string, error) {
-	terms := strings.Fields(query)
-	if len(terms) == 0 {
-		return "", errors.New("search query is required")
-	}
-
+func chunkFTSMatch(terms []string) (string, error) {
 	parts := make([]string, 0, len(terms))
 	for _, term := range terms {
+		term = strings.TrimSpace(term)
 		term = strings.ReplaceAll(term, `"`, "")
 		if term != "" {
 			parts = append(parts, `"`+term+`"`)

@@ -174,7 +174,7 @@ func (m Manifest) Validate() error {
 	if m.Schema != TrustedManifestSchema {
 		return fmt.Errorf("unsupported semantic manifest schema %q", m.Schema)
 	}
-	if m.SemanticAPIVersion != 1 || m.GenerationSchemaVersion != 1 {
+	if m.SemanticAPIVersion != 1 || m.GenerationSchemaVersion != 2 {
 		return errors.New("unsupported semantic manifest API or generation schema")
 	}
 	if err := validateModel(m.Model); err != nil {

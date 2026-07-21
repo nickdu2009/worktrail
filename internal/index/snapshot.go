@@ -42,10 +42,13 @@ type SourceSnapshot struct {
 }
 
 // SourceRecord retains the selected index entry with its original Markdown
-// body, excluding frontmatter but preserving body whitespace.
+// body, excluding frontmatter but preserving body whitespace. BodyStartByte
+// and SourceSizeByte locate that body inside the original source file.
 type SourceRecord struct {
-	Entry Entry  `json:"entry"`
-	Body  string `json:"body"`
+	Entry          Entry  `json:"entry"`
+	Body           string `json:"body"`
+	BodyStartByte  int    `json:"body_start_byte"`
+	SourceSizeByte int    `json:"source_size_byte"`
 }
 
 // EntryFingerprint contains the source fields that define an entry's snapshot
@@ -81,19 +84,21 @@ type semanticSnapshotCanonical struct {
 }
 
 type semanticRecordCanonical struct {
-	Path          string   `json:"path"`
-	ID            string   `json:"id"`
-	Type          string   `json:"type"`
-	Status        string   `json:"status"`
-	Lifecycle     string   `json:"lifecycle"`
-	Topic         string   `json:"topic"`
-	SourceOfTruth bool     `json:"source_of_truth"`
-	Supersedes    []string `json:"supersedes"`
-	SupersededBy  []string `json:"superseded_by"`
-	Tags          []string `json:"tags"`
-	Active        bool     `json:"active"`
-	Scope         string   `json:"scope"`
-	BodyHash      string   `json:"body_hash"`
+	Path           string   `json:"path"`
+	ID             string   `json:"id"`
+	Type           string   `json:"type"`
+	Status         string   `json:"status"`
+	Lifecycle      string   `json:"lifecycle"`
+	Topic          string   `json:"topic"`
+	SourceOfTruth  bool     `json:"source_of_truth"`
+	Supersedes     []string `json:"supersedes"`
+	SupersededBy   []string `json:"superseded_by"`
+	Tags           []string `json:"tags"`
+	Active         bool     `json:"active"`
+	Scope          string   `json:"scope"`
+	BodyHash       string   `json:"body_hash"`
+	BodyStartByte  int      `json:"body_start_byte"`
+	SourceSizeByte int      `json:"source_size_byte"`
 }
 
 // FreshSnapshot scans the current source and returns its selected deterministic
@@ -170,14 +175,17 @@ func sourceRecords(root string, entries []Entry) ([]SourceRecord, error) {
 		// Match lexical scan/buildEntry: frontmatter is preferred, but init seed
 		// and overview docs may omit it. Semantic rebuild still indexes the raw
 		// Markdown body so a fresh worktrail root remains rebuildable.
-		body := string(data)
+		record := SourceRecord{
+			Entry:          entry,
+			Body:           string(data),
+			BodyStartByte:  0,
+			SourceSizeByte: len(data),
+		}
 		if doc, err := store.ParseMarkdown(data); err == nil {
-			body = doc.Body
+			record.Body = doc.Body
+			record.BodyStartByte = doc.BodyStartByte
 		}
-		records[i] = SourceRecord{
-			Entry: entry,
-			Body:  body,
-		}
+		records[i] = record
 	}
 	return records, nil
 }
@@ -212,19 +220,21 @@ func newSemanticSnapshotHash(scope, policyVersion string, records []SourceRecord
 func semanticRecord(record SourceRecord) semanticRecordCanonical {
 	entry := record.Entry
 	return semanticRecordCanonical{
-		Path:          normalizeSnapshotPath(entry.Path),
-		ID:            entry.ID,
-		Type:          entry.Type,
-		Status:        entry.Status,
-		Lifecycle:     entry.Lifecycle,
-		Topic:         entry.Topic,
-		SourceOfTruth: entry.SourceOfTruth,
-		Supersedes:    normalizedSnapshotStrings(entry.Supersedes),
-		SupersededBy:  normalizedSnapshotStrings(entry.SupersededBy),
-		Tags:          normalizedSnapshotStrings(entry.Tags),
-		Active:        entry.Active,
-		Scope:         entry.Scope,
-		BodyHash:      contentHash(record.Body),
+		Path:           normalizeSnapshotPath(entry.Path),
+		ID:             entry.ID,
+		Type:           entry.Type,
+		Status:         entry.Status,
+		Lifecycle:      entry.Lifecycle,
+		Topic:          entry.Topic,
+		SourceOfTruth:  entry.SourceOfTruth,
+		Supersedes:     normalizedSnapshotStrings(entry.Supersedes),
+		SupersededBy:   normalizedSnapshotStrings(entry.SupersededBy),
+		Tags:           normalizedSnapshotStrings(entry.Tags),
+		Active:         entry.Active,
+		Scope:          entry.Scope,
+		BodyHash:       contentHash(record.Body),
+		BodyStartByte:  record.BodyStartByte,
+		SourceSizeByte: record.SourceSizeByte,
 	}
 }
 

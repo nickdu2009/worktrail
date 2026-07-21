@@ -20,35 +20,59 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-// Version identifies the structural chunking policy.
-const Version = "chunker-v1"
+// Version identifies the structural chunking policy exposed on Chunk records
+// and hashed into chunk/group IDs.
+const Version = "chunker-v2"
+
+// SmallChunkThreshold is the architecture small-chunk floor used by MinPayload.
+const SmallChunkThreshold = 80
+
+// Chunk kinds emitted by the chunker.
+const (
+	KindText              = "text"
+	KindTableRowGroup     = "table_row_group"
+	KindTableCellFragment = "table_cell_fragment"
+)
+
+// Structural group kinds used in group identity material.
+const (
+	GroupKindText  = "text"
+	GroupKindTable = "table"
+)
 
 // Document is the stable source and metadata supplied to the chunker.
 type Document struct {
-	Scope string
-	ID    string
-	Path  string
-	Title string
-	Type  string
-	Topic string
-	Tags  []string
-	Body  string
+	Scope          string
+	ID             string
+	Path           string
+	Title          string
+	Type           string
+	Topic          string
+	Tags           []string
+	Body           string
+	SourceBaseByte int
+	SourceSizeByte int
 }
 
 // Budget limits embedding inputs, including their metadata prefix.
 type Budget struct {
-	Target  int
-	HardMax int
-	Overlap int
+	Target     int
+	HardMax    int
+	Overlap    int
+	MinPayload int
 }
 
-// DefaultBudget returns an independent initial structural-chunking budget.
-func DefaultBudget() Budget {
-	return Budget{
-		Target:  512,
-		HardMax: 768,
-		Overlap: 64,
-	}
+// ChunkingPolicy is the versioned structural chunking configuration.
+type ChunkingPolicy struct {
+	Version    string
+	Budget     Budget
+	ConfigHash string
+}
+
+// ByteRange is a zero-based, half-open UTF-8 byte range in the original file.
+type ByteRange struct {
+	Start int
+	End   int
 }
 
 // Chunk is a deterministic, source-citable embedding unit.
@@ -57,17 +81,28 @@ type Chunk struct {
 	Scope             string
 	DocumentID        string
 	Path              string
+	Type              string
+	Topic             string
+	Tags              []string
 	Order             int
+	Kind              string
+	StructuralGroupID string
+	FragmentOrdinal   int
 	HeadingBreadcrumb []string
 	SourceStart       int
 	SourceEnd         int
+	ContextRange      *ByteRange
+	GroupRange        *ByteRange
 	Body              string
+	MetadataTerms     string
+	ContextTerms      string
 	EmbeddingInput    string
 	TokenCount        int
 	EmbeddingHash     string
 	PrevChunkID       string
 	NextChunkID       string
 	ChunkerVersion    string
+	SourceSizeByte    int
 }
 
 type atom struct {
@@ -85,10 +120,58 @@ type chunker struct {
 	chunks  []Chunk
 }
 
-// ChunkDocument creates deterministic structural chunks using only the
-// injected token counter.
+// DefaultBudget returns an independent initial structural-chunking budget.
+func DefaultBudget() Budget {
+	return Budget{
+		Target:     512,
+		HardMax:    768,
+		Overlap:    64,
+		MinPayload: 80,
+	}
+}
+
+// ConfigHash returns the canonical hash of a chunking budget.
+func ConfigHash(budget Budget) string {
+	return sha256Hex(fmt.Sprintf(
+		"chunking_policy_v1\ntarget=%d\nhard_max=%d\noverlap=%d\nmin_payload=%d\n",
+		budget.Target,
+		budget.HardMax,
+		budget.Overlap,
+		budget.MinPayload,
+	))
+}
+
+// DefaultPolicy returns the production chunking policy.
+func DefaultPolicy() ChunkingPolicy {
+	budget := DefaultBudget()
+	return ChunkingPolicy{
+		Version:    Version,
+		Budget:     budget,
+		ConfigHash: ConfigHash(budget),
+	}
+}
+
+// PolicyWithBudget builds a policy for the current Version and budget.
+func PolicyWithBudget(budget Budget) ChunkingPolicy {
+	return ChunkingPolicy{
+		Version:    Version,
+		Budget:     budget,
+		ConfigHash: ConfigHash(budget),
+	}
+}
+
+// ChunkDocument creates deterministic structural chunks using DefaultPolicy.
 func ChunkDocument(ctx context.Context, doc Document, counter contracts.TokenCounter) ([]Chunk, error) {
-	return chunkDocument(ctx, doc, counter, DefaultBudget())
+	return ChunkDocumentWithPolicy(ctx, doc, counter, DefaultPolicy())
+}
+
+// ChunkDocumentWithPolicy creates deterministic structural chunks with an
+// explicit policy. Production callers should use ChunkDocument / DefaultPolicy.
+func ChunkDocumentWithPolicy(ctx context.Context, doc Document, counter contracts.TokenCounter, policy ChunkingPolicy) ([]Chunk, error) {
+	if err := policy.valid(); err != nil {
+		return nil, err
+	}
+	return chunkDocument(ctx, doc, counter, policy.Budget)
 }
 
 func chunkDocument(ctx context.Context, doc Document, counter contracts.TokenCounter, budget Budget) ([]Chunk, error) {
@@ -98,6 +181,7 @@ func chunkDocument(ctx context.Context, doc Document, counter contracts.TokenCou
 	if err := budget.valid(); err != nil {
 		return nil, err
 	}
+	budget = budget.normalized()
 
 	c := chunker{
 		doc:     doc,
@@ -123,15 +207,22 @@ func chunkDocument(ctx context.Context, doc Document, counter contracts.TokenCou
 	}
 
 	for _, next := range atoms {
+		if next.table {
+			if err := flush(); err != nil {
+				return nil, err
+			}
+			if err := c.appendTable(ctx, next); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
 		if pending == nil {
-			candidate, err := c.tokenCount(ctx, next.start, next.end, next.breadcrumb)
+			candidate, err := c.tokenCount(ctx, next.start, next.end, next.breadcrumb, "", string(c.source[next.start:next.end]))
 			if err != nil {
 				return nil, err
 			}
 			if candidate > budget.HardMax {
-				if next.table {
-					return nil, tableTooLargeError(next, budget)
-				}
 				if err := c.appendForced(ctx, next); err != nil {
 					return nil, err
 				}
@@ -146,14 +237,11 @@ func chunkDocument(ctx context.Context, doc Document, counter contracts.TokenCou
 			if err := flush(); err != nil {
 				return nil, err
 			}
-			candidate, err := c.tokenCount(ctx, next.start, next.end, next.breadcrumb)
+			candidate, err := c.tokenCount(ctx, next.start, next.end, next.breadcrumb, "", string(c.source[next.start:next.end]))
 			if err != nil {
 				return nil, err
 			}
 			if candidate > budget.HardMax {
-				if next.table {
-					return nil, tableTooLargeError(next, budget)
-				}
 				if err := c.appendForced(ctx, next); err != nil {
 					return nil, err
 				}
@@ -164,7 +252,7 @@ func chunkDocument(ctx context.Context, doc Document, counter contracts.TokenCou
 			continue
 		}
 
-		candidate, err := c.tokenCount(ctx, pending.start, next.end, pending.breadcrumb)
+		candidate, err := c.tokenCount(ctx, pending.start, next.end, pending.breadcrumb, "", string(c.source[pending.start:next.end]))
 		if err != nil {
 			return nil, err
 		}
@@ -176,14 +264,11 @@ func chunkDocument(ctx context.Context, doc Document, counter contracts.TokenCou
 			return nil, err
 		}
 
-		tokens, err := c.tokenCount(ctx, next.start, next.end, next.breadcrumb)
+		tokens, err := c.tokenCount(ctx, next.start, next.end, next.breadcrumb, "", string(c.source[next.start:next.end]))
 		if err != nil {
 			return nil, err
 		}
 		if tokens > budget.HardMax {
-			if next.table {
-				return nil, tableTooLargeError(next, budget)
-			}
 			if err := c.appendForced(ctx, next); err != nil {
 				return nil, err
 			}
@@ -200,15 +285,37 @@ func chunkDocument(ctx context.Context, doc Document, counter contracts.TokenCou
 		c.chunks[i].Order = i
 		c.chunks[i].ChunkID = chunkID(doc, c.chunks[i])
 	}
-	for i := range c.chunks {
-		if i > 0 {
-			c.chunks[i].PrevChunkID = c.chunks[i-1].ChunkID
-		}
-		if i+1 < len(c.chunks) {
-			c.chunks[i].NextChunkID = c.chunks[i+1].ChunkID
-		}
-	}
+	linkSameGroupNeighbors(c.chunks)
 	return c.chunks, nil
+}
+
+// Validate reports whether the policy fields are internally consistent.
+func (p ChunkingPolicy) Validate() error {
+	return p.valid()
+}
+
+func (p ChunkingPolicy) valid() error {
+	if p.Version == "" {
+		return fmt.Errorf("chunk: policy version is required")
+	}
+	if err := p.Budget.valid(); err != nil {
+		return err
+	}
+	budget := p.Budget.normalized()
+	floor := max(SmallChunkThreshold, budget.Overlap+1)
+	if budget.MinPayload < floor {
+		return fmt.Errorf("chunk: min payload must be at least %d", floor)
+	}
+	if budget.MinPayload >= budget.HardMax {
+		return fmt.Errorf("chunk: min payload must be less than the hard maximum")
+	}
+	if p.ConfigHash == "" {
+		return fmt.Errorf("chunk: policy config hash is required")
+	}
+	if want := ConfigHash(budget); p.ConfigHash != want {
+		return fmt.Errorf("chunk: policy config hash mismatch")
+	}
+	return nil
 }
 
 func (b Budget) valid() error {
@@ -224,7 +331,25 @@ func (b Budget) valid() error {
 	if b.Overlap > b.HardMax {
 		return fmt.Errorf("chunk: overlap must not exceed the hard maximum")
 	}
+	if b.MinPayload < 0 {
+		return fmt.Errorf("chunk: min payload must not be negative")
+	}
 	return nil
+}
+
+func (b Budget) normalized() Budget {
+	if b.MinPayload == 0 {
+		floor := max(SmallChunkThreshold, b.Overlap+1)
+		if floor < b.HardMax {
+			b.MinPayload = floor
+		} else {
+			b.MinPayload = max(1, b.Overlap+1)
+			if b.MinPayload >= b.HardMax {
+				b.MinPayload = max(1, b.HardMax/2)
+			}
+		}
+	}
+	return b
 }
 
 func collectAtoms(source []byte) ([]atom, error) {
@@ -402,28 +527,40 @@ func isTable(node gast.Node) bool {
 }
 
 func (c *chunker) appendChunk(ctx context.Context, block atom) error {
-	tokens, err := c.tokenCount(ctx, block.start, block.end, block.breadcrumb)
+	body := string(c.source[block.start:block.end])
+	tokens, err := c.tokenCount(ctx, block.start, block.end, block.breadcrumb, "", body)
 	if err != nil {
 		return err
 	}
 	if tokens > c.budget.HardMax {
 		return fmt.Errorf("chunk: internal oversized chunk at bytes [%d,%d)", block.start, block.end)
 	}
-	c.chunks = append(c.chunks, c.newChunk(block.start, block.end, block.breadcrumb, tokens))
+	chunk, err := c.newTextChunk(block.start, block.end, block.start, block.end, block.breadcrumb, "", body, tokens, 0)
+	if err != nil {
+		return err
+	}
+	c.chunks = append(c.chunks, chunk)
 	return nil
 }
 
 func (c *chunker) appendForced(ctx context.Context, block atom) error {
 	start := block.start
+	ordinal := 0
 	for start < block.end {
-		end, tokens, err := c.forcedEnd(ctx, start, block.end, block.breadcrumb)
+		end, tokens, err := c.forcedEnd(ctx, start, block.end, block.breadcrumb, "")
 		if err != nil {
 			return err
 		}
 		if end <= start {
 			return fmt.Errorf("chunk: unable to split oversized block at byte %d", start)
 		}
-		c.chunks = append(c.chunks, c.newChunk(start, end, block.breadcrumb, tokens))
+		body := string(c.source[start:end])
+		chunk, err := c.newTextChunk(start, end, block.start, block.end, block.breadcrumb, "", body, tokens, ordinal)
+		if err != nil {
+			return err
+		}
+		c.chunks = append(c.chunks, chunk)
+		ordinal++
 		if end == block.end {
 			return nil
 		}
@@ -440,10 +577,10 @@ func (c *chunker) appendForced(ctx context.Context, block atom) error {
 	return nil
 }
 
-func (c *chunker) forcedEnd(ctx context.Context, start, limit int, breadcrumb []string) (int, int, error) {
+func (c *chunker) forcedEnd(ctx context.Context, start, limit int, breadcrumb []string, contextTerms string) (int, int, error) {
 	lastSafe, lastPreferred, lastTokens := -1, -1, 0
 	for end := nextRuneEnd(c.source, start); end <= limit; end = nextRuneEnd(c.source, end) {
-		tokens, err := c.tokenCount(ctx, start, end, breadcrumb)
+		tokens, err := c.tokenCount(ctx, start, end, breadcrumb, contextTerms, string(c.source[start:end]))
 		if err != nil {
 			return 0, 0, err
 		}
@@ -462,7 +599,7 @@ func (c *chunker) forcedEnd(ctx context.Context, start, limit int, breadcrumb []
 		return 0, 0, fmt.Errorf("chunk: metadata prefix alone exceeds hard maximum %d", c.budget.HardMax)
 	}
 	if lastPreferred > start {
-		tokens, err := c.tokenCount(ctx, start, lastPreferred, breadcrumb)
+		tokens, err := c.tokenCount(ctx, start, lastPreferred, breadcrumb, contextTerms, string(c.source[start:lastPreferred]))
 		if err != nil {
 			return 0, 0, err
 		}
@@ -492,8 +629,8 @@ func (c *chunker) overlapStart(ctx context.Context, start, end int) (int, error)
 	return best, nil
 }
 
-func (c *chunker) tokenCount(ctx context.Context, start, end int, breadcrumb []string) (int, error) {
-	input := embeddingInput(c.doc, breadcrumb, string(c.source[start:end]))
+func (c *chunker) tokenCount(ctx context.Context, start, end int, breadcrumb []string, contextTerms, body string) (int, error) {
+	input := embeddingInput(c.doc, breadcrumb, contextTerms, body)
 	tokens, err := c.counter.CountTokens(ctx, input)
 	if err != nil {
 		return 0, fmt.Errorf("chunk: count tokens: %w", err)
@@ -504,38 +641,152 @@ func (c *chunker) tokenCount(ctx context.Context, start, end int, breadcrumb []s
 	return tokens, nil
 }
 
-func (c *chunker) newChunk(start, end int, breadcrumb []string, tokens int) Chunk {
-	body := string(c.source[start:end])
-	input := embeddingInput(c.doc, breadcrumb, body)
-	return Chunk{
-		DocumentID:        c.doc.ID,
-		Scope:             c.doc.Scope,
-		Path:              c.doc.Path,
-		HeadingBreadcrumb: append([]string(nil), breadcrumb...),
-		SourceStart:       start,
-		SourceEnd:         end,
-		Body:              body,
-		EmbeddingInput:    input,
-		TokenCount:        tokens,
-		EmbeddingHash:     sha256Hex(input),
-		ChunkerVersion:    Version,
+func (c *chunker) countInput(ctx context.Context, breadcrumb []string, contextTerms, body string) (int, error) {
+	input := embeddingInput(c.doc, breadcrumb, contextTerms, body)
+	tokens, err := c.counter.CountTokens(ctx, input)
+	if err != nil {
+		return 0, fmt.Errorf("chunk: count tokens: %w", err)
 	}
+	if tokens < 0 {
+		return 0, fmt.Errorf("chunk: token counter returned negative count %d", tokens)
+	}
+	return tokens, nil
 }
 
-func embeddingInput(doc Document, breadcrumb []string, body string) string {
+func (c *chunker) newTextChunk(primaryStart, primaryEnd, groupStart, groupEnd int, breadcrumb []string, contextTerms, body string, tokens, ordinal int) (Chunk, error) {
+	return c.newChunk(Chunk{
+		Kind:              KindText,
+		StructuralGroupID: c.groupID(GroupKindText, groupStart, groupEnd),
+		FragmentOrdinal:   ordinal,
+		HeadingBreadcrumb: append([]string(nil), breadcrumb...),
+		SourceStart:       c.abs(primaryStart),
+		SourceEnd:         c.abs(primaryEnd),
+		GroupRange:        &ByteRange{Start: c.abs(groupStart), End: c.abs(groupEnd)},
+		Body:              body,
+		MetadataTerms:     metadataTerms(c.doc),
+		ContextTerms:      contextTermsOrSection(contextTerms, breadcrumb),
+		EmbeddingInput:    embeddingInput(c.doc, breadcrumb, contextTerms, body),
+		TokenCount:        tokens,
+	})
+}
+
+func (c *chunker) newChunk(base Chunk) (Chunk, error) {
+	if err := c.validateAbsRange(base.SourceStart, base.SourceEnd); err != nil {
+		return Chunk{}, err
+	}
+	if base.ContextRange != nil {
+		if err := c.validateAbsRange(base.ContextRange.Start, base.ContextRange.End); err != nil {
+			return Chunk{}, err
+		}
+	}
+	if base.GroupRange != nil {
+		if err := c.validateAbsRange(base.GroupRange.Start, base.GroupRange.End); err != nil {
+			return Chunk{}, err
+		}
+		if base.SourceStart < base.GroupRange.Start || base.SourceEnd > base.GroupRange.End {
+			return Chunk{}, fmt.Errorf(
+				"chunk: primary range [%d,%d) escapes structural group [%d,%d)",
+				base.SourceStart,
+				base.SourceEnd,
+				base.GroupRange.Start,
+				base.GroupRange.End,
+			)
+		}
+		if base.ContextRange != nil {
+			if base.ContextRange.Start < base.GroupRange.Start || base.ContextRange.End > base.GroupRange.End {
+				return Chunk{}, fmt.Errorf(
+					"chunk: context range [%d,%d) escapes structural group [%d,%d)",
+					base.ContextRange.Start,
+					base.ContextRange.End,
+					base.GroupRange.Start,
+					base.GroupRange.End,
+				)
+			}
+		}
+	}
+	base.DocumentID = c.doc.ID
+	base.Scope = c.doc.Scope
+	base.Path = c.doc.Path
+	base.Type = c.doc.Type
+	base.Topic = c.doc.Topic
+	base.Tags = append([]string(nil), c.doc.Tags...)
+	base.EmbeddingHash = sha256Hex(base.EmbeddingInput)
+	base.ChunkerVersion = Version
+	base.SourceSizeByte = c.sourceLimit()
+	return base, nil
+}
+
+func (c *chunker) abs(local int) int {
+	return c.doc.SourceBaseByte + local
+}
+
+func (c *chunker) sourceLimit() int {
+	if c.doc.SourceSizeByte > 0 {
+		return c.doc.SourceSizeByte
+	}
+	return c.doc.SourceBaseByte + len(c.source)
+}
+
+func (c *chunker) validateAbsRange(start, end int) error {
+	limit := c.sourceLimit()
+	if start < 0 || start >= end || end > limit {
+		return fmt.Errorf("chunk: invalid absolute range [%d,%d) for source size %d", start, end, limit)
+	}
+	return nil
+}
+
+func (c *chunker) groupID(groupKind string, localStart, localEnd int) string {
+	return structuralGroupID(c.doc, groupKind, c.abs(localStart), c.abs(localEnd))
+}
+
+func structuralGroupID(doc Document, groupKind string, absStart, absEnd int) string {
+	return sha256Hex(strings.Join([]string{
+		Version,
+		doc.Scope,
+		doc.ID,
+		doc.Path,
+		groupKind,
+		fmt.Sprintf("%d", absStart),
+		fmt.Sprintf("%d", absEnd),
+	}, "\x1e"))
+}
+
+func embeddingInput(doc Document, breadcrumb []string, contextTerms, body string) string {
+	var builder strings.Builder
+	builder.WriteString(metadataTerms(doc))
+	builder.WriteString("\nsection: ")
+	builder.WriteString(metadataValue(strings.Join(breadcrumb, " > ")))
+	builder.WriteString("\n\n")
+	if contextTerms != "" {
+		builder.WriteString(contextTerms)
+		if !strings.HasSuffix(contextTerms, "\n") {
+			builder.WriteString("\n")
+		}
+		builder.WriteString("\n")
+	}
+	builder.WriteString(body)
+	return builder.String()
+}
+
+func metadataTerms(doc Document) string {
 	tags := append([]string(nil), doc.Tags...)
 	sort.Strings(tags)
 	return fmt.Sprintf(
-		"path: %s\nscope: %s\ntitle: %s\ntype: %s\ntopic: %s\ntags: %s\nsection: %s\n\n%s",
+		"path: %s\nscope: %s\ntitle: %s\ntype: %s\ntopic: %s\ntags: %s",
 		metadataValue(doc.Path),
 		metadataValue(doc.Scope),
 		metadataValue(doc.Title),
 		metadataValue(doc.Type),
 		metadataValue(doc.Topic),
 		metadataValue(strings.Join(tags, ", ")),
-		metadataValue(strings.Join(breadcrumb, " > ")),
-		body,
 	)
+}
+
+func contextTermsOrSection(contextTerms string, breadcrumb []string) string {
+	if contextTerms != "" {
+		return contextTerms
+	}
+	return metadataValue(strings.Join(breadcrumb, " > "))
 }
 
 func metadataValue(value string) string {
@@ -548,21 +799,28 @@ func chunkID(doc Document, chunk Chunk) string {
 		doc.Scope,
 		doc.ID,
 		doc.Path,
+		chunk.Kind,
 		strings.Join(chunk.HeadingBreadcrumb, "\x1f"),
 		fmt.Sprintf("%d", chunk.Order),
 		fmt.Sprintf("%d", chunk.SourceStart),
 		fmt.Sprintf("%d", chunk.SourceEnd),
-		chunk.Body,
+		fmt.Sprintf("%d", chunk.FragmentOrdinal),
+		chunk.EmbeddingHash,
 	}, "\x1e"))
 }
 
-func tableTooLargeError(block atom, budget Budget) error {
-	return fmt.Errorf(
-		"chunk: table at bytes [%d,%d) exceeds hard maximum %d; table row splitting is not supported",
-		block.start,
-		block.end,
-		budget.HardMax,
-	)
+func linkSameGroupNeighbors(chunks []Chunk) {
+	for i := range chunks {
+		chunks[i].PrevChunkID = ""
+		chunks[i].NextChunkID = ""
+	}
+	for i := 1; i < len(chunks); i++ {
+		if chunks[i].StructuralGroupID == "" || chunks[i].StructuralGroupID != chunks[i-1].StructuralGroupID {
+			continue
+		}
+		chunks[i].PrevChunkID = chunks[i-1].ChunkID
+		chunks[i-1].NextChunkID = chunks[i].ChunkID
+	}
 }
 
 func sha256Hex(value string) string {

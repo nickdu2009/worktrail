@@ -1,12 +1,14 @@
 package generation
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 	_ "modernc.org/sqlite/vec"
@@ -136,11 +138,98 @@ func SealCandidate(candidate *Candidate) error {
 	return candidate.SealCandidate()
 }
 
+// UpdateSnapshot rewrites the candidate snapshot hash before sealing.
+func (c *Candidate) UpdateSnapshot(ctx context.Context, snapshot string) error {
+	if c == nil || c.db == nil {
+		return errors.New("candidate database is already closed")
+	}
+	if strings.TrimSpace(snapshot) == "" {
+		return errors.New("generation metadata snapshot is required")
+	}
+	result, err := c.db.ExecContext(ctx, `UPDATE meta SET snapshot = ? WHERE build_state = 'candidate'`, snapshot)
+	if err != nil {
+		return fmt.Errorf("update candidate snapshot: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update candidate snapshot: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("update candidate snapshot: expected one metadata row, updated %d", affected)
+	}
+	return nil
+}
+
+// DeleteDocumentChunks removes all candidate rows for one source document.
+func (c *Candidate) DeleteDocumentChunks(ctx context.Context, scope, documentID, path string) error {
+	if c == nil || c.db == nil {
+		return errors.New("candidate database is already closed")
+	}
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete document chunks: %w", err)
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT rowid, chunk_id FROM chunks
+		WHERE scope = ? AND document_id = ? AND path = ?`,
+		scope, documentID, path,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("list document chunks: %w", err)
+	}
+	type chunkRef struct {
+		rowID   int64
+		chunkID string
+	}
+	var refs []chunkRef
+	for rows.Next() {
+		var ref chunkRef
+		if err := rows.Scan(&ref.rowID, &ref.chunkID); err != nil {
+			rows.Close()
+			_ = tx.Rollback()
+			return fmt.Errorf("scan document chunks: %w", err)
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		_ = tx.Rollback()
+		return fmt.Errorf("iterate document chunks: %w", err)
+	}
+	rows.Close()
+	for _, ref := range refs {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM chunk_tags WHERE chunk_id = ?`, ref.chunkID); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("delete chunk tags %q: %w", ref.chunkID, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM chunk_fts WHERE rowid = ?`, ref.rowID); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("delete FTS chunk %q: %w", ref.chunkID, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM chunk_vec WHERE rowid = ?`, ref.rowID); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("delete vector chunk %q: %w", ref.chunkID, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM chunks WHERE rowid = ?`, ref.rowID); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("delete chunk %q: %w", ref.chunkID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete document chunks: %w", err)
+	}
+	return nil
+}
+
 // OpenSealed opens and validates a sealed candidate through an immutable
 // read-only SQLite URI. It performs no DDL, DML, or repair.
 func OpenSealed(path string, expected Metadata) (*SealedCandidate, error) {
 	if err := expected.validate(); err != nil {
 		return nil, err
+	}
+	if expected.Schema != databaseSchema {
+		return nil, fmt.Errorf("unsupported generation schema %q", expected.Schema)
 	}
 	if expected.BuildState != "" && expected.BuildState != "sealed" {
 		return nil, errors.New("expected metadata build-state must be sealed or empty")

@@ -17,13 +17,13 @@ import (
 const embeddingDimension = 1024
 
 // DefaultSubsystemVersions returns a fresh, validated set of versioned semantic
-// subsystem identity inputs for the v1 recall profile. Changing any value
-// creates a new recall profile and requires an explicit rebuild.
+// subsystem identity inputs for the table-aware recall profile. Changing any
+// value creates a new recall profile and requires an explicit rebuild.
 func DefaultSubsystemVersions() profile.SubsystemVersions {
 	return profile.SubsystemVersions{
 		ChunkerVersion:   chunk.Version,
 		IndexingVersion:  policy.Version,
-		LexicalVersion:   "worktrail-fts5-gse-v1",
+		LexicalVersion:   "worktrail-fts5-gse-v2",
 		SQLiteVecVersion: "sqlite-vec-v0.1.9",
 	}
 }

@@ -1,0 +1,113 @@
+{
+  "source": "# Table Fixture\r\n\r\n| Col \\| Name | Status | Notes |\r\n| ---: | --- | --- |\r\n| café path | open | first row with unicode and escaped pipe context |\r\n| beta | closed | second row keeps adjacent coverage ordered and unique |\r\n| gamma | pending | third row forces another group under the tiny target budget |\r\n| delta | open | fourth row continues the ordered coverage contract |\r\n",
+  "document": {
+    "scope": "project",
+    "id": "table-fixture",
+    "path": "testdata/table-fixture.md",
+    "title": "Table Fixture",
+    "type": "architecture",
+    "topic": "recall",
+    "tags": [
+      "table",
+      "gfm"
+    ],
+    "source_base_byte": 16,
+    "source_size_byte": 393
+  },
+  "budget": {
+    "target": 45,
+    "hard_max": 90,
+    "overlap": 4,
+    "min_payload": 5
+  },
+  "chunks": [
+    {
+      "kind": "table_row_group",
+      "order": 0,
+      "fragment_ordinal": 0,
+      "structural_group_id": "951187ff78745a916465f2da205e315f14c74203b0e1352c35d7a6fa9b367a1e",
+      "chunk_id": "0dfd3e05da3cdb572d8c78ef25b1f9076ea1e71c92d04cc27b12d3460a2cedd9",
+      "heading_breadcrumb": [
+        "Table Fixture"
+      ],
+      "source_start": 91,
+      "source_end": 164,
+      "context_start": 35,
+      "context_end": 91,
+      "group_start": 35,
+      "group_end": 393,
+      "body": "| café path | open | first row with unicode and escaped pipe context |\r\n",
+      "context_terms": "| Col \\| Name | Status | Notes |\r\n| ---: | --- | --- |\r\n",
+      "token_count": 48,
+      "prev_chunk_id": "",
+      "next_chunk_id": "87491e361c20b731788d4aaf196a86a0a4ff8f392b25adefbd4fd2e79354ab9e",
+      "chunker_version": "chunker-v2"
+    },
+    {
+      "kind": "table_row_group",
+      "order": 1,
+      "fragment_ordinal": 0,
+      "structural_group_id": "951187ff78745a916465f2da205e315f14c74203b0e1352c35d7a6fa9b367a1e",
+      "chunk_id": "87491e361c20b731788d4aaf196a86a0a4ff8f392b25adefbd4fd2e79354ab9e",
+      "heading_breadcrumb": [
+        "Table Fixture"
+      ],
+      "source_start": 164,
+      "source_end": 239,
+      "context_start": 35,
+      "context_end": 91,
+      "group_start": 35,
+      "group_end": 393,
+      "body": "| beta | closed | second row keeps adjacent coverage ordered and unique |\r\n",
+      "context_terms": "| Col \\| Name | Status | Notes |\r\n| ---: | --- | --- |\r\n",
+      "token_count": 47,
+      "prev_chunk_id": "0dfd3e05da3cdb572d8c78ef25b1f9076ea1e71c92d04cc27b12d3460a2cedd9",
+      "next_chunk_id": "6596452be1a77deadc89061c3b69a0859610c5e2e5487a47aec258ab7b4cd3e1",
+      "chunker_version": "chunker-v2"
+    },
+    {
+      "kind": "table_row_group",
+      "order": 2,
+      "fragment_ordinal": 0,
+      "structural_group_id": "951187ff78745a916465f2da205e315f14c74203b0e1352c35d7a6fa9b367a1e",
+      "chunk_id": "6596452be1a77deadc89061c3b69a0859610c5e2e5487a47aec258ab7b4cd3e1",
+      "heading_breadcrumb": [
+        "Table Fixture"
+      ],
+      "source_start": 239,
+      "source_end": 322,
+      "context_start": 35,
+      "context_end": 91,
+      "group_start": 35,
+      "group_end": 393,
+      "body": "| gamma | pending | third row forces another group under the tiny target budget |\r\n",
+      "context_terms": "| Col \\| Name | Status | Notes |\r\n| ---: | --- | --- |\r\n",
+      "token_count": 49,
+      "prev_chunk_id": "87491e361c20b731788d4aaf196a86a0a4ff8f392b25adefbd4fd2e79354ab9e",
+      "next_chunk_id": "641a978cece7fe3a2eac28c1b59fc64a63ecda165fd4bc873a083247bdfbe90d",
+      "chunker_version": "chunker-v2"
+    },
+    {
+      "kind": "table_row_group",
+      "order": 3,
+      "fragment_ordinal": 0,
+      "structural_group_id": "951187ff78745a916465f2da205e315f14c74203b0e1352c35d7a6fa9b367a1e",
+      "chunk_id": "641a978cece7fe3a2eac28c1b59fc64a63ecda165fd4bc873a083247bdfbe90d",
+      "heading_breadcrumb": [
+        "Table Fixture"
+      ],
+      "source_start": 322,
+      "source_end": 393,
+      "context_start": 35,
+      "context_end": 91,
+      "group_start": 35,
+      "group_end": 393,
+      "body": "| delta | open | fourth row continues the ordered coverage contract |\r\n",
+      "context_terms": "| Col \\| Name | Status | Notes |\r\n| ---: | --- | --- |\r\n",
+      "token_count": 46,
+      "prev_chunk_id": "6596452be1a77deadc89061c3b69a0859610c5e2e5487a47aec258ab7b4cd3e1",
+      "next_chunk_id": "",
+      "chunker_version": "chunker-v2"
+    }
+  ]
+}

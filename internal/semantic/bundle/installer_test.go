@@ -600,7 +600,7 @@ func testManifest(model []byte, variants []RuntimeVariant) Manifest {
 		CanonicalManifest: CanonicalManifest{
 			Schema:                  TrustedManifestSchema,
 			SemanticAPIVersion:      1,
-			GenerationSchemaVersion: 1,
+			GenerationSchemaVersion: 2,
 			Embedding: EmbeddingProfile{
 				Dimension:        BGEM3EmbeddingDimension,
 				Tokenizer:        BGEM3Tokenizer,

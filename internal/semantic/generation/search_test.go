@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nickdu2009/worktrail/internal/index"
 	"github.com/nickdu2009/worktrail/internal/semantic/chunk"
 )
 
@@ -239,19 +240,35 @@ func createQueryableGeneration(t *testing.T, directory string, pointer Pointer, 
 	inputs := make([]chunk.Chunk, 0, len(chunks))
 	vectors := make(map[string][]float32, len(chunks))
 	for _, source := range chunks {
+		body := source.body
+		if body == "" {
+			body = source.input
+		}
+		end := len(body)
+		if end == 0 {
+			end = 1
+		}
 		inputs = append(inputs, chunk.Chunk{
-			ChunkID:        source.id,
-			Scope:          "project",
-			DocumentID:     source.entryID,
-			Path:           source.path,
-			Body:           source.body,
-			EmbeddingInput: source.input,
-			EmbeddingHash:  "hash-" + source.id,
-			ChunkerVersion: chunk.Version,
+			ChunkID:           source.id,
+			Scope:             "project",
+			DocumentID:        source.entryID,
+			Path:              source.path,
+			Type:              "rule",
+			Kind:              chunk.KindText,
+			StructuralGroupID: "group-" + source.id,
+			Body:              body,
+			MetadataTerms:     "path: " + source.path,
+			ContextTerms:      "section",
+			EmbeddingInput:    source.input,
+			EmbeddingHash:     "hash-" + source.id,
+			ChunkerVersion:    chunk.Version,
+			SourceStart:       0,
+			SourceEnd:         end,
+			SourceSizeByte:    end,
 		})
 		vectors[source.input] = source.vector
 	}
-	if err := BuildCandidate(context.Background(), candidate, inputs, &fakeEmbedder{vectors: vectors}); err != nil {
+	if err := BuildCandidate(context.Background(), candidate, inputs, &fakeEmbedder{vectors: vectors}, index.NewTokenizer()); err != nil {
 		t.Fatalf("BuildCandidate() error = %v", err)
 	}
 	if err := candidate.SealCandidate(); err != nil {

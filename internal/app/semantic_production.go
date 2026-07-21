@@ -111,7 +111,7 @@ func (s productionSemanticSearcher) unavailable(request SemanticSearchRequest, r
 	return SemanticSearchResponse{
 		Degraded:        true,
 		DegradedReasons: []contracts.ReasonCode{reason},
-		NextSteps:       []string{semanticSearchRebuildStep(request.Scope)},
+		NextSteps:       []string{semanticRepairNextStep(reason, request.Scope)},
 	}, nil
 }
 
@@ -205,7 +205,10 @@ func prepareProductionSemanticScope(
 	hydrator := retrieve.IndexEntryHydrator{Root: root, Query: query}
 	facade := retrieve.Facade{
 		Policy:    retrieve.DefaultPolicy(),
-		ChunkFTS:  retrieve.GenerationChunkFTS{Active: active},
+		ChunkFTS: retrieve.GenerationChunkFTS{
+			Active:    active,
+			Tokenizer: index.NewTokenizer(),
+		},
 		VectorKNN: retrieve.GenerationVectorKNN{Active: active},
 		Embedder: retrieve.DaemonQueryEmbedder{
 			Embedder:    composed.Client,

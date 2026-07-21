@@ -13,7 +13,7 @@ release_record_writer="$repo_root/scripts/semantic/write-release-record.py"
 phase="${1:-all}"
 gate_assets_root="${WORKTRAIL_SEMANTIC_GATE_ROOT:-}"
 
-BUNDLE_ID="60e883f9f5fb62d0f6986d24df30ad8f129f3485a8a19b691eeb2662a438d4d2"
+BUNDLE_ID="3625d27700727578d7694ab04d19291efce45095aa57daba66d692a37a51be58"
 MODEL_SHA256="aa473d51f451a22f0fcf39ba3330c14bed38a385712b1113440f69df4047a173"
 RUNTIME_SHA256="15d468c9f4820f4ba0fd44ccd2e19dd19bb60e8c7c839deb3fc2cfbff281307c"
 MODEL_SIZE="634553760"
