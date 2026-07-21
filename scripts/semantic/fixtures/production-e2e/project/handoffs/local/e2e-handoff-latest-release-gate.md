@@ -40,6 +40,7 @@
   "source_tool": "worktrail",
   "actor": "fixture:production-e2e"
 }
+
 ---
 
 Latest handoff: continue the semantic release gate from the isolated production E2E harness.

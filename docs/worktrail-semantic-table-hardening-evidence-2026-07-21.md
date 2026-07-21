@@ -158,3 +158,9 @@ reasons; both are intentional contract/corpus updates, not gate-script bugs.
 
 5. **Governed vs entry_fts**: production-e2e decision/rule/table fixtures no longer set `source_of_truth`, because ApplyGovernance stably promotes SoT above RRF order and was pushing handoff/workflow/lesson queries below the governed MRR/nDCG floor.
 6. **Active-path governance bias**: move the e2e active-state fixture out of `state/active/` so ApplyGovernance Active preference does not pin it above RRF for unrelated queries; content/title still satisfy q-active-state.
+7. **Budget-matrix fake path + V2 handoff setext**: GFM treated pretty-printed
+   V2 JSON followed by the closing `---` as a setext heading, so the entire
+   frontmatter became the chunk breadcrumb and exceeded HardMax 640 under the
+   rune token counter. Insert a blank line before the terminator so `---` is a
+   thematic break; ParseMarkdown still accepts it. Current v1 golden score after
+   subsequent fixture moves: `17.94747070820838`.
