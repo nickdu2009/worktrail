@@ -7,9 +7,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture_root="$repo_root/scripts/semantic/fixtures/production-e2e"
 golden_search="$fixture_root/search-json-v1.golden"
+golden_search_v2_table="$fixture_root/search-json-v2-table.golden"
 labels_path="$fixture_root/labeled-queries.json"
 archive_safety_scan="$repo_root/scripts/semantic/check-archive-safety.py"
 release_record_writer="$repo_root/scripts/semantic/write-release-record.py"
+release_archive_helper="$repo_root/scripts/semantic/release_archive.py"
 phase="${1:-all}"
 gate_assets_root="${WORKTRAIL_SEMANTIC_GATE_ROOT:-}"
 
@@ -27,6 +29,8 @@ eval_bin=""
 evidence_dir=""
 daemon_pid=""
 release_command_ledger=""
+release_archive_staging=""
+WORKTRAIL_E2E_REUSE_ARCHIVE="${WORKTRAIL_E2E_REUSE_ARCHIVE:-0}"
 original_home="${HOME}"
 original_gocache="$(go env GOCACHE)"
 original_gomodcache="$(go env GOMODCACHE)"
@@ -87,6 +91,17 @@ PY
         wait "$pid" 2>/dev/null || true
       fi
     done < <(find "$tmp_root/home/Library/Application Support/worktrail/semantic" -name state.json 2>/dev/null || true)
+  fi
+  # Trap may only remove staging created by this process; never delete a final archive.
+  if [[ -n "${release_archive_staging:-}" && -d "$release_archive_staging" ]]; then
+    python3 - "$release_archive_helper" "$release_archive_staging" <<'PY'
+import importlib.util,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("release_archive", sys.argv[1])
+mod=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+mod.cleanup_staging(Path(sys.argv[2]))
+PY
   fi
   if [[ "$KEEP_TMP" != "1" && -n "${tmp_root:-}" && -d "$tmp_root" ]]; then
     chmod -R u+w "$tmp_root" 2>/dev/null || true
@@ -428,6 +443,41 @@ print(root)
 PY
 }
 
+precheck_release_archive() {
+  [[ "$phase" == "all" ]] || return 0
+  local archive_root candidate release_archive status
+  require_clean_checkout_for_release_record
+  archive_root="$(release_archive_root)"
+  candidate="$(git -C "$repo_root" rev-parse HEAD)"
+  release_archive="$archive_root/$candidate"
+  status="$(
+    python3 - "$release_archive_helper" "$release_archive" "$candidate" <<'PY'
+import importlib.util,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("release_archive", sys.argv[1])
+mod=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+try:
+    print(mod.validate_reusable_archive(Path(sys.argv[2]), sys.argv[3]))
+except mod.ArchiveError as exc:
+    raise SystemExit(f"existing release archive is incomplete or illegal: {exc}")
+PY
+  )"
+  case "$status" in
+    missing)
+      log "release archive precheck: missing (will stage+rename after expensive gates)"
+      WORKTRAIL_E2E_REUSE_ARCHIVE=0
+      ;;
+    reusable)
+      log "release archive precheck: reusable PASS archive for HEAD"
+      WORKTRAIL_E2E_REUSE_ARCHIVE=1
+      ;;
+    *)
+      fail "unexpected archive precheck status: $status"
+      ;;
+  esac
+}
+
 capture_review_plan() {
   local label="$1"
   local output="$evidence_dir/review-${label}.json"
@@ -468,6 +518,47 @@ phase_offline() {
     run_release_command "readonly" "bash scripts/semantic/run-offline-gate.sh" env -u WORKTRAIL_HOME -u WORKTRAIL_PROJECT_ROOT \
       HOME="$original_home" GOCACHE="$original_gocache" GOMODCACHE="$original_gomodcache" \
       bash scripts/semantic/run-offline-gate.sh
+    run_release_command "readonly" "table hardening retrieval gate" env -u WORKTRAIL_HOME -u WORKTRAIL_PROJECT_ROOT \
+      HOME="$original_home" GOCACHE="$original_gocache" GOMODCACHE="$original_gomodcache" \
+      go run ./cmd/worktrail-semantic-eval retrieval-report \
+        --labels testdata/semantic/table-retrieval-labels-fixture.json \
+        --rankings testdata/semantic/table-retrieval-rankings-fixture.json \
+        >"$evidence_dir/table-retrieval-report.json"
+    for size in 1000 2000 5000; do
+      env -u WORKTRAIL_HOME -u WORKTRAIL_PROJECT_ROOT \
+        HOME="$original_home" GOCACHE="$original_gocache" GOMODCACHE="$original_gomodcache" \
+        go run ./cmd/worktrail-semantic-eval refill-benchmark \
+          --corpus-size "$size" --queries 20 --warmup 3 --fake \
+          >"$evidence_dir/refill-${size}.json"
+    done
+    python3 - "$evidence_dir/refill-capacity-matrix.json" \
+      "$evidence_dir/refill-1000.json" \
+      "$evidence_dir/refill-2000.json" \
+      "$evidence_dir/refill-5000.json" <<'PY'
+import json,sys
+from pathlib import Path
+out=Path(sys.argv[1])
+sizes=[]
+passed=True
+for path in sys.argv[2:]:
+    report=json.loads(Path(path).read_text(encoding="utf-8"))
+    sizes.append(report.get("corpus_size"))
+    passed=passed and bool(report.get("passed"))
+matrix={"schema":"worktrail.semantic.eval.refill-capacity-matrix.v1","path":"fake-deterministic","sizes":sizes,"passed":passed,
+        "notes":["offline small matrix proves forced refill wiring; full 10k/50k/100k remains step-7 M1 gate"]}
+out.write_text(json.dumps(matrix,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
+if not passed:
+    raise SystemExit("refill capacity matrix failed")
+print("refill_capacity_matrix_ok", sizes)
+PY
+    record_release_command "readonly" "refill capacity matrix"
+    python3 - "$golden_search_v2_table" <<'PY'
+import json,sys
+data=json.load(open(sys.argv[1],encoding="utf-8"))
+assert data.get("schema")=="worktrail.search.results.v2", data
+assert data.get("results"), data
+print("search_json_v2_table_golden_ok")
+PY
     run_release_command "readonly" "signal cleanup" \
       bash scripts/semantic/test-production-e2e-gate-signals.sh
   )
@@ -905,17 +996,43 @@ phase_evidence() {
   mkdir -p -m 700 "$archive_root"
   candidate_commit="$(git -C "$repo_root" rev-parse HEAD)"
   release_archive="$archive_root/$candidate_commit"
-  [[ ! -e "$release_archive" ]] || fail "refusing to reuse an existing release archive"
   verify_dirty_tree_snapshot "$evidence_dir/source-snapshot-before-gate.json" "$evidence_dir/source-snapshot-verification.json"
   capture_review_plan "after"
   record_release_command "mutating (isolated)" "production E2E"
   record_release_command "readonly" "archive safety and SHA256SUMS verification"
-
   assert_clean_checkout "after"
+
+  if [[ "$WORKTRAIL_E2E_REUSE_ARCHIVE" == "1" ]]; then
+    python3 - "$release_archive_helper" "$release_archive" "$candidate_commit" <<'PY'
+import importlib.util,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("release_archive", sys.argv[1])
+mod=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+status=mod.validate_reusable_archive(Path(sys.argv[2]), sys.argv[3])
+if status != "reusable":
+    raise SystemExit(f"reuse requested but archive status={status}")
+print("release_archive_reused", sys.argv[3])
+PY
+    wt semantic stop --format json >/dev/null 2>&1 || true
+    log "phase evidence reused existing PASS archive; temporary runtime cleaned via trap"
+    return 0
+  fi
+
   author="$(git -C "$repo_root" log -1 --format='%an <%ae>')"
   committer="$(git -C "$repo_root" log -1 --format='%cn <%ce>')"
+  release_archive_staging="$(
+    python3 - "$release_archive_helper" "$archive_root" "$candidate_commit" <<'PY'
+import importlib.util,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("release_archive", sys.argv[1])
+mod=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(mod.staging_dir(Path(sys.argv[2]), sys.argv[3]))
+PY
+  )"
   python3 "$release_record_writer" \
-    --archive "$release_archive" \
+    --archive "$release_archive_staging" \
     --candidate-commit "$candidate_commit" \
     --author "$author" \
     --committer "$committer" \
@@ -923,30 +1040,37 @@ phase_evidence() {
     --review-before "$evidence_dir/review-before.json" \
     --review-after "$evidence_dir/review-after.json" \
     --retrieval-report "$evidence_dir/retrieval-report.json" \
-    --resource-report "$evidence_dir/runtime-resource-report.json"
-  python3 "$archive_safety_scan" "$release_archive" \
-    --report "$release_archive/SAFETY-SCAN.json" >/dev/null
+    --resource-report "$evidence_dir/runtime-resource-report.json" \
+    --refill-capacity-report "$evidence_dir/refill-capacity-matrix.json" \
+    --final-budget "512:768:80"
+  python3 "$archive_safety_scan" "$release_archive_staging" \
+    --report "$release_archive_staging/SAFETY-SCAN.json" >/dev/null
   (
-    cd "$release_archive"
+    cd "$release_archive_staging"
     shasum -a 256 SUMMARY.md RELEASE-RECORD.json SAFETY-SCAN.json >SHA256SUMS
   )
-  python3 "$archive_safety_scan" "$release_archive" \
-    --report "$release_archive/SAFETY-SCAN.json" >/dev/null
+  python3 "$archive_safety_scan" "$release_archive_staging" \
+    --report "$release_archive_staging/SAFETY-SCAN.json" >/dev/null
   (
-    cd "$release_archive"
+    cd "$release_archive_staging"
     shasum -a 256 SUMMARY.md RELEASE-RECORD.json SAFETY-SCAN.json >SHA256SUMS
     shasum -a 256 -c SHA256SUMS
   )
-  python3 "$archive_safety_scan" "$release_archive" >"$evidence_dir/archive-safety-scan.json"
-  python3 - "$release_archive" <<'PY'
-import pathlib,sys
-root=pathlib.Path(sys.argv[1])
-manifest=(root/"SHA256SUMS").read_text(encoding="utf-8").splitlines()
-members={line.split(maxsplit=1)[1].lstrip("*") for line in manifest}
-assert members == {"SUMMARY.md","RELEASE-RECORD.json","SAFETY-SCAN.json"}, members
-assert {path.name for path in root.iterdir()} == members | {"SHA256SUMS"}
+  python3 "$archive_safety_scan" "$release_archive_staging" >"$evidence_dir/archive-safety-scan.json"
+  python3 - "$release_archive_helper" "$release_archive_staging" "$release_archive" <<'PY'
+import importlib.util,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location("release_archive", sys.argv[1])
+mod=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+staging=Path(sys.argv[2])
+final=Path(sys.argv[3])
+members={path.name for path in staging.iterdir()}
+assert members == {"SUMMARY.md","RELEASE-RECORD.json","SAFETY-SCAN.json","SHA256SUMS"}, members
+mod.atomic_promote(staging, final)
+print("release_archive_promoted", final.name)
 PY
-
+  release_archive_staging=""
   wt semantic stop --format json >/dev/null 2>&1 || true
   log "phase evidence recorded; temporary runtime cleaned via trap"
 }
@@ -992,6 +1116,8 @@ main() {
       phase_resource
       ;;
     all)
+      # Expensive gate precheck: reuse valid PASS archive or fail fast on illegal/partial.
+      precheck_release_archive
       phase_offline
       phase_install
       phase_positive
@@ -1016,6 +1142,13 @@ main() {
         --labels "$repo_root/testdata/semantic/retrieval-labels-fixture.json" \
         --rankings "$repo_root/testdata/semantic/retrieval-rankings-fixture.json" \
         >"$evidence_dir/retrieval-report-fixture.json"
+      python3 - "$golden_search_v2_table" <<'PY'
+import json,sys
+data=json.load(open(sys.argv[1],encoding="utf-8"))
+assert data.get("schema")=="worktrail.search.results.v2", data
+assert data.get("results"), data
+print("harness_search_json_v2_table_golden_ok")
+PY
       assert_no_semantic_artifacts
       log "harness phase passed"
       ;;

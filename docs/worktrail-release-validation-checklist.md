@@ -1,10 +1,14 @@
 # Worktrail Release Validation Checklist
 
-Last updated: 2026-07-17
+Last updated: 2026-07-21
 
 Status: in progress
 
 Previous baseline commit: `448b133` (passed on 2026-05-15)
+
+Table-hardening offline/dogfood engineering evidence:
+[worktrail-semantic-table-hardening-evidence-2026-07-21.md](worktrail-semantic-table-hardening-evidence-2026-07-21.md)
+(does not replace the clean-checkout M1 release record required by step 7).
 
 This checklist maps the release acceptance requirements in
 `docs/worktrail-release-acceptance.md` to validation evidence. The dated release
@@ -81,18 +85,20 @@ checklist tracks evidence types and execution status:
 | `REQ-SEM-001` | Trusted-manifest / bundle identity tests; M1 verified vs M2–M5 experimental classification |
 | `REQ-SEM-002` | Init network-free / `--semantic` / `--no-semantic` / no implicit generation tests |
 | `REQ-SEM-003` | Loopback lifecycle, identity mismatch, `auto` degrade / `required` fail tests |
-| `REQ-SEM-004` | Chunk, profile, sqlite-vec, lease, activation tests |
-| `REQ-SEM-005` | Labeled retrieval + text/JSON v1 / JSON v2 fixtures |
-| `REQ-SEM-006` | Context Pack section/evidence fixtures |
-| `REQ-SEM-007` | Replaced-generation cleanup / no-rollback tests |
+| `REQ-SEM-004` | Chunk, profile, sqlite-vec, lease, activation tests; table-hardening generation/rebuild dogfood counts in 2026-07-21 evidence |
+| `REQ-SEM-005` | Labeled retrieval + text/JSON v1 / JSON v2 fixtures; table retrieval gate + `search-json-v2-table.golden` offline wiring |
+| `REQ-SEM-006` | Context Pack section/evidence fixtures (unchanged contract; covered by focused Go tests) |
+| `REQ-SEM-007` | Replaced-generation cleanup / no-rollback tests; dogfood rebuild-only activation notes |
 | `REQ-SEM-008` | Verified M1 physical report; experimental self-check coverage (no cross-chip fallback) |
-| `REQ-SEM-009` | Fake/no-network CI + dated privacy-safe real-runtime evidence |
+| `REQ-SEM-009` | Fake/no-network offline gate + dated privacy-safe dogfood evidence (2026-07-21); clean M1 E2E remains step 7 |
 | `REQ-SEM-010` | Three semantic ADRs Accepted and conflict-free |
 | `REQ-SEM-011` | M1 resource envelope (cold / warm P95 / peak RSS); experimental has no inherited claim |
 
-Current engineering evidence index:
+Current engineering evidence indexes:
 [worktrail-semantic-m1-release-evidence-2026-07-17.md](worktrail-semantic-m1-release-evidence-2026-07-17.md)
-(dirty-tree; not a clean-checkout release record).
+(dirty-tree; not a clean-checkout release record);
+[worktrail-semantic-table-hardening-evidence-2026-07-21.md](worktrail-semantic-table-hardening-evidence-2026-07-21.md)
+(table-hardening offline gates + privacy-safe dogfood; not a clean M1 release record).
 
 ## Release Gate Commands
 

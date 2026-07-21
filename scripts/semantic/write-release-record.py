@@ -26,6 +26,8 @@ REQUIRED_COMMANDS = {
     "git status --porcelain=v1 --untracked-files=all (after)",
     "worktrail review plan --format json (before)",
     "worktrail review plan --format json (after)",
+    "table hardening retrieval gate",
+    "refill capacity matrix",
 }
 
 
@@ -40,6 +42,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--review-after", type=Path, required=True)
     parser.add_argument("--retrieval-report", type=Path, required=True)
     parser.add_argument("--resource-report", type=Path, required=True)
+    parser.add_argument(
+        "--refill-capacity-report",
+        type=Path,
+        help="optional JSON object summarizing 10k/50k/100k (or small offline) refill matrix",
+    )
+    parser.add_argument(
+        "--final-budget",
+        default="512:768:80",
+        help="final frozen chunk budget Target:HardMax:MinPayload (Overlap fixed at 64)",
+    )
     return parser.parse_args()
 
 
@@ -89,7 +101,13 @@ def review_count(path: Path) -> int:
     return summary["total"]
 
 
-def metrics(retrieval: dict[str, object], resource: dict[str, object]) -> dict[str, object]:
+def metrics(
+    retrieval: dict[str, object],
+    resource: dict[str, object],
+    *,
+    refill_capacity: dict[str, object] | None,
+    final_budget: str,
+) -> dict[str, object]:
     lanes = retrieval.get("lanes")
     if not isinstance(lanes, list):
         raise ValueError("retrieval report has no lanes")
@@ -118,11 +136,19 @@ def metrics(retrieval: dict[str, object], resource: dict[str, object]) -> dict[s
     }
     if any(value is None for value in resource_metrics.values()):
         raise ValueError("resource report is missing required metrics")
-    return {
+    thresholds = retrieval.get("thresholds")
+    evidence = retrieval.get("evidence")
+    out: dict[str, object] = {
         "retrieval_passed": retrieval.get("passed"),
         "retrieval_lanes": lane_metrics,
+        "retrieval_thresholds": thresholds if isinstance(thresholds, dict) else {},
+        "evidence": evidence if isinstance(evidence, dict) else {},
+        "final_chunk_budget": final_budget,
         "resource": resource_metrics,
     }
+    if refill_capacity is not None:
+        out["refill_capacity_matrix"] = refill_capacity
+    return out
 
 
 def markdown(record: dict[str, object]) -> str:
@@ -186,6 +212,20 @@ def markdown(record: dict[str, object]) -> str:
         )
     for key, value in metrics_report["resource"].items():
         lines.append(f"- {key}: {value}")
+    lines.append(f"- final_chunk_budget: {metrics_report.get('final_budget', metrics_report.get('final_chunk_budget'))}")
+    evidence = metrics_report.get("evidence")
+    if isinstance(evidence, dict) and evidence:
+        lines.append(
+            "- evidence"
+            f" recall_at_k={evidence.get('evidence_recall_at_k')}"
+            f" neighbor_precision={evidence.get('neighbor_precision')}"
+        )
+    refill = metrics_report.get("refill_capacity_matrix")
+    if isinstance(refill, dict) and refill:
+        lines.append(f"- refill_capacity_matrix_passed: {refill.get('passed')}")
+        sizes = refill.get("sizes")
+        if isinstance(sizes, list):
+            lines.append(f"- refill_capacity_sizes: {', '.join(str(item) for item in sizes)}")
     lines.append("")
     return "\n".join(lines)
 
@@ -197,6 +237,9 @@ def main() -> int:
     commands = load_commands(args.commands)
     retrieval = load_json(args.retrieval_report)
     resource = load_json(args.resource_report)
+    refill_capacity = (
+        load_json(args.refill_capacity_report) if args.refill_capacity_report else None
+    )
     record = {
         "schema": SCHEMA,
         "result": "PASS",
@@ -227,9 +270,20 @@ def main() -> int:
             "temporary_worktree_runtime_models_daemon_cleanup": "PASS",
             "signal_cleanup_validation": "PASS",
         },
-        "metrics": metrics(retrieval, resource),
+        "metrics": metrics(
+            retrieval,
+            resource,
+            refill_capacity=refill_capacity,
+            final_budget=args.final_budget,
+        ),
     }
-    args.archive.mkdir(mode=0o700, parents=True, exist_ok=False)
+    if args.archive.exists():
+        if not args.archive.is_dir() or args.archive.is_symlink():
+            raise ValueError("archive path must be a real directory")
+        if any(args.archive.iterdir()):
+            raise ValueError("archive staging directory must be empty")
+    else:
+        args.archive.mkdir(mode=0o700, parents=True, exist_ok=False)
     (args.archive / "RELEASE-RECORD.json").write_text(
         json.dumps(record, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
