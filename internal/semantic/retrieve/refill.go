@@ -61,13 +61,15 @@ func CollectEntryLane(
 	fetch func(limit int) ([]RawChunkHit, error),
 	policy Policy,
 	scope string,
+	laneName string,
 	filters ExactFilters,
 	applyFilters bool,
-) ([]LaneHit, Lane, error) {
+) ([]LaneHit, []MatchHit, Lane, error) {
 	provider := newPrefixProvider(fetch)
-	hits, diagnostics, err := collectEntryLane(provider, policy, scope, filters, applyFilters)
+	hits, matches, diagnostics, err := collectEntryLane(provider, policy, scope, laneName, filters, applyFilters)
 	lane := Lane{
 		Scope:            scope,
+		Name:             laneName,
 		RawHits:          diagnostics.RawHits,
 		FilterRejections: diagnostics.FilterRejections,
 		EligibleEntries:  diagnostics.EligibleEntries,
@@ -75,18 +77,19 @@ func CollectEntryLane(
 		HardCap:          policy.HardCap,
 		WindowSaturated:  diagnostics.WindowSaturated,
 	}
-	return hits, lane, err
+	return hits, matches, lane, err
 }
 
 func collectEntryLane(
 	provider *prefixProvider,
 	policy Policy,
 	scope string,
+	laneName string,
 	filters ExactFilters,
 	applyFilters bool,
-) ([]LaneHit, laneDiagnostics, error) {
+) ([]LaneHit, []MatchHit, laneDiagnostics, error) {
 	if err := provider.ensure(policy.HardCap); err != nil {
-		return nil, laneDiagnostics{}, err
+		return nil, nil, laneDiagnostics{}, err
 	}
 
 	window := policy.InitialWindow
@@ -96,6 +99,7 @@ func collectEntryLane(
 
 	var (
 		eligible     []LaneHit
+		matches      []MatchHit
 		seenEntry    = map[string]bool{}
 		seenChunk    = map[string]bool{}
 		rejections   int
@@ -119,11 +123,24 @@ func collectEntryLane(
 				continue
 			}
 			seenChunk[hit.ChunkID] = true
+			if applyFilters && !matchesExactFilters(hit, filters) {
+				rejections++
+				continue
+			}
+			matches = append(matches, MatchHit{
+				Scope:   scope,
+				Lane:    laneName,
+				ChunkID: hit.ChunkID,
+				EntryID: hit.EntryID,
+				Rank:    hit.Rank,
+			})
 			if seenEntry[hit.EntryID] {
 				continue
 			}
-			if applyFilters && !matchesExactFilters(hit, filters) {
-				rejections++
+			if targetReached || len(eligible) >= policy.EligibleEntryTarget {
+				// Keep walking the current prefix for evidence matches of
+				// already-selected entries, but do not admit new entries.
+				targetReached = true
 				continue
 			}
 			seenEntry[hit.EntryID] = true
@@ -136,7 +153,6 @@ func collectEntryLane(
 			})
 			if len(eligible) >= policy.EligibleEntryTarget {
 				targetReached = true
-				break
 			}
 		}
 		// raw_hits is the final cumulative prefix length, not the early-stop walk offset.
@@ -166,7 +182,7 @@ func collectEntryLane(
 		// unique-entry target was still unmet (backend not exhausted early).
 		WindowSaturated: len(eligible) < policy.EligibleEntryTarget && len(provider.hits) >= policy.HardCap,
 	}
-	return eligible, diagnostics, nil
+	return eligible, matches, diagnostics, nil
 }
 
 func normalizeRawHits(hits []RawChunkHit) []RawChunkHit {

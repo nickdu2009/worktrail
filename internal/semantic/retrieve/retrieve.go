@@ -23,26 +23,30 @@ const (
 
 // Policy configures reciprocal-rank fusion, bounded refill, and result limits.
 type Policy struct {
-	Version             string
-	RRFK                int
-	InitialWindow       int
-	WindowGrowth        int
-	HardCap             int
-	EligibleEntryTarget int
-	FinalLimit          int
+	Version                string
+	RRFK                   int
+	InitialWindow          int
+	WindowGrowth           int
+	HardCap                int
+	EligibleEntryTarget    int
+	FinalLimit             int
+	MaxMatchingChunks      int
+	MaxNeighborsPerAnchor  int
 }
 
 // DefaultPolicy returns a fresh copy of the stable semantic-retrieve-v2 policy
 // so callers cannot mutate the package default.
 func DefaultPolicy() Policy {
 	return Policy{
-		Version:             PolicyVersion,
-		RRFK:                60,
-		InitialWindow:       50,
-		WindowGrowth:        2,
-		HardCap:             200,
-		EligibleEntryTarget: 20,
-		FinalLimit:          10,
+		Version:               PolicyVersion,
+		RRFK:                  60,
+		InitialWindow:         50,
+		WindowGrowth:          2,
+		HardCap:               200,
+		EligibleEntryTarget:   20,
+		FinalLimit:            10,
+		MaxMatchingChunks:     3,
+		MaxNeighborsPerAnchor: 1,
 	}
 }
 
@@ -110,9 +114,11 @@ type Lane struct {
 }
 
 // Response contains only recall-stage data. Callers decide how to present it.
+// Evidence is parallel to Candidates and never mutates entry ranking.
 type Response struct {
 	PolicyVersion string
 	Candidates    []Candidate
+	Evidence      []EntryEvidence
 	Lanes         []Lane
 	Degraded      bool
 	Reason        contracts.ReasonCode
@@ -182,6 +188,8 @@ type ScopeBackend struct {
 	ChunkFTS  ChunkFTS
 	VectorKNN VectorKNN
 	Hydrator  EntryHydrator
+	// ChunkLoader hydrates sealed chunk evidence after entry ranking.
+	ChunkLoader ChunkLoader
 	// FiltersPushed reports whether ChunkFTS already applied exact filters in SQL.
 	FiltersPushed bool
 }
@@ -231,23 +239,26 @@ func (f Facade) Recall(ctx context.Context, request Request) (Response, error) {
 	}
 
 	type laneResult struct {
-		hits []LaneHit
-		lane Lane
-		err  error
+		hits    []LaneHit
+		matches []MatchHit
+		lane    Lane
+		err     error
 	}
 	results := make([]laneResult, 0, len(f.Backends)*2)
 	for _, backend := range f.Backends {
-		lexical, lane, err := f.collectLexicalLane(ctx, backend, request, policy)
-		results = append(results, laneResult{hits: lexical, lane: lane, err: err})
+		lexical, matches, lane, err := f.collectLexicalLane(ctx, backend, request, policy)
+		results = append(results, laneResult{hits: lexical, matches: matches, lane: lane, err: err})
 		if request.Mode == contracts.ModeLexical {
 			continue
 		}
-		vector, vectorLane, vectorErr := f.collectVectorLane(ctx, backend, request, policy, embedding, embedErr)
-		results = append(results, laneResult{hits: vector, lane: vectorLane, err: vectorErr})
+		vector, vectorMatches, vectorLane, vectorErr := f.collectVectorLane(ctx, backend, request, policy, embedding, embedErr)
+		results = append(results, laneResult{hits: vector, matches: vectorMatches, lane: vectorLane, err: vectorErr})
 	}
 
 	lanes := make([]Lane, 0, len(results))
 	var fusedLanes [][]LaneHit
+	var namedLanes []NamedLaneHits
+	var allMatches []MatchHit
 	var laneErrors []error
 	var firstLaneReason contracts.ReasonCode
 	available := 0
@@ -263,7 +274,9 @@ func (f Facade) Recall(ctx context.Context, request Request) (Response, error) {
 		available++
 		if len(result.hits) > 0 {
 			fusedLanes = append(fusedLanes, result.hits)
+			namedLanes = append(namedLanes, NamedLaneHits{Name: result.lane.Name, Hits: result.hits})
 		}
+		allMatches = append(allMatches, result.matches...)
 	}
 
 	if request.Mode == contracts.ModeRequired {
@@ -314,7 +327,22 @@ func (f Facade) Recall(ctx context.Context, request Request) (Response, error) {
 		return Response{}, err
 	}
 	response.Candidates = ApplyGovernance(hydrated, policy)
+	evidence, err := SelectEvidence(ctx, response.Candidates, namedLanes, allMatches, f.chunkLoaders(), policy)
+	if err != nil {
+		return Response{}, err
+	}
+	response.Evidence = evidence
 	return response, nil
+}
+
+func (f Facade) chunkLoaders() map[string]ChunkLoader {
+	out := make(map[string]ChunkLoader, len(f.Backends))
+	for _, backend := range f.Backends {
+		if backend.ChunkLoader != nil {
+			out[backend.Scope] = backend.ChunkLoader
+		}
+	}
+	return out
 }
 
 func (f Facade) policy() (Policy, error) {
@@ -343,6 +371,12 @@ func (f Facade) policy() (Policy, error) {
 	if policy.FinalLimit <= 0 {
 		return Policy{}, errors.New("invalid retrieval policy: FinalLimit must be positive")
 	}
+	if policy.MaxMatchingChunks <= 0 {
+		policy.MaxMatchingChunks = DefaultPolicy().MaxMatchingChunks
+	}
+	if policy.MaxNeighborsPerAnchor <= 0 {
+		policy.MaxNeighborsPerAnchor = DefaultPolicy().MaxNeighborsPerAnchor
+	}
 	return policy, nil
 }
 
@@ -367,17 +401,17 @@ func (f Facade) embed(ctx context.Context, query string) ([]float32, error) {
 	return f.Embedder.EmbedQuery(ctx, query)
 }
 
-func (f Facade) collectLexicalLane(ctx context.Context, backend ScopeBackend, request Request, policy Policy) ([]LaneHit, Lane, error) {
+func (f Facade) collectLexicalLane(ctx context.Context, backend ScopeBackend, request Request, policy Policy) ([]LaneHit, []MatchHit, Lane, error) {
 	lane := Lane{Scope: backend.Scope, Name: LaneNameChunkFTS, HardCap: policy.HardCap}
 	if backend.ChunkFTS == nil {
 		lane.Degraded = true
 		lane.Reason = contracts.ReasonRuntimeUnavailable
-		return nil, lane, errors.New("chunk FTS backend is not configured")
+		return nil, nil, lane, errors.New("chunk FTS backend is not configured")
 	}
 	provider := newPrefixProvider(func(limit int) ([]RawChunkHit, error) {
 		return backend.ChunkFTS.SearchChunks(ctx, request.Query, limit)
 	})
-	hits, diagnostics, err := collectEntryLane(provider, policy, backend.Scope, request.Filters, !backend.FiltersPushed)
+	hits, matches, diagnostics, err := collectEntryLane(provider, policy, backend.Scope, LaneNameChunkFTS, request.Filters, !backend.FiltersPushed)
 	lane.RawHits = diagnostics.RawHits
 	lane.FilterRejections = diagnostics.FilterRejections
 	lane.EligibleEntries = diagnostics.EligibleEntries
@@ -386,9 +420,9 @@ func (f Facade) collectLexicalLane(ctx context.Context, backend ScopeBackend, re
 	if err != nil {
 		lane.Degraded = true
 		lane.Reason = classifyLaneError(err, true)
-		return nil, lane, err
+		return nil, nil, lane, err
 	}
-	return hits, lane, nil
+	return hits, matches, lane, nil
 }
 
 func (f Facade) collectVectorLane(
@@ -398,22 +432,22 @@ func (f Facade) collectVectorLane(
 	policy Policy,
 	embedding []float32,
 	embedErr error,
-) ([]LaneHit, Lane, error) {
+) ([]LaneHit, []MatchHit, Lane, error) {
 	lane := Lane{Scope: backend.Scope, Name: LaneNameVectorKNN, HardCap: policy.HardCap}
 	if embedErr != nil {
 		lane.Degraded = true
 		lane.Reason = classifyLaneError(embedErr, false)
-		return nil, lane, embedErr
+		return nil, nil, lane, embedErr
 	}
 	if backend.VectorKNN == nil {
 		lane.Degraded = true
 		lane.Reason = contracts.ReasonRuntimeUnavailable
-		return nil, lane, errors.New("vector KNN backend is not configured")
+		return nil, nil, lane, errors.New("vector KNN backend is not configured")
 	}
 	provider := newPrefixProvider(func(limit int) ([]RawChunkHit, error) {
 		return backend.VectorKNN.SearchChunks(ctx, embedding, limit)
 	})
-	hits, diagnostics, err := collectEntryLane(provider, policy, backend.Scope, request.Filters, true)
+	hits, matches, diagnostics, err := collectEntryLane(provider, policy, backend.Scope, LaneNameVectorKNN, request.Filters, true)
 	lane.RawHits = diagnostics.RawHits
 	lane.FilterRejections = diagnostics.FilterRejections
 	lane.EligibleEntries = diagnostics.EligibleEntries
@@ -422,9 +456,9 @@ func (f Facade) collectVectorLane(
 	if err != nil {
 		lane.Degraded = true
 		lane.Reason = classifyLaneError(err, false)
-		return nil, lane, err
+		return nil, nil, lane, err
 	}
-	return hits, lane, nil
+	return hits, matches, lane, nil
 }
 
 func (f Facade) hydrateAll(ctx context.Context, candidates []Candidate) ([]Candidate, error) {

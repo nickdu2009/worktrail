@@ -147,22 +147,23 @@ func TestProductionSemanticSearcherProfileMismatchAcrossScopes(t *testing.T) {
 
 func TestSemanticContextRankingsKeepScopeQualifiedSamePath(t *testing.T) {
 	rankings := semanticContextRankings([]index.Result{
-		{Entry: index.Entry{Scope: "user", Path: "rules/shared.md"}},
-		{Entry: index.Entry{Scope: "project", Path: "rules/shared.md"}},
+		{Entry: index.Entry{ID: "shared", Scope: "user", Path: "rules/shared.md"}},
+		{Entry: index.Entry{ID: "shared", Scope: "project", Path: "rules/shared.md"}},
 	})
 	want := []struct {
-		scope string
-		path  string
-		rank  int
+		scope   string
+		entryID string
+		path    string
+		rank    int
 	}{
-		{"user", "rules/shared.md", 1},
-		{"project", "rules/shared.md", 2},
+		{"user", "shared", "rules/shared.md", 1},
+		{"project", "shared", "rules/shared.md", 2},
 	}
 	if len(rankings) != len(want) {
 		t.Fatalf("rankings = %#v", rankings)
 	}
 	for i, ranking := range rankings {
-		if ranking.Scope != want[i].scope || ranking.Path != want[i].path || ranking.Rank != want[i].rank {
+		if ranking.Scope != want[i].scope || ranking.EntryID != want[i].entryID || ranking.Path != want[i].path || ranking.Rank != want[i].rank {
 			t.Fatalf("ranking[%d] = %#v, want %#v", i, ranking, want[i])
 		}
 	}

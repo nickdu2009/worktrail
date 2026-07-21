@@ -2,6 +2,7 @@ package generation
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -235,6 +236,139 @@ func (a *Active) VectorKNN(embedding []float32, limit int) ([]ChunkHit, error) {
 		return nil, err
 	}
 	return hits, nil
+}
+
+// ChunkEvidenceRecord is one sealed chunk's ranking-independent evidence fields.
+// Ranges use zero-based, half-open UTF-8 byte offsets in the original source.
+type ChunkEvidenceRecord struct {
+	ChunkID            string
+	EntryID            string
+	Path               string
+	ChunkOrder         int
+	ChunkKind          string
+	StructuralGroupID  string
+	FragmentOrdinal    int
+	HeadingBreadcrumb  []string
+	SourceByteLength   int
+	PrimaryStart       int
+	PrimaryEnd         int
+	ContextStart       *int
+	ContextEnd         *int
+	GroupStart         *int
+	GroupEnd           *int
+	PrevChunkID        string
+	NextChunkID        string
+}
+
+// ChunksByIDs loads evidence metadata for the requested chunk IDs. Missing IDs
+// are omitted. Results are ordered by the first occurrence of each requested ID.
+func (a *Active) ChunksByIDs(chunkIDs []string) ([]ChunkEvidenceRecord, error) {
+	unique := uniqueNonEmpty(chunkIDs)
+	if len(unique) == 0 {
+		return []ChunkEvidenceRecord{}, nil
+	}
+
+	placeholders := make([]string, len(unique))
+	args := make([]any, len(unique))
+	for i, id := range unique {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := `
+		SELECT
+			chunk_id,
+			document_id,
+			path,
+			chunk_order,
+			chunk_kind,
+			structural_group_id,
+			fragment_ordinal,
+			heading_breadcrumb,
+			source_byte_length,
+			source_start,
+			source_end,
+			context_start,
+			context_end,
+			group_start,
+			group_end,
+			prev_chunk_id,
+			next_chunk_id
+		FROM chunks
+		WHERE chunk_id IN (` + strings.Join(placeholders, ",") + `)`
+
+	byID := make(map[string]ChunkEvidenceRecord, len(unique))
+	err := a.withReadOnlyDB(func(db *sql.DB) error {
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			return newQueryError(QueryErrorQuery, "chunk evidence", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				rec                                ChunkEvidenceRecord
+				breadcrumbJSON                     string
+				contextStart, contextEnd           sql.NullInt64
+				groupStart, groupEnd               sql.NullInt64
+			)
+			if err := rows.Scan(
+				&rec.ChunkID,
+				&rec.EntryID,
+				&rec.Path,
+				&rec.ChunkOrder,
+				&rec.ChunkKind,
+				&rec.StructuralGroupID,
+				&rec.FragmentOrdinal,
+				&breadcrumbJSON,
+				&rec.SourceByteLength,
+				&rec.PrimaryStart,
+				&rec.PrimaryEnd,
+				&contextStart,
+				&contextEnd,
+				&groupStart,
+				&groupEnd,
+				&rec.PrevChunkID,
+				&rec.NextChunkID,
+			); err != nil {
+				return newQueryError(QueryErrorQuery, "chunk evidence", err)
+			}
+			if err := json.Unmarshal([]byte(breadcrumbJSON), &rec.HeadingBreadcrumb); err != nil {
+				return newQueryError(QueryErrorQuery, "chunk evidence", fmt.Errorf("decode heading breadcrumb for %q: %w", rec.ChunkID, err))
+			}
+			if rec.HeadingBreadcrumb == nil {
+				rec.HeadingBreadcrumb = []string{}
+			}
+			rec.ContextStart, rec.ContextEnd = nullIntPair(contextStart, contextEnd)
+			rec.GroupStart, rec.GroupEnd = nullIntPair(groupStart, groupEnd)
+			byID[rec.ChunkID] = rec
+		}
+		if err := rows.Err(); err != nil {
+			return newQueryError(QueryErrorQuery, "chunk evidence", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]ChunkEvidenceRecord, 0, len(unique))
+	for _, id := range unique {
+		if rec, ok := byID[id]; ok {
+			out = append(out, rec)
+		}
+	}
+	return out, nil
+}
+
+func nullIntPair(start, end sql.NullInt64) (*int, *int) {
+	if !start.Valid && !end.Valid {
+		return nil, nil
+	}
+	if !start.Valid || !end.Valid {
+		return nil, nil
+	}
+	startValue := int(start.Int64)
+	endValue := int(end.Int64)
+	return &startValue, &endValue
 }
 
 // EntryTagSets loads distinct tags for the requested entry IDs from the sealed

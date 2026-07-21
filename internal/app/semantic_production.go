@@ -248,6 +248,7 @@ func prepareProductionSemanticRuntime(
 				Scope:  item.scope,
 			},
 			Hydrator:      item.hydrator,
+			ChunkLoader:   retrieve.GenerationChunkLoader{Active: item.active},
 			FiltersPushed: true,
 		})
 		legacyAdapters = append(legacyAdapters, retrieve.LegacyLexicalAdapter{
@@ -312,8 +313,12 @@ func (s *productionSemanticMultiRecall) Recall(ctx context.Context, request Sema
 	if err != nil {
 		return SemanticSearchResponse{}, err
 	}
+	details := mapProductionEvidence(response.Evidence)
 	if request.Limit > 0 && len(results) > request.Limit {
 		results = results[:request.Limit]
+		if len(details) > request.Limit {
+			details = details[:request.Limit]
+		}
 	}
 
 	lanes := make([]SemanticSearchLane, len(response.Lanes))
@@ -333,6 +338,7 @@ func (s *productionSemanticMultiRecall) Recall(ctx context.Context, request Sema
 	}
 	searchResponse := SemanticSearchResponse{
 		Results:  results,
+		Details:  details,
 		Policy:   response.PolicyVersion,
 		Profile:  s.profileID,
 		Lanes:    lanes,
@@ -364,6 +370,64 @@ func (s *productionSemanticMultiRecall) Close() error {
 		}
 	}
 	return first
+}
+
+func mapProductionEvidence(evidence []retrieve.EntryEvidence) []SemanticSearchResultDetail {
+	if len(evidence) == 0 {
+		return nil
+	}
+	out := make([]SemanticSearchResultDetail, len(evidence))
+	for i, item := range evidence {
+		detail := SemanticSearchResultDetail{
+			Ranks: SemanticSearchRanks{Final: item.FinalRank},
+		}
+		if item.LexicalRank > 0 {
+			rank := item.LexicalRank
+			detail.Ranks.Lexical = &rank
+		}
+		if item.SemanticRank > 0 {
+			rank := item.SemanticRank
+			detail.Ranks.Semantic = &rank
+		}
+		if len(item.Chunks) > 0 {
+			detail.ChunkMatches = make([]SemanticChunkMatch, len(item.Chunks))
+			for j, chunk := range item.Chunks {
+				match := SemanticChunkMatch{
+					ChunkID:           chunk.ChunkID,
+					ChunkKind:         chunk.ChunkKind,
+					StructuralGroupID: chunk.StructuralGroupID,
+					HeadingBreadcrumb: append([]string(nil), chunk.HeadingBreadcrumb...),
+					EvidenceRole:      chunk.EvidenceRole,
+					Lanes:             append([]string(nil), chunk.Lanes...),
+					PrimarySourceRange: SemanticByteRange{
+						StartByte: chunk.PrimarySourceRange.StartByte,
+						EndByte:   chunk.PrimarySourceRange.EndByte,
+					},
+				}
+				if len(chunk.BestChunkRanks) > 0 {
+					match.BestChunkRanks = make(map[string]int, len(chunk.BestChunkRanks))
+					for lane, rank := range chunk.BestChunkRanks {
+						match.BestChunkRanks[lane] = rank
+					}
+				}
+				if chunk.ContextSourceRange != nil {
+					match.ContextSourceRange = &SemanticByteRange{
+						StartByte: chunk.ContextSourceRange.StartByte,
+						EndByte:   chunk.ContextSourceRange.EndByte,
+					}
+				}
+				if chunk.StructuralGroupSourceRange != nil {
+					match.StructuralGroupSourceRange = &SemanticByteRange{
+						StartByte: chunk.StructuralGroupSourceRange.StartByte,
+						EndByte:   chunk.StructuralGroupSourceRange.EndByte,
+					}
+				}
+				detail.ChunkMatches[j] = match
+			}
+		}
+		out[i] = detail
+	}
+	return out
 }
 
 func mapProductionCandidates(ctx context.Context, opened []productionOpenedScope, candidates []retrieve.Candidate) ([]index.Result, error) {

@@ -225,6 +225,52 @@ func TestActiveChunkFTSReturnsQueryError(t *testing.T) {
 	requireQueryErrorKind(t, err, QueryErrorQuery)
 }
 
+func TestActiveChunksByIDsReturnsEvidenceMetadataAndNeighbors(t *testing.T) {
+	directory := t.TempDir()
+	pointer := testPointer("query-evidence", "")
+	metadata := metadataForPointer(pointer)
+	metadata.Dimension = 2
+	createQueryableGeneration(t, directory, pointer, metadata, []queryChunk{
+		{
+			id: "chunk-a", entryID: "entry", path: "docs/a.md", body: "row a", input: "input a", vector: []float32{1, 0},
+			kind: chunk.KindTableRowGroup, groupID: "group-1", order: 1, breadcrumb: []string{"Architecture"},
+			primaryStart: 10, primaryEnd: 20, contextStart: 0, contextEnd: 10, groupStart: 0, groupEnd: 40,
+			prev: "", next: "chunk-b", sourceSize: 40,
+		},
+		{
+			id: "chunk-b", entryID: "entry", path: "docs/a.md", body: "row b", input: "input b", vector: []float32{0, 1},
+			kind: chunk.KindTableRowGroup, groupID: "group-1", order: 2, breadcrumb: []string{"Architecture"},
+			primaryStart: 20, primaryEnd: 30, contextStart: 0, contextEnd: 10, groupStart: 0, groupEnd: 40,
+			prev: "chunk-a", next: "", sourceSize: 40,
+		},
+	})
+	active, err := OpenActive(context.Background(), directory, metadata)
+	if err != nil {
+		t.Fatalf("OpenActive() error = %v", err)
+	}
+	t.Cleanup(func() { _ = active.Close() })
+
+	got, err := active.ChunksByIDs([]string{"chunk-b", "missing", "chunk-a", "chunk-b"})
+	if err != nil {
+		t.Fatalf("ChunksByIDs() error = %v", err)
+	}
+	if len(got) != 2 || got[0].ChunkID != "chunk-b" || got[1].ChunkID != "chunk-a" {
+		t.Fatalf("ChunksByIDs() = %#v", got)
+	}
+	if got[1].ChunkKind != chunk.KindTableRowGroup || got[1].StructuralGroupID != "group-1" || got[1].NextChunkID != "chunk-b" {
+		t.Fatalf("chunk-a evidence = %#v", got[1])
+	}
+	if got[1].ContextStart == nil || *got[1].ContextStart != 0 || got[1].ContextEnd == nil || *got[1].ContextEnd != 10 {
+		t.Fatalf("context range = %#v", got[1])
+	}
+	if got[1].GroupStart == nil || *got[1].GroupStart != 0 || got[1].GroupEnd == nil || *got[1].GroupEnd != 40 {
+		t.Fatalf("group range = %#v", got[1])
+	}
+	if len(got[1].HeadingBreadcrumb) != 1 || got[1].HeadingBreadcrumb[0] != "Architecture" {
+		t.Fatalf("breadcrumb = %#v", got[1].HeadingBreadcrumb)
+	}
+}
+
 func TestActiveClosedQueryReturnsMetadataError(t *testing.T) {
 	directory := t.TempDir()
 	pointer := testPointer("query-closed", "")
@@ -244,15 +290,29 @@ func TestActiveClosedQueryReturnsMetadataError(t *testing.T) {
 }
 
 type queryChunk struct {
-	id      string
-	entryID string
-	path    string
-	docType string
-	topic   string
-	tags    []string
-	body    string
-	input   string
-	vector  []float32
+	id           string
+	entryID      string
+	path         string
+	docType      string
+	topic        string
+	tags         []string
+	body         string
+	input        string
+	vector       []float32
+	kind         string
+	groupID      string
+	order        int
+	breadcrumb   []string
+	primaryStart int
+	primaryEnd   int
+	contextStart int
+	contextEnd   int
+	groupStart   int
+	groupEnd     int
+	prev         string
+	next         string
+	sourceSize   int
+	hasRanges    bool
 }
 
 func createQueryableGeneration(t *testing.T, directory string, pointer Pointer, metadata Metadata, chunks []queryChunk) string {
@@ -280,6 +340,34 @@ func createQueryableGeneration(t *testing.T, directory string, pointer Pointer, 
 		if docType == "" {
 			docType = "rule"
 		}
+		kind := source.kind
+		if kind == "" {
+			kind = chunk.KindText
+		}
+		groupID := source.groupID
+		if groupID == "" {
+			groupID = "group-" + source.id
+		}
+		primaryStart, primaryEnd := 0, end
+		sourceSize := end
+		var contextRange, groupRange *chunk.ByteRange
+		if source.hasRanges || source.primaryEnd > 0 || source.sourceSize > 0 {
+			primaryStart = source.primaryStart
+			primaryEnd = source.primaryEnd
+			if primaryEnd <= primaryStart {
+				primaryEnd = primaryStart + 1
+			}
+			sourceSize = source.sourceSize
+			if sourceSize < primaryEnd {
+				sourceSize = primaryEnd
+			}
+			if source.contextEnd > source.contextStart {
+				contextRange = &chunk.ByteRange{Start: source.contextStart, End: source.contextEnd}
+			}
+			if source.groupEnd > source.groupStart {
+				groupRange = &chunk.ByteRange{Start: source.groupStart, End: source.groupEnd}
+			}
+		}
 		inputs = append(inputs, chunk.Chunk{
 			ChunkID:           source.id,
 			Scope:             "project",
@@ -288,17 +376,23 @@ func createQueryableGeneration(t *testing.T, directory string, pointer Pointer, 
 			Type:              docType,
 			Topic:             source.topic,
 			Tags:              append([]string{}, source.tags...),
-			Kind:              chunk.KindText,
-			StructuralGroupID: "group-" + source.id,
+			Order:             source.order,
+			Kind:              kind,
+			StructuralGroupID: groupID,
+			HeadingBreadcrumb: append([]string(nil), source.breadcrumb...),
 			Body:              body,
 			MetadataTerms:     "path: " + source.path,
 			ContextTerms:      "section",
 			EmbeddingInput:    source.input,
 			EmbeddingHash:     "hash-" + source.id,
 			ChunkerVersion:    chunk.Version,
-			SourceStart:       0,
-			SourceEnd:         end,
-			SourceSizeByte:    end,
+			SourceStart:       primaryStart,
+			SourceEnd:         primaryEnd,
+			ContextRange:      contextRange,
+			GroupRange:        groupRange,
+			PrevChunkID:       source.prev,
+			NextChunkID:       source.next,
+			SourceSizeByte:    sourceSize,
 		})
 		vectors[source.input] = source.vector
 	}

@@ -135,12 +135,13 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 				Tokenizer: index.NewTokenizer(),
 				Scope:     runtime.scope,
 			}
-			chunkHits, _, err := retrieve.CollectEntryLane(
+			chunkHits, _, _, err := retrieve.CollectEntryLane(
 				func(limit int) ([]retrieve.RawChunkHit, error) {
 					return ftsAdapter.SearchChunks(ctx, query.Text, limit)
 				},
 				policy,
 				runtime.scope,
+				retrieve.LaneNameChunkFTS,
 				retrieve.ExactFilters{},
 				false,
 			)
@@ -156,12 +157,13 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 		}
 		for _, runtime := range runtimes {
 			knnAdapter := retrieve.GenerationVectorKNN{Active: runtime.active, Scope: runtime.scope}
-			denseHits, _, err := retrieve.CollectEntryLane(
+			denseHits, _, _, err := retrieve.CollectEntryLane(
 				func(limit int) ([]retrieve.RawChunkHit, error) {
 					return knnAdapter.SearchChunks(ctx, embedding, limit)
 				},
 				policy,
 				runtime.scope,
+				retrieve.LaneNameVectorKNN,
 				retrieve.ExactFilters{},
 				true,
 			)

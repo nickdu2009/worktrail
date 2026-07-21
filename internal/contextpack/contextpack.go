@@ -37,6 +37,7 @@ type Item struct {
 	Type          string    `json:"type"`
 	Title         string    `json:"title"`
 	Path          string    `json:"path"`
+	EntryID       string    `json:"-"`
 	Status        string    `json:"status,omitempty"`
 	Stage         string    `json:"stage,omitempty"`
 	Lifecycle     string    `json:"lifecycle,omitempty"`
@@ -174,7 +175,7 @@ func Build(env paths.Env, opts Options) (Pack, error) {
 				continue
 			}
 			if spec.keep(entry) {
-				items = append(items, itemFromEntry(entry, supersededBy[filepath.ToSlash(entry.Path)]))
+				items = append(items, itemFromEntry(entry, supersededBy[scopePathKey(entry.Scope, entry.Path)]))
 			}
 		}
 		sort.SliceStable(items, func(i, j int) bool {
@@ -401,6 +402,7 @@ func itemFromEntry(entry index.Entry, supersededBy []string) Item {
 		Type:          entry.Type,
 		Title:         entry.Title,
 		Path:          filepath.ToSlash(entry.Path),
+		EntryID:       entry.ID,
 		Status:        entry.Status,
 		Stage:         entry.Stage,
 		Lifecycle:     entry.Lifecycle,
@@ -480,24 +482,48 @@ func selectItems(selector Selector, request SelectionRequest) ([]Item, error) {
 	if len(selected) > request.Limit {
 		return nil, fmt.Errorf("select context section %q: selector returned %d items, limit is %d", request.Section, len(selected), request.Limit)
 	}
-	candidates := make(map[string]Item, len(request.Candidates))
+	candidatesByEntry := make(map[string]Item, len(request.Candidates))
+	candidatesByPath := make(map[string]Item, len(request.Candidates))
 	for _, item := range request.Candidates {
-		candidates[item.Path] = item
+		if item.EntryID != "" {
+			candidatesByEntry[scopeEntryKey(item.Scope, item.EntryID)] = item
+		}
+		candidatesByPath[scopePathKey(item.Scope, item.Path)] = item
 	}
 	seen := make(map[string]bool, len(selected))
 	out := make([]Item, 0, len(selected))
 	for _, item := range selected {
-		canonical, ok := candidates[item.Path]
+		canonical, identity, ok := lookupSelectedItem(item, candidatesByEntry, candidatesByPath)
 		if !ok {
-			return nil, fmt.Errorf("select context section %q: selector returned non-candidate path %q", request.Section, item.Path)
+			return nil, fmt.Errorf("select context section %q: selector returned non-candidate item scope=%q entry_id=%q path=%q", request.Section, item.Scope, item.EntryID, item.Path)
 		}
-		if seen[item.Path] {
-			return nil, fmt.Errorf("select context section %q: selector returned duplicate path %q", request.Section, item.Path)
+		if seen[identity] {
+			return nil, fmt.Errorf("select context section %q: selector returned duplicate item %q", request.Section, identity)
 		}
-		seen[item.Path] = true
+		seen[identity] = true
 		out = append(out, canonical)
 	}
 	return out, nil
+}
+
+func lookupSelectedItem(item Item, byEntry, byPath map[string]Item) (Item, string, bool) {
+	if item.EntryID != "" {
+		key := scopeEntryKey(item.Scope, item.EntryID)
+		if canonical, ok := byEntry[key]; ok {
+			return canonical, key, true
+		}
+	}
+	key := scopePathKey(item.Scope, item.Path)
+	canonical, ok := byPath[key]
+	return canonical, key, ok
+}
+
+func scopePathKey(scope, path string) string {
+	return scope + "\x00" + filepath.ToSlash(path)
+}
+
+func scopeEntryKey(scope, entryID string) string {
+	return scope + "\x00" + entryID
 }
 
 func cloneItems(items []Item) []Item {
@@ -571,16 +597,18 @@ func supersededByMap(entries []index.Entry) map[string][]string {
 	out := map[string][]string{}
 	for _, entry := range entries {
 		path := filepath.ToSlash(entry.Path)
+		key := scopePathKey(entry.Scope, path)
 		for _, old := range entry.Supersedes {
 			old = filepath.ToSlash(strings.TrimSpace(old))
 			if old != "" {
-				out[old] = appendUnique(out[old], path)
+				oldKey := scopePathKey(entry.Scope, old)
+				out[oldKey] = appendUnique(out[oldKey], path)
 			}
 		}
 		for _, by := range entry.SupersededBy {
 			by = filepath.ToSlash(strings.TrimSpace(by))
 			if by != "" {
-				out[path] = appendUnique(out[path], by)
+				out[key] = appendUnique(out[key], by)
 			}
 		}
 	}

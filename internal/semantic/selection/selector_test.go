@@ -118,33 +118,40 @@ func TestSelectRanksSamePathInDifferentScopes(t *testing.T) {
 	}
 }
 
-func TestSelectUsesFirstExactScopedRankOverUnscopedFallback(t *testing.T) {
-	for _, rankings := range [][]Ranking{
-		{
-			{Scope: "project", Path: "rules/shared.md", Rank: 5},
-			{Path: "rules/shared.md", Rank: 0},
-			{Scope: "project", Path: "rules/shared.md", Rank: 1},
-			{Scope: "project", Path: "rules/other.md", Rank: 3},
+func TestSelectPrefersEntryIDOverPathAndIgnoresUnscopedPath(t *testing.T) {
+	selector := New([]Ranking{
+		{Scope: "project", EntryID: "shared", Path: "rules/shared.md", Rank: 2},
+		{Scope: "project", Path: "rules/other.md", Rank: 1},
+		{Path: "rules/shared.md", Rank: 0}, // unscoped path must not cross into project
+	})
+	got := selectIdentities(t, selector, contextpack.SelectionRequest{
+		Limit: 2,
+		Candidates: []contextpack.Item{
+			scopedEntryItem("project", "shared", "rules/shared.md"),
+			scopedItem("project", "rules/other.md"),
 		},
-		{
-			{Path: "rules/shared.md", Rank: 0},
-			{Scope: "project", Path: "rules/shared.md", Rank: 5},
-			{Scope: "project", Path: "rules/shared.md", Rank: 1},
-			{Scope: "project", Path: "rules/other.md", Rank: 3},
+	})
+	want := []string{"project:rules/other.md", "project:rules/shared.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected identities = %v, want %v", got, want)
+	}
+}
+
+func TestSelectFallsBackToScopedPathWithoutEntryID(t *testing.T) {
+	selector := New([]Ranking{
+		{Scope: "project", Path: "rules/shared.md", Rank: 1},
+		{Scope: "project", Path: "rules/other.md", Rank: 2},
+	})
+	got := selectIdentities(t, selector, contextpack.SelectionRequest{
+		Limit: 2,
+		Candidates: []contextpack.Item{
+			scopedItem("project", "rules/other.md"),
+			scopedItem("project", "rules/shared.md"),
 		},
-	} {
-		selector := New(rankings)
-		got := selectIdentities(t, selector, contextpack.SelectionRequest{
-			Limit: 2,
-			Candidates: []contextpack.Item{
-				scopedItem("project", "rules/shared.md"),
-				scopedItem("project", "rules/other.md"),
-			},
-		})
-		want := []string{"project:rules/other.md", "project:rules/shared.md"}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("selected identities = %v, want %v", got, want)
-		}
+	})
+	want := []string{"project:rules/shared.md", "project:rules/other.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected identities = %v, want %v", got, want)
 	}
 }
 
@@ -259,5 +266,11 @@ func item(path string) contextpack.Item {
 func scopedItem(scope, path string) contextpack.Item {
 	item := item(path)
 	item.Scope = scope
+	return item
+}
+
+func scopedEntryItem(scope, entryID, path string) contextpack.Item {
+	item := scopedItem(scope, path)
+	item.EntryID = entryID
 	return item
 }

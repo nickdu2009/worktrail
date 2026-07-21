@@ -201,6 +201,44 @@ func matchesIndexFilters(entry index.Entry, query index.Query) bool {
 	return true
 }
 
+// GenerationChunkLoader adapts one caller-owned active generation to ChunkLoader.
+type GenerationChunkLoader struct {
+	Active *generation.Active
+}
+
+// LoadChunks returns sealed chunk evidence metadata keyed by chunk ID.
+func (a GenerationChunkLoader) LoadChunks(_ context.Context, chunkIDs []string) (map[string]ChunkMeta, error) {
+	if a.Active == nil {
+		return nil, errors.New("generation chunk loader is not configured")
+	}
+	records, err := a.Active.ChunksByIDs(chunkIDs)
+	if err != nil {
+		return nil, wrapGenerationQueryError(err, false)
+	}
+	out := make(map[string]ChunkMeta, len(records))
+	for _, record := range records {
+		meta := ChunkMeta{
+			ChunkID:           record.ChunkID,
+			EntryID:           record.EntryID,
+			ChunkKind:         record.ChunkKind,
+			StructuralGroupID: record.StructuralGroupID,
+			HeadingBreadcrumb: append([]string(nil), record.HeadingBreadcrumb...),
+			ChunkOrder:        record.ChunkOrder,
+			Primary:           ByteRange{StartByte: record.PrimaryStart, EndByte: record.PrimaryEnd},
+			PrevChunkID:       record.PrevChunkID,
+			NextChunkID:       record.NextChunkID,
+		}
+		if record.ContextStart != nil && record.ContextEnd != nil {
+			meta.Context = &ByteRange{StartByte: *record.ContextStart, EndByte: *record.ContextEnd}
+		}
+		if record.GroupStart != nil && record.GroupEnd != nil {
+			meta.Group = &ByteRange{StartByte: *record.GroupStart, EndByte: *record.GroupEnd}
+		}
+		out[record.ChunkID] = meta
+	}
+	return out, nil
+}
+
 // GenerationChunkFTS adapts one caller-owned active generation to ChunkFTS.
 // It never closes Active: the caller that opened the generation owns its lease.
 type GenerationChunkFTS struct {

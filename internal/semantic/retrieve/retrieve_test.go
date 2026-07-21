@@ -249,7 +249,7 @@ func TestPrefixProviderFetchesHardCapOnceAndRefills(t *testing.T) {
 		return hits, nil
 	}
 	provider := newPrefixProvider(fetch)
-	got, diagnostics, err := collectEntryLane(provider, policy, "project", ExactFilters{}, true)
+	got, _, diagnostics, err := collectEntryLane(provider, policy, "project", LaneNameChunkFTS, ExactFilters{}, true)
 	if err != nil {
 		t.Fatalf("collectEntryLane() error = %v", err)
 	}
@@ -286,7 +286,7 @@ func TestFilterStarvationRefillsAndCountsRejections(t *testing.T) {
 		}
 		return hits[:limit], nil
 	})
-	got, diagnostics, err := collectEntryLane(provider, policy, "project", ExactFilters{Type: "rule"}, true)
+	got, _, diagnostics, err := collectEntryLane(provider, policy, "project", LaneNameChunkFTS, ExactFilters{Type: "rule"}, true)
 	if err != nil {
 		t.Fatalf("collectEntryLane() error = %v", err)
 	}
@@ -308,7 +308,7 @@ func TestBackendExhaustionDoesNotMarkSaturation(t *testing.T) {
 		{ChunkID: "c2", EntryID: "e2", Rank: 2},
 	}
 	provider := newPrefixProvider(func(limit int) ([]RawChunkHit, error) { return hits, nil })
-	got, diagnostics, err := collectEntryLane(provider, policy, "project", ExactFilters{}, true)
+	got, _, diagnostics, err := collectEntryLane(provider, policy, "project", LaneNameChunkFTS, ExactFilters{}, true)
 	if err != nil {
 		t.Fatalf("collectEntryLane() error = %v", err)
 	}
@@ -327,7 +327,7 @@ func TestHardCapSaturationWhenTargetUnmet(t *testing.T) {
 		hits = append(hits, RawChunkHit{ChunkID: "c-" + itoa(i), EntryID: "same", Rank: i + 1})
 	}
 	provider := newPrefixProvider(func(limit int) ([]RawChunkHit, error) { return hits, nil })
-	got, diagnostics, err := collectEntryLane(provider, policy, "project", ExactFilters{}, true)
+	got, _, diagnostics, err := collectEntryLane(provider, policy, "project", LaneNameChunkFTS, ExactFilters{}, true)
 	if err != nil {
 		t.Fatalf("collectEntryLane() error = %v", err)
 	}

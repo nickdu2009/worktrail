@@ -411,9 +411,10 @@ func semanticContextRankings(results []index.Result) []selection.Ranking {
 	rankings := make([]selection.Ranking, 0, len(results))
 	for i, result := range results {
 		rankings = append(rankings, selection.Ranking{
-			Scope: result.Entry.Scope,
-			Path:  result.Entry.Path,
-			Rank:  i + 1,
+			Scope:   result.Entry.Scope,
+			EntryID: result.Entry.ID,
+			Path:    result.Entry.Path,
+			Rank:    i + 1,
 		})
 	}
 	return rankings
