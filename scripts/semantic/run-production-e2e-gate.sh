@@ -440,7 +440,10 @@ data_home=pathlib.Path(sys.argv[1]).expanduser()
 if not data_home.is_absolute():
     raise SystemExit("XDG_DATA_HOME must be absolute for release archives")
 root=(data_home / "worktrail" / "release-archive").resolve()
-if str(root) in ("/tmp", "/private/tmp") or str(root).startswith(("/tmp/", "/private/tmp/", "/var/folders/")):
+root_s=str(root)
+if root_s in ("/tmp", "/private/tmp") or root_s.startswith((
+    "/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/",
+)):
     raise SystemExit("release archive root must be persistent and must not be under a temporary directory")
 print(root)
 PY

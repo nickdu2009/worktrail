@@ -168,3 +168,7 @@ reasons; both are intentional contract/corpus updates, not gate-script bugs.
    `scripts/semantic/__pycache__/` mid-run and blocked release-archive write.
    Ignore `__pycache__` / `*.py[cod]` and set `PYTHONDONTWRITEBYTECODE=1` in the
    production E2E gate.
+9. **Release archive root persistence**: macOS `Path.resolve()` rewrites
+   `/var/folders/...` to `/private/var/folders/...`, which previously bypassed
+   the temp-dir reject list. Gate now blocks both prefixes so a polluted
+   `HOME` cannot stage a "PASS" archive under disposable paths.
