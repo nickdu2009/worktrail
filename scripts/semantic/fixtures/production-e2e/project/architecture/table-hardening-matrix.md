@@ -5,7 +5,6 @@
   "type": "architecture",
   "title": "Table Hardening Budget Matrix",
   "topic": "semantic-recall",
-  "source_of_truth": true,
   "status": "active",
   "updated_at": "2026-07-21T00:00:00Z",
   "tags": ["semantic", "table", "budget-matrix", "e2e-prod-gate"]
