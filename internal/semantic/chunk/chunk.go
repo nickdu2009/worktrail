@@ -160,6 +160,18 @@ func PolicyWithBudget(budget Budget) ChunkingPolicy {
 	}
 }
 
+// EvalPolicy builds an isolated eval chunker policy for one budget candidate.
+// The version is always chunker-v2-eval-<config-hash> so candidates never share
+// the production chunker-v2 profile or vector reuse boundary.
+func EvalPolicy(budget Budget) ChunkingPolicy {
+	hash := ConfigHash(budget)
+	return ChunkingPolicy{
+		Version:    "chunker-v2-eval-" + hash,
+		Budget:     budget,
+		ConfigHash: hash,
+	}
+}
+
 // ChunkDocument creates deterministic structural chunks using DefaultPolicy.
 func ChunkDocument(ctx context.Context, doc Document, counter contracts.TokenCounter) ([]Chunk, error) {
 	return ChunkDocumentWithPolicy(ctx, doc, counter, DefaultPolicy())

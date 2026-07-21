@@ -1,0 +1,157 @@
+{
+  "schema": "worktrail.semantic.eval.retrieval-rankings.v2",
+  "queries": [
+    {
+      "query_id": "q-table-row-key",
+      "lanes": {
+        "entry_fts": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "chunk_fts": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "dense": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "rrf": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "governed": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ]
+      },
+      "evidence": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix",
+          "chunks": [
+            {
+              "chunk_id": "7f2bd3e14e720576d2ec8c29ee9ca74b758f0762e281557ebc4410461930e37d",
+              "evidence_role": "match",
+              "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39",
+              "row_key": "512:768:80",
+              "token_count": 477,
+              "primary_source_range": {"start_byte": 721, "end_byte": 918},
+              "context_source_range": {"start_byte": 632, "end_byte": 721},
+              "structural_group_source_range": {"start_byte": 632, "end_byte": 1718}
+            },
+            {
+              "chunk_id": "0cf7c596e676a029e4fb21ec2c4c0c25bc905632c51afd617aa6142b258cc8fb",
+              "evidence_role": "neighbor",
+              "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39",
+              "row_key": "512:768:128",
+              "token_count": 469,
+              "primary_source_range": {"start_byte": 918, "end_byte": 1107}
+            }
+          ]
+        }
+      ],
+      "diagnostics": {
+        "duplicate_entries": 0,
+        "duplicate_chunk_evidence": 0,
+        "cross_group_neighbor_violations": 0,
+        "range_violations": 0,
+        "hard_max_violations": 0,
+        "max_entry_occupancy": 2,
+        "refill_rounds": 0,
+        "window_saturated": false
+      }
+    },
+    {
+      "query_id": "q-table-header-context",
+      "lanes": {
+        "entry_fts": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "chunk_fts": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "dense": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "rrf": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "governed": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ]
+      },
+      "evidence": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix",
+          "chunks": [
+            {
+              "chunk_id": "7f2bd3e14e720576d2ec8c29ee9ca74b758f0762e281557ebc4410461930e37d",
+              "evidence_role": "match",
+              "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39",
+              "row_key": "512:768:80",
+              "token_count": 477,
+              "primary_source_range": {"start_byte": 721, "end_byte": 918},
+              "context_source_range": {"start_byte": 632, "end_byte": 721},
+              "structural_group_source_range": {"start_byte": 632, "end_byte": 1718}
+            }
+          ]
+        }
+      ],
+      "diagnostics": {
+        "duplicate_entries": 0,
+        "duplicate_chunk_evidence": 0,
+        "cross_group_neighbor_violations": 0,
+        "range_violations": 0,
+        "hard_max_violations": 0,
+        "max_entry_occupancy": 1,
+        "refill_rounds": 0,
+        "window_saturated": false
+      }
+    },
+    {
+      "query_id": "q-table-aggregate",
+      "lanes": {
+        "entry_fts": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "chunk_fts": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "dense": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "rrf": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ],
+        "governed": [
+          {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+        ]
+      },
+      "evidence": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix",
+          "chunks": [
+            {
+              "chunk_id": "7f2bd3e14e720576d2ec8c29ee9ca74b758f0762e281557ebc4410461930e37d",
+              "evidence_role": "match",
+              "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39",
+              "row_key": "512:768:80",
+              "token_count": 477,
+              "primary_source_range": {"start_byte": 721, "end_byte": 918},
+              "context_source_range": {"start_byte": 632, "end_byte": 721},
+              "structural_group_source_range": {"start_byte": 632, "end_byte": 1718}
+            }
+          ]
+        }
+      ],
+      "diagnostics": {
+        "duplicate_entries": 0,
+        "duplicate_chunk_evidence": 0,
+        "cross_group_neighbor_violations": 0,
+        "range_violations": 0,
+        "hard_max_violations": 0,
+        "max_entry_occupancy": 1,
+        "refill_rounds": 0,
+        "window_saturated": false
+      }
+    }
+  ]
+}

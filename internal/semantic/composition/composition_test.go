@@ -441,5 +441,6 @@ func (compositionProcess) Start(context.Context) error { return nil }
 func (compositionProcess) Identity() (daemon.Identity, error) {
 	return daemon.Identity{PID: 1, StartedAt: time.Now()}, nil
 }
-func (compositionProcess) Signal(os.Signal) error { return nil }
-func (compositionProcess) Release() error         { return nil }
+func (compositionProcess) Signal(os.Signal) error      { return nil }
+func (compositionProcess) WaitExited(context.Context) error { return nil }
+func (compositionProcess) Release() error              { return nil }

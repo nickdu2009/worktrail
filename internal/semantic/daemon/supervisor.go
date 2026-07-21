@@ -24,6 +24,7 @@ const (
 	// budget after this wait is exhausted.
 	defaultReadyWait         = 25 * time.Second
 	defaultReadyPollInterval = 250 * time.Millisecond
+	defaultStopWait          = 5 * time.Second
 )
 
 // RuntimeVerifier is the injected local integrity-verification boundary.
@@ -114,6 +115,9 @@ type SupervisorConfig struct {
 	// ReadyPollInterval is the delay between readiness probes. Zero selects the
 	// default poll interval.
 	ReadyPollInterval time.Duration
+	// StopWait is the budget to wait for process exit after SIGTERM before
+	// removing descriptor state. Zero selects the default stop wait.
+	StopWait time.Duration
 }
 
 // Supervisor is the trusted-bundle-gated implementation of Controller.
@@ -164,6 +168,12 @@ func NewSupervisor(config SupervisorConfig) (*Supervisor, error) {
 	}
 	if config.ReadyPollInterval < 0 {
 		return nil, errors.New("semantic daemon ready poll interval must be non-negative")
+	}
+	if config.StopWait == 0 {
+		config.StopWait = defaultStopWait
+	}
+	if config.StopWait < 0 {
+		return nil, errors.New("semantic daemon stop wait must be non-negative")
 	}
 	return &Supervisor{config: config}, nil
 }
@@ -230,6 +240,12 @@ func (s *Supervisor) Stop(ctx context.Context) (Report, error) {
 		return operationFailure("stop", err)
 	}
 
+	unlock, err := s.config.Locker.Lock(ctx, s.config.Runtime.BundleID)
+	if err != nil {
+		return operationFailure("stop", err)
+	}
+	defer unlock()
+
 	descriptor, err := s.config.Store.Load()
 	if errors.Is(err, ErrDescriptorNotFound) {
 		return stoppedReport("stop"), nil
@@ -256,6 +272,11 @@ func (s *Supervisor) Stop(ctx context.Context) (Report, error) {
 	defer process.Release()
 	if err := process.Signal(terminateSignal); err != nil {
 		return operationFailure("stop", err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, s.config.StopWait)
+	defer cancel()
+	if err := process.WaitExited(waitCtx); err != nil {
+		return operationFailure("stop", fmt.Errorf("wait for semantic process exit: %w", err))
 	}
 	if err := s.config.Store.Remove(); err != nil {
 		return operationFailure("stop", err)

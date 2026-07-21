@@ -37,6 +37,10 @@ func (unsupportedProcess) Signal(os.Signal) error {
 	return ErrProcessUnsupported
 }
 
+func (unsupportedProcess) WaitExited(context.Context) error {
+	return ErrProcessUnsupported
+}
+
 func (unsupportedProcess) Release() error {
 	return nil
 }

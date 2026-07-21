@@ -83,11 +83,33 @@ func TestRetrievalReportHelpDocumentsLaneSpecificGates(t *testing.T) {
 	for _, expected := range []string{
 		"-min-rrf-mrr",
 		"-min-governed-recall-at-k",
-		"governed MRR/nDCG@k are reported, not gated",
+		"-min-governed-mrr",
+		"-min-evidence-recall-at-k",
+		"require governed recall, MRR, and nDCG@k to meet entry FTS",
 	} {
 		if !strings.Contains(help, expected) {
 			t.Fatalf("help missing %q:\n%s", expected, help)
 		}
+	}
+}
+
+func TestRunTableRetrievalReportFixture(t *testing.T) {
+	root := filepath.Join("..", "..", "testdata", "semantic")
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), []string{
+		"retrieval-report",
+		"--labels", filepath.Join(root, "table-retrieval-labels-fixture.json"),
+		"--rankings", filepath.Join(root, "table-retrieval-rankings-fixture.json"),
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run table retrieval-report: %v; stderr=%s", err, stderr.String())
+	}
+	var report semanticeval.RetrievalReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if !report.Passed || report.Evidence.EvidenceRecallAtK < 0.9 {
+		t.Fatalf("unexpected table report: %#v", report)
 	}
 }
 

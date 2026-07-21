@@ -1,59 +1,182 @@
 {
-  "schema": "worktrail.semantic.eval.retrieval-labels.v1",
+  "schema": "worktrail.semantic.eval.retrieval-labels.v2",
   "queries": [
     {
       "id": "q-identifier",
       "text": "e2e-prod-gate-needle-zx9",
       "category": "identifier",
-      "relevant_ids": ["e2e-decision-hybrid-recall"]
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-decision-hybrid-recall"
+        }
+      ]
     },
     {
       "id": "q-paraphrase",
       "text": "how should local semantic search fuse lexical and vector results",
       "category": "paraphrase",
-      "relevant_ids": ["e2e-decision-hybrid-recall"]
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-decision-hybrid-recall"
+        }
+      ]
     },
     {
       "id": "q-zh-en",
-      "text": "语义索引 rebuild-only immutable generation",
+      "text": "\u8bed\u4e49\u7d22\u5f15 rebuild-only immutable generation",
       "category": "zh_en_mixed",
-      "relevant_ids": ["e2e-rule-rebuild-only"]
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-rule-rebuild-only"
+        }
+      ]
     },
     {
       "id": "q-decision",
       "text": "hybrid recall context contract decision",
       "category": "decision",
-      "relevant_ids": ["e2e-decision-hybrid-recall"]
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-decision-hybrid-recall"
+        }
+      ]
     },
     {
       "id": "q-rule",
       "text": "rebuild only semantic generation rule",
       "category": "rule",
-      "relevant_ids": ["e2e-rule-rebuild-only"]
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-rule-rebuild-only"
+        }
+      ]
     },
     {
       "id": "q-workflow",
       "text": "production e2e semantic release gate workflow",
       "category": "workflow",
-      "relevant_ids": ["e2e-workflow-release-gate"]
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-workflow-release-gate"
+        }
+      ]
     },
     {
       "id": "q-active-state",
       "text": "active state semantic e2e release gate",
       "category": "active_state",
-      "relevant_ids": ["e2e-state-active-release-gate"]
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-state-active-release-gate"
+        }
+      ]
     },
     {
       "id": "q-handoff",
       "text": "latest handoff continue semantic release gate",
       "category": "handoff",
-      "relevant_ids": ["e2e-handoff-latest-release-gate"]
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-handoff-latest-release-gate"
+        }
+      ]
     },
     {
       "id": "q-user-lesson",
       "text": "user lesson avoid inferring lane ranks from search json",
       "category": "user_lesson",
-      "relevant_ids": ["e2e-user-lesson-lane-ranks"]
+      "relevant_ids": [
+        {
+          "scope": "user",
+          "entry_id": "e2e-user-lesson-lane-ranks"
+        }
+      ]
+    },
+    {
+      "id": "q-table-row-key",
+      "text": "budget matrix hardmax 768 target 512",
+      "category": "table_exact_row",
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix"
+        }
+      ],
+      "exact_row_keys": [
+        "512:768:80"
+      ],
+      "required_evidence": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix",
+          "range_role": "primary",
+          "allowed_evidence_roles": [
+            "match",
+            "neighbor"
+          ],
+          "start_byte": 820,
+          "end_byte": 917,
+          "row_key": "512:768:80",
+          "require_neighbor": true,
+          "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39"
+        }
+      ]
+    },
+    {
+      "id": "q-table-header-context",
+      "text": "chunk budget candidate target hardmax minpayload",
+      "category": "table_header_context",
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix"
+        }
+      ],
+      "required_evidence": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix",
+          "range_role": "context",
+          "allowed_evidence_roles": [
+            "match"
+          ],
+          "start_byte": 632,
+          "end_byte": 721,
+          "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39"
+        }
+      ]
+    },
+    {
+      "id": "q-table-aggregate",
+      "text": "whole table hardening matrix comparison",
+      "category": "table_aggregate",
+      "relevant_ids": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix"
+        }
+      ],
+      "required_evidence": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix",
+          "range_role": "group",
+          "allowed_evidence_roles": [
+            "match"
+          ],
+          "start_byte": 632,
+          "end_byte": 1718,
+          "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39"
+        }
+      ]
     }
   ]
 }

@@ -39,6 +39,10 @@ type Process interface {
 	Start(context.Context) error
 	Identity() (Identity, error)
 	Signal(os.Signal) error
+	// WaitExited blocks until the previously observed process identity is gone
+	// or has been reused by a different process. Callers must supply a deadline
+	// or cancelable context; a timeout must leave daemon state intact.
+	WaitExited(context.Context) error
 	Release() error
 }
 

@@ -107,6 +107,36 @@ func (p *darwinProcess) Signal(signal os.Signal) error {
 	return process.Signal(signal)
 }
 
+func (p *darwinProcess) WaitExited(ctx context.Context) error {
+	p.mu.Lock()
+	identity := p.identity
+	p.mu.Unlock()
+	if identity.PID <= 0 || identity.StartedAt.IsZero() {
+		return errors.New("semantic process has not started")
+	}
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		actual, err := darwinIdentity(identity.PID)
+		if err != nil {
+			// PID is gone; the original process has exited.
+			return nil
+		}
+		if !actual.StartedAt.Equal(identity.StartedAt) {
+			// PID was reused by a different process.
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 func (p *darwinProcess) Release() error {
 	p.mu.Lock()
 	process := p.process

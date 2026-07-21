@@ -1,0 +1,65 @@
+{
+  "schema": "worktrail.semantic.eval.retrieval-labels.v2",
+  "queries": [
+    {
+      "id": "q-table-row-key",
+      "text": "budget matrix hardmax 768 target 512",
+      "category": "table_exact_row",
+      "relevant_ids": [
+        {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+      ],
+      "exact_row_keys": ["512:768:80"],
+      "required_evidence": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix",
+          "range_role": "primary",
+          "allowed_evidence_roles": ["match", "neighbor"],
+          "start_byte": 820,
+          "end_byte": 917,
+          "row_key": "512:768:80",
+          "require_neighbor": true,
+          "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39"
+        }
+      ]
+    },
+    {
+      "id": "q-table-header-context",
+      "text": "chunk budget candidate target hardmax minpayload",
+      "category": "table_header_context",
+      "relevant_ids": [
+        {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+      ],
+      "required_evidence": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix",
+          "range_role": "context",
+          "allowed_evidence_roles": ["match"],
+          "start_byte": 632,
+          "end_byte": 721,
+          "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39"
+        }
+      ]
+    },
+    {
+      "id": "q-table-aggregate",
+      "text": "whole table hardening matrix comparison",
+      "category": "table_aggregate",
+      "relevant_ids": [
+        {"scope": "project", "entry_id": "e2e-architecture-table-hardening-matrix"}
+      ],
+      "required_evidence": [
+        {
+          "scope": "project",
+          "entry_id": "e2e-architecture-table-hardening-matrix",
+          "range_role": "group",
+          "allowed_evidence_roles": ["match"],
+          "start_byte": 632,
+          "end_byte": 1718,
+          "structural_group_id": "60b03c4a2109a241a441991521d7bcf6578cf6cad6642aeba1fa73415612dc39"
+        }
+      ]
+    }
+  ]
+}

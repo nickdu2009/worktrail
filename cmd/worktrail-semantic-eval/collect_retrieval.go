@@ -128,14 +128,18 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 			return semanticeval.RetrievalRankings{}, fmt.Errorf("entry fts for %q: %w", query.ID, err)
 		}
 
-		var chunkLanes, denseLanes [][]retrieve.LaneHit
+		var (
+			chunkLanes, denseLanes [][]retrieve.LaneHit
+			allMatches             []retrieve.MatchHit
+			laneDiag               []retrieve.Lane
+		)
 		for _, runtime := range runtimes {
 			ftsAdapter := retrieve.GenerationChunkFTS{
 				Active:    runtime.active,
 				Tokenizer: index.NewTokenizer(),
 				Scope:     runtime.scope,
 			}
-			chunkHits, _, _, err := retrieve.CollectEntryLane(
+			chunkHits, matches, lane, err := retrieve.CollectEntryLane(
 				func(limit int) ([]retrieve.RawChunkHit, error) {
 					return ftsAdapter.SearchChunks(ctx, query.Text, limit)
 				},
@@ -149,6 +153,8 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 				return semanticeval.RetrievalRankings{}, fmt.Errorf("chunk fts for %q: %w", query.ID, err)
 			}
 			chunkLanes = append(chunkLanes, chunkHits)
+			allMatches = append(allMatches, matches...)
+			laneDiag = append(laneDiag, lane)
 		}
 
 		embedding, err := embedder.EmbedQuery(ctx, query.Text)
@@ -157,7 +163,7 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 		}
 		for _, runtime := range runtimes {
 			knnAdapter := retrieve.GenerationVectorKNN{Active: runtime.active, Scope: runtime.scope}
-			denseHits, _, _, err := retrieve.CollectEntryLane(
+			denseHits, matches, lane, err := retrieve.CollectEntryLane(
 				func(limit int) ([]retrieve.RawChunkHit, error) {
 					return knnAdapter.SearchChunks(ctx, embedding, limit)
 				},
@@ -171,6 +177,8 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 				return semanticeval.RetrievalRankings{}, fmt.Errorf("dense knn for %q: %w", query.ID, err)
 			}
 			denseLanes = append(denseLanes, denseHits)
+			allMatches = append(allMatches, matches...)
+			laneDiag = append(laneDiag, lane)
 		}
 
 		allLanes := append(append([][]retrieve.LaneHit{}, chunkLanes...), denseLanes...)
@@ -181,7 +189,20 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 		}
 		governed := retrieve.ApplyGovernance(hydrated, policy)
 
-		out.Queries = append(out.Queries, semanticeval.RetrievalQueryRankings{
+		loaders := map[string]retrieve.ChunkLoader{}
+		for _, runtime := range runtimes {
+			loaders[runtime.scope] = retrieve.GenerationChunkLoader{Active: runtime.active}
+		}
+		named := []retrieve.NamedLaneHits{
+			{Name: retrieve.LaneNameChunkFTS, Hits: flattenHits(chunkLanes)},
+			{Name: retrieve.LaneNameVectorKNN, Hits: flattenHits(denseLanes)},
+		}
+		evidence, err := retrieve.SelectEvidence(ctx, governed, named, allMatches, loaders, policy)
+		if err != nil {
+			return semanticeval.RetrievalRankings{}, fmt.Errorf("evidence for %q: %w", query.ID, err)
+		}
+
+		item := semanticeval.RetrievalQueryRankings{
 			QueryID: query.ID,
 			Lanes: map[string][]semanticeval.ScopedEntryID{
 				semanticeval.LaneEntryFTS: entryIDs,
@@ -190,9 +211,85 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 				semanticeval.LaneRRF:      scopedIDsFromCandidates(fused),
 				semanticeval.LaneGoverned: scopedIDsFromCandidates(governed),
 			},
-		})
+			Evidence:    rankedEvidenceFrom(governed, evidence),
+			Diagnostics: diagnosticsFromLanes(governed, evidence, laneDiag),
+		}
+		out.Queries = append(out.Queries, item)
 	}
 	return out, nil
+}
+
+func rankedEvidenceFrom(candidates []retrieve.Candidate, evidence []retrieve.EntryEvidence) []semanticeval.RankedEntryEvidence {
+	out := make([]semanticeval.RankedEntryEvidence, 0, len(candidates))
+	for i, candidate := range candidates {
+		item := semanticeval.RankedEntryEvidence{Scope: candidate.Scope, EntryID: candidate.EntryID}
+		if i < len(evidence) {
+			for _, chunk := range evidence[i].Chunks {
+				mapped := semanticeval.RankedEvidenceChunk{
+					ChunkID:           chunk.ChunkID,
+					EvidenceRole:      chunk.EvidenceRole,
+					StructuralGroupID: chunk.StructuralGroupID,
+					Primary: semanticeval.EvalByteRange{
+						StartByte: chunk.PrimarySourceRange.StartByte,
+						EndByte:   chunk.PrimarySourceRange.EndByte,
+					},
+				}
+				if chunk.ContextSourceRange != nil {
+					mapped.Context = &semanticeval.EvalByteRange{
+						StartByte: chunk.ContextSourceRange.StartByte,
+						EndByte:   chunk.ContextSourceRange.EndByte,
+					}
+				}
+				if chunk.StructuralGroupSourceRange != nil {
+					mapped.Group = &semanticeval.EvalByteRange{
+						StartByte: chunk.StructuralGroupSourceRange.StartByte,
+						EndByte:   chunk.StructuralGroupSourceRange.EndByte,
+					}
+				}
+				item.Chunks = append(item.Chunks, mapped)
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func diagnosticsFromLanes(candidates []retrieve.Candidate, evidence []retrieve.EntryEvidence, lanes []retrieve.Lane) *semanticeval.QueryDiagnostics {
+	diag := &semanticeval.QueryDiagnostics{EntryOccupancy: map[string]int{}}
+	seenEntries := map[string]bool{}
+	for _, candidate := range candidates {
+		key := candidate.Scope + "\x00" + candidate.EntryID
+		if seenEntries[key] {
+			diag.DuplicateEntries++
+		}
+		seenEntries[key] = true
+	}
+	seenChunks := map[string]bool{}
+	for i, entry := range evidence {
+		scope := ""
+		if i < len(candidates) {
+			scope = candidates[i].Scope
+		}
+		for _, chunk := range entry.Chunks {
+			key := scope + "\x00" + chunk.ChunkID
+			if seenChunks[key] {
+				diag.DuplicateChunkEvidence++
+			}
+			seenChunks[key] = true
+			if chunk.PrimarySourceRange.EndByte < chunk.PrimarySourceRange.StartByte {
+				diag.RangeViolations++
+			}
+		}
+	}
+	for _, lane := range lanes {
+		if lane.RefillRounds > diag.RefillRounds {
+			diag.RefillRounds = lane.RefillRounds
+		}
+		if lane.WindowSaturated {
+			diag.WindowSaturated = true
+		}
+	}
+	return diag
 }
 
 func collectScopes(scope string) ([]string, error) {

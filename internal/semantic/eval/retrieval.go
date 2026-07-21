@@ -42,10 +42,13 @@ type RetrievalLabels struct {
 
 // RetrievalQuery names one labeled query and its relevant scoped entry IDs.
 type RetrievalQuery struct {
-	ID          string          `json:"id"`
-	Text        string          `json:"text"`
-	Category    string          `json:"category,omitempty"`
-	RelevantIDs []ScopedEntryID `json:"relevant_ids"`
+	ID                      string             `json:"id"`
+	Text                    string             `json:"text"`
+	Category                string             `json:"category,omitempty"`
+	RelevantIDs             []ScopedEntryID    `json:"relevant_ids"`
+	RequiredEvidence        []RequiredEvidence `json:"required_evidence,omitempty"`
+	ExactRowKeys            []string           `json:"exact_row_keys,omitempty"`
+	RequireNeighborCoverage bool               `json:"require_neighbor_coverage,omitempty"`
 }
 
 // RetrievalRankings carries explicit per-lane scoped entry ID rankings.
@@ -58,8 +61,10 @@ type RetrievalRankings struct {
 
 // RetrievalQueryRankings holds one query's lane rankings as ordered scoped IDs.
 type RetrievalQueryRankings struct {
-	QueryID string                     `json:"query_id"`
-	Lanes   map[string][]ScopedEntryID `json:"lanes"`
+	QueryID     string                     `json:"query_id"`
+	Lanes       map[string][]ScopedEntryID `json:"lanes"`
+	Evidence    []RankedEntryEvidence      `json:"evidence,omitempty"`
+	Diagnostics *QueryDiagnostics          `json:"diagnostics,omitempty"`
 }
 
 // RetrievalThresholds configures lane-specific metric gates for the retrieval report.
@@ -67,6 +72,7 @@ type RetrievalThresholds struct {
 	K        int                         `json:"k"`
 	RRF      RRFThresholds               `json:"rrf"`
 	Governed GovernedRetrievalThresholds `json:"governed"`
+	Evidence EvidenceThresholds          `json:"evidence"`
 }
 
 // RRFThresholds require fused ranking quality to preserve every reported
@@ -78,16 +84,16 @@ type RRFThresholds struct {
 	MinNDCGAtK        float64 `json:"min_ndcg_at_k"`
 }
 
-// GovernedRetrievalThresholds intentionally gate recall only. Governance may
-// promote current source-of-truth records and therefore change MRR/nDCG.
-// Those metrics remain reported for diagnosis but are not release thresholds.
+// GovernedRetrievalThresholds gate Recall@K/MRR/nDCG@K against entry FTS for
+// table-hardening release freeze, matching the RRF entry-lane contract.
 type GovernedRetrievalThresholds struct {
-	RequireRecallVsEntryFTS bool    `json:"require_recall_vs_entry_fts"`
-	MinRecallAtK            float64 `json:"min_recall_at_k"`
-	MRRAndNDCGPolicy        string  `json:"mrr_and_ndcg_at_k_policy"`
+	RequireVsEntryFTS bool    `json:"require_vs_entry_fts"`
+	MinRecallAtK      float64 `json:"min_recall_at_k"`
+	MinMRR            float64 `json:"min_mrr"`
+	MinNDCGAtK        float64 `json:"min_ndcg_at_k"`
 }
 
-// DefaultRetrievalThresholds returns the initial release gate thresholds.
+// DefaultRetrievalThresholds returns the table-hardening release gate thresholds.
 func DefaultRetrievalThresholds() RetrievalThresholds {
 	return RetrievalThresholds{
 		K: 10,
@@ -98,10 +104,12 @@ func DefaultRetrievalThresholds() RetrievalThresholds {
 			MinNDCGAtK:        0.9,
 		},
 		Governed: GovernedRetrievalThresholds{
-			RequireRecallVsEntryFTS: true,
-			MinRecallAtK:            0.9,
-			MRRAndNDCGPolicy:        "reported_not_gated",
+			RequireVsEntryFTS: true,
+			MinRecallAtK:      0.9,
+			MinMRR:            0.9,
+			MinNDCGAtK:        0.9,
 		},
+		Evidence: DefaultEvidenceThresholds(),
 	}
 }
 
@@ -121,6 +129,7 @@ type RetrievalReport struct {
 	Thresholds     RetrievalThresholds `json:"thresholds"`
 	Queries        int                 `json:"queries"`
 	Lanes          []LaneMetrics       `json:"lanes"`
+	Evidence       EvidenceMetrics     `json:"evidence"`
 	Passed         bool                `json:"passed"`
 	FailureReasons []string            `json:"failure_reasons,omitempty"`
 }
@@ -228,20 +237,31 @@ func ReportRetrieval(labels RetrievalLabels, rankings RetrievalRankings, thresho
 				report.FailureReasons = append(report.FailureReasons, name+"_ndcg_at_k")
 			}
 		case LaneGoverned:
-			if thresholds.Governed.RequireRecallVsEntryFTS {
-				if metrics.RecallAtK+1e-12 >= entry.RecallAtK {
-					metrics.VsEntryFTS = "ge"
-				} else {
-					metrics.VsEntryFTS = "lt"
+			if thresholds.Governed.RequireVsEntryFTS {
+				metrics.VsEntryFTS = compareAgainstBaseline(metrics, entry)
+				if metrics.VsEntryFTS != "ge" {
 					report.FailureReasons = append(report.FailureReasons, name+"_below_entry_fts")
 				}
 			}
 			if metrics.RecallAtK < thresholds.Governed.MinRecallAtK {
 				report.FailureReasons = append(report.FailureReasons, name+"_recall_at_k")
 			}
+			if metrics.MRR < thresholds.Governed.MinMRR {
+				report.FailureReasons = append(report.FailureReasons, name+"_mrr")
+			}
+			if metrics.NDCGAtK < thresholds.Governed.MinNDCGAtK {
+				report.FailureReasons = append(report.FailureReasons, name+"_ndcg_at_k")
+			}
 		}
 		report.Lanes = append(report.Lanes, metrics)
 	}
+
+	evidence, evidenceFailures, err := scoreEvidence(labels, rankings, thresholds.K, thresholds.Evidence)
+	if err != nil {
+		return RetrievalReport{}, err
+	}
+	report.Evidence = evidence
+	report.FailureReasons = append(report.FailureReasons, evidenceFailures...)
 	report.Passed = len(report.FailureReasons) == 0
 	return report, nil
 }
@@ -294,6 +314,11 @@ func validateRetrievalLabels(labels RetrievalLabels) error {
 				return fmt.Errorf("query %q has an invalid relevant id", query.ID)
 			}
 		}
+		for _, evidence := range query.RequiredEvidence {
+			if err := evidence.valid(); err != nil {
+				return fmt.Errorf("query %q required evidence: %w", query.ID, err)
+			}
+		}
 	}
 	return nil
 }
@@ -339,15 +364,14 @@ func validateRetrievalThresholds(t RetrievalThresholds) error {
 		t.RRF.MinMRR,
 		t.RRF.MinNDCGAtK,
 		t.Governed.MinRecallAtK,
+		t.Governed.MinMRR,
+		t.Governed.MinNDCGAtK,
 	} {
 		if value < 0 || value > 1 {
 			return errors.New("retrieval quality thresholds must be between zero and one")
 		}
 	}
-	if t.Governed.MRRAndNDCGPolicy != "reported_not_gated" {
-		return errors.New("governed MRR/nDCG policy must be reported_not_gated")
-	}
-	return nil
+	return validateEvidenceThresholds(t.Evidence)
 }
 
 // EncodeJSON writes indented JSON ending with a newline.
