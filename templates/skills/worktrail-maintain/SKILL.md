@@ -20,7 +20,7 @@ Do not automatically commit git changes.
 
 ## Workflow
 
-1. Start with `worktrail context "maintenance"` and summarize only maintenance counts and next steps.
+1. Start with `worktrail context --semantic=auto "maintenance"` and summarize only maintenance counts and next steps.
 2. Run `worktrail distill --pending --summary`, `worktrail review plan --format json`, and `worktrail evidence plan --format json` or their scoped variants. If a command reports that another scope has work, rerun the exact suggested `--scope` command. If there is no work for a scope, report that as a no-op.
 3. Present one concise maintenance summary: pending evidence, pending review, evidence lifecycle actions, blockers, and commands that would be safe after confirmation. Treat this as the default inbox summary: operational candidates may still exist in preview or `worktrail review --all`, but they should not be counted as default maintenance work unless the user explicitly asks to inspect them.
 4. Ask the user which lane to run: note capture, distill proposal workflow, review apply-plan workflow, review apply-candidates batch command, single candidate command, evidence archive/discard, or no action.

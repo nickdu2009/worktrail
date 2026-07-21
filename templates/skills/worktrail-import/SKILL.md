@@ -39,7 +39,7 @@ Choose the lane that matches the source.
 
 ### Current-project Codex conversations
 
-1. Run a bounded dry-run first and show the count. Prefer the exact command from `worktrail context "maintenance"` when present, such as `worktrail import codex --since 14d`, otherwise use `worktrail import codex --limit 20`.
+1. Run a bounded dry-run first and show the count. Prefer the exact command from `worktrail context --semantic=auto "maintenance"` when present, such as `worktrail import codex --since 14d`, otherwise use `worktrail import codex --limit 20`.
 2. If the user asked to proceed or already asked for all conversations, run the same bounded command with `--all`, for example `worktrail import codex --since 14d --all`.
 3. Summarize matched sessions, synced transcripts, extracted pending transcript evidence candidates, and skipped duplicates.
 4. Distill all transcript evidence before review. Prefer `worktrail distill --pending --all --write-pack worktrail-distill.md`; for chat-sized batches, process every batch with `worktrail distill --pending --limit 5 --offset <N>` until all `transcript_notes` are covered.
@@ -50,7 +50,7 @@ Choose the lane that matches the source.
 
 ### Observed Cursor conversations
 
-1. Run a bounded dry-run first and show the observed, matched, skipped, and blocked counts. Prefer the exact command from `worktrail context "maintenance"` when present, such as `worktrail import cursor --limit 20`.
+1. Run a bounded dry-run first and show the observed, matched, skipped, and blocked counts. Prefer the exact command from `worktrail context --semantic=auto "maintenance"` when present, such as `worktrail import cursor --limit 20`.
 2. Explain that Cursor import uses explicit `--file` paths or Worktrail-observed `observed-*.metadata.json` registry entries. It does not scan undocumented private Cursor directories.
 3. If the user asked to proceed or already asked for observed Cursor conversations, run the same bounded command with `--all`, for example `worktrail import cursor --limit 20 --all`.
 4. Summarize observed, synced, extracted, skipped, and blocked counts.

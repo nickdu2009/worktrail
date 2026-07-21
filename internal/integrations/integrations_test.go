@@ -209,7 +209,7 @@ func TestInstallCodexDefaultIsUserOnly(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Run the read-only discovery chain without asking for confirmation first",
-		"worktrail context \"maintenance\"",
+		"worktrail context --semantic=auto \"maintenance\"",
 		"worktrail distill --pending --summary",
 		"worktrail review plan --format json",
 		"review apply-candidates batch command",

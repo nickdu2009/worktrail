@@ -7,9 +7,9 @@ import (
 
 func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 	expected := map[string][]string{
-		"worktrail-context":     {"worktrail context", "load context", "worktrail resume"},
+		"worktrail-context":     {"worktrail context --semantic=auto", "load context", "worktrail resume"},
 		"worktrail-doc-preview": {"worktrail preview", "--no-open", "keyword lookup", "worktrail search"},
-		"worktrail-search":      {"worktrail search", "keyword", "`rg`, `grep`, `find`, `worktrail context`, or `worktrail preview`"},
+		"worktrail-search":      {"worktrail search --semantic=auto", "keyword", "`rg`, `grep`, `find`, `worktrail context`, or `worktrail preview`"},
 		"worktrail-init":        {"worktrail init", "worktrail install cursor|codex|claude|zcode|all", "worktrail doctor <tool>", "`worktrail` CLI is available in `PATH`"},
 		"worktrail-state":       {"worktrail state", "checkpoint", "worktrail resume"},
 		"worktrail-resume":      {"worktrail resume", "latest state", "durable handoff", "worktrail state inject", "worktrail state list", "worktrail state show"},
@@ -19,7 +19,7 @@ func TestSkillTriggerContractCoversWorktrailSkills(t *testing.T) {
 		"worktrail-draft":       {"worktrail draft create", "single-quoted heredoc", "frontmatter-bearing", "do not create `docs/`, `.plans/`"},
 		"worktrail-adr":         {"worktrail adr create", "pending decision candidate", "do not require agent-skills", "`.worktrail/decisions/`"},
 		"worktrail-review":      {"worktrail review plan --format json", "worktrail review apply-candidates", "promoted, merged, discarded, restored, or retired", "evidence or operational drafts"},
-		"worktrail-maintain":    {"worktrail context \"maintenance\"", "worktrail evidence plan --format json", "worktrail note add", "worktrail doctor recovery", "state-changing maintenance action"},
+		"worktrail-maintain":    {"worktrail context --semantic=auto \"maintenance\"", "worktrail evidence plan --format json", "worktrail note add", "worktrail doctor recovery", "state-changing maintenance action"},
 	}
 	seen := map[string]bool{}
 	rendered := RenderSkillTriggerRouting()
@@ -117,9 +117,9 @@ func TestPlaceholderIsOnlyUsedByRootRuleTemplates(t *testing.T) {
 
 func TestSkillTemplatesExposeTriggerIntent(t *testing.T) {
 	expected := map[string][]string{
-		"worktrail-context":     {"description:", "Use this skill when", "starting", "continuing", "load context", ".worktrail/"},
+		"worktrail-context":     {"description:", "Use this skill when", "starting", "continuing", "load context", "--semantic=auto", ".worktrail/"},
 		"worktrail-doc-preview": {"description:", "Use this skill when", "preview", "overall", "candidate", ".worktrail/"},
-		"worktrail-search":      {"description:", "Use this skill when", "search", "keyword", "do not substitute", ".worktrail/"},
+		"worktrail-search":      {"description:", "Use this skill when", "search", "keyword", "--semantic=auto", "do not substitute", ".worktrail/"},
 		"worktrail-init":        {"description:", "Use this skill when", "initialize Worktrail", "install", "doctor", "worktrail --help", ".worktrail/", ".zcode/skills"},
 		"worktrail-state":       {"description:", "Use this skill when", "long", "risky", "checkpoint", "worktrail-resume", ".worktrail/"},
 		"worktrail-resume":      {"description:", "Use this skill when", "resume", "latest state", "state inject", ".worktrail/"},

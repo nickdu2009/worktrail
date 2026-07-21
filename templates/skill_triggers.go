@@ -25,7 +25,7 @@ var skillTriggers = []SkillTrigger{
 			"starting substantial project work, loading project memory, or when the user asks to start work, load context, or load project context",
 		},
 		RequiredActions: []string{
-			"Use the installed `worktrail-context` skill when available, or run `worktrail context \"<task>\"` before substantial work.",
+			"Use the installed `worktrail-context` skill when available, or run `worktrail context --semantic=auto \"<task>\"` before substantial work.",
 			"Read the Context Pack and follow active state, constraints, maintenance hints, and next steps.",
 			"Keep Task Recovery Summary entries separated by task id; never merge state, handoffs, checkpoints, or runtime records from different tasks.",
 		},
@@ -34,7 +34,7 @@ var skillTriggers = []SkillTrigger{
 			"Do not use `worktrail context` as the recovery command for a new session that should continue prior state or handoff; use `worktrail resume` instead.",
 		},
 		RootIntent:    "starting substantial project work, loading project memory, or when the user asks to start work, load context, or load project context",
-		RootCommand:   "Run `worktrail context \"<task>\"`.",
+		RootCommand:   "Run `worktrail context --semantic=auto \"<task>\"`.",
 		RootGuardrail: "Do not use `worktrail context` to resume prior state or handoff; use `worktrail resume` instead.",
 	},
 	{
@@ -61,7 +61,7 @@ var skillTriggers = []SkillTrigger{
 			"the user asks to search Worktrail knowledge, find a Worktrail document by keyword, locate a rule or lesson in Worktrail, or pinpoint Worktrail knowledge without opening the full preview site",
 		},
 		RequiredActions: []string{
-			"Run `worktrail search \"<keyword>\"` for keyword lookup when the user wants to pinpoint Worktrail knowledge quickly.",
+			"Run `worktrail search --semantic=auto \"<keyword>\"` for keyword or paraphrase lookup when the user wants to pinpoint Worktrail knowledge quickly.",
 			"Report the keyword used, the scope if relevant, and the search result or next step.",
 		},
 		Never: []string{
@@ -71,7 +71,7 @@ var skillTriggers = []SkillTrigger{
 			"Do not use browser verification for search-only flows.",
 		},
 		RootIntent:    "the user wants to look up Worktrail knowledge by keyword, term, or phrase without browsing the full preview site",
-		RootCommand:   "Run `worktrail search \"<keyword>\"`.",
+		RootCommand:   "Run `worktrail search --semantic=auto \"<keyword>\"`.",
 		RootGuardrail: "Do not substitute `rg`, `grep`, `find`, `worktrail context`, or `worktrail preview` for the initial lookup.",
 	},
 	{
@@ -157,7 +157,7 @@ var skillTriggers = []SkillTrigger{
 			"the user wants to import, sync, extract, migrate, or reuse knowledge from Codex, Claude, Cursor, transcript files, all current-project conversations, observed Cursor conversations, legacy handoffs, or legacy KDD docs",
 		},
 		RequiredActions: []string{
-			"Run the relevant bounded dry-run first: `worktrail import codex --since 14d`, `worktrail import cursor --limit 20`, `worktrail sync <source> <file>`, `worktrail migrate handoff-v2`, or `worktrail migrate kdd`; prefer the exact command from `worktrail context \"maintenance\"` when present.",
+			"Run the relevant bounded dry-run first: `worktrail import codex --since 14d`, `worktrail import cursor --limit 20`, `worktrail sync <source> <file>`, `worktrail migrate handoff-v2`, or `worktrail migrate kdd`; prefer the exact command from `worktrail context --semantic=auto \"maintenance\"` when present.",
 			"Create pending candidates only after the user asked to proceed, then hand off review to the installed `worktrail-review` skill or the equivalent review CLI flow.",
 		},
 		Never: []string{
@@ -250,7 +250,7 @@ var skillTriggers = []SkillTrigger{
 			"the user asks to maintain, clean up, advance, summarize, prune runtime records, inspect operation health, repair handoffs, or do low-intervention upkeep for Worktrail knowledge and evidence",
 		},
 		RequiredActions: []string{
-			"Run the read-only discovery chain first: `worktrail context \"maintenance\"`, then the exact scope-aware commands from `maintenance.next_steps`.",
+			"Run the read-only discovery chain first: `worktrail context --semantic=auto \"maintenance\"`, then the exact scope-aware commands from `maintenance.next_steps`.",
 			"Use `worktrail distill --pending --summary`, `worktrail review plan --format json`, and `worktrail evidence plan --format json` as indicated by maintenance hints.",
 			"Use `worktrail note add ...` to capture a confirmed finding as a pending semantic candidate instead of editing formal `.worktrail` knowledge directly.",
 			"Ask which lane to run and require explicit confirmation before distill apply, review apply-plan, review apply-candidates, promote, merge, discard, archive, restore, or retire.",
@@ -262,7 +262,7 @@ var skillTriggers = []SkillTrigger{
 			"Do not run state-changing maintenance commands without explicit user confirmation.",
 		},
 		RootIntent:    "the user asks to maintain, clean up, advance, summarize, prune runtime records, inspect operation health, or repair Worktrail records",
-		RootCommand:   "For knowledge maintenance, start with `worktrail context \"maintenance\"`, then `worktrail evidence plan --format json` and its suggested read-only steps; for an explicit operational request, start with `worktrail runtime prune`, `worktrail doctor recovery`, `worktrail doctor ops status`, `worktrail handoff doctor`, or `worktrail handoff repair`.",
+		RootCommand:   "For knowledge maintenance, start with `worktrail context --semantic=auto \"maintenance\"`, then `worktrail evidence plan --format json` and its suggested read-only steps; for an explicit operational request, start with `worktrail runtime prune`, `worktrail doctor recovery`, `worktrail doctor ops status`, `worktrail handoff doctor`, or `worktrail handoff repair`.",
 		RootGuardrail: "Use `worktrail note add ...` for confirmed findings, and require explicit confirmation before any state-changing maintenance action.",
 	},
 }
@@ -298,9 +298,9 @@ func RenderRootShared() string {
 		"- If `.worktrail/` is absent, do not automatically run Worktrail context, preview, search, state, resume, handoff, import, review, maintain, distill, or note workflows.",
 		"- This gate does not block explicit user requests to initialize, install, inspect, or repair Worktrail itself.",
 		"",
-		"- Use the installed `worktrail-context` skill, or run `worktrail context \"<task>\"`, before starting substantial work.",
+		"- Use the installed `worktrail-context` skill, or run `worktrail context --semantic=auto \"<task>\"`, before starting substantial work.",
 		"- Use the installed `worktrail-doc-preview` skill, or `worktrail preview`, when you need to browse Worktrail knowledge.",
-		"- Use the installed `worktrail-search` skill, or `worktrail search \"<keyword>\"`, when you need to pinpoint Worktrail knowledge.",
+		"- Use the installed `worktrail-search` skill, or `worktrail search --semantic=auto \"<keyword>\"`, when you need to pinpoint Worktrail knowledge.",
 		"- Keep the installed `worktrail-state` skill current for long or risky sessions.",
 		"- Use the installed `worktrail-handoff` skill only when the user explicitly asks to hand off, continue later in another chat, or switch agents with recovery context. Local is the default; team publish is separate and explicit.",
 		"- Prefer `worktrail state close --to handoff --next-step \"<action>\" \"<summary>\"` whenever an active explicit state exists; otherwise use `worktrail handoff create --next-step \"<action>\" \"<summary>\"`. Use `--complete` only when no follow-up remains.",
@@ -320,10 +320,10 @@ func RenderRootShared() string {
 		"",
 		"| User intent | Use this command | Do NOT use these substitutes |",
 		"| --- | --- | --- |",
-		"| Look up a Worktrail rule, lesson, decision, workflow, or note by keyword/term/phrase (\"find\", \"search\", \"look up\", \"where is X documented\") | `worktrail search \"<keyword>\"` (skill `worktrail-search`) | `rg`, `grep`, `find`, `cat`, `worktrail context`, `worktrail preview` |",
+		"| Look up a Worktrail rule, lesson, decision, workflow, or note by keyword/term/phrase (\"find\", \"search\", \"look up\", \"where is X documented\") | `worktrail search --semantic=auto \"<keyword>\"` (skill `worktrail-search`) | `rg`, `grep`, `find`, `cat`, `worktrail context`, `worktrail preview` |",
 		"| Continue prior Worktrail work in a new session (\"resume\", \"pick up where I left off\", \"continue previous session\", \"load my previous Worktrail context for this new chat\") | `worktrail resume --task-id <id>` or another explicit selector (skill `worktrail-resume`); bare resume only for one unambiguous task | `worktrail context`, `worktrail state inject`, `worktrail state start`, `worktrail state list`, `worktrail state show` |",
 		"| Browse the rendered Worktrail knowledge site for a doc, candidate, handoff, workflow, profile, rule, or lesson | `worktrail preview --scope <scope>` (skill `worktrail-doc-preview`) | `worktrail search`, target project's dev server, ad hoc Markdown viewers |",
-		"| Start substantial project work or load project memory for a new task | `worktrail context \"<task>\"` (skill `worktrail-context`) | `worktrail resume`, `worktrail search`, `worktrail preview` |",
+		"| Start substantial project work or load project memory for a new task | `worktrail context --semantic=auto \"<task>\"` (skill `worktrail-context`) | `worktrail resume`, `worktrail search`, `worktrail preview` |",
 		"| Record current state, explicit checkpoint, or ordinary progress for the active session | `worktrail state start|update|checkpoint|inject` (skill `worktrail-state`) | `worktrail resume`, `worktrail handoff` (until an explicit cross-chat/switch-agent boundary) |",
 		"| Persist requirements, architecture, plans, rules, workflows, or other non-ADR semantic knowledge after explicit user request | `worktrail draft create ...` through stdin when Worktrail is the only destination, then `worktrail review plan --format json` (skill `worktrail-draft`) | unrequested `docs/` or `.plans/` copies, direct formal edits, automatic promote |",
 		"| Persist a reviewed ADR after explicit user request | `worktrail adr create <title> --from-file <path> --format json` or explicit `--stdin` (skill `worktrail-adr`) | direct `.worktrail/decisions/` edits, implicit persistence, automatic promote |",

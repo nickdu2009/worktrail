@@ -265,12 +265,14 @@ func writeSearchResults(ioctx IO, format string, results []index.Result, respons
 }
 
 func printSearchHelp(out interface{ Write([]byte) (int, error) }) {
-	fmt.Fprintln(out, "usage: worktrail search [--scope project|user|all] [--type <type>] [--topic <topic>] [--tag <tag>] [--format text|json] <keyword>")
+	fmt.Fprintln(out, "usage: worktrail search [--semantic|--semantic=auto|--semantic=required] [--explain] [--scope project|user|all] [--type <type>] [--topic <topic>] [--tag <tag>] [--format text|json|json-v2] <keyword>")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Pinpoint Worktrail knowledge entries by keyword. Use this command — not rg, grep, or find — to look up notes, decisions, lessons, handoffs, state, and other Worktrail records by topic, term, or phrase.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Examples:")
 	fmt.Fprintln(out, "  worktrail search \"webhook retry\"")
+	fmt.Fprintln(out, "  worktrail search --semantic=auto \"documents about hybrid ranking\"")
+	fmt.Fprintln(out, "  worktrail search --semantic=auto --format json-v2 --explain \"deployment lesson\"")
 	fmt.Fprintln(out, "  worktrail search --scope all \"deployment lesson\"")
 	fmt.Fprintln(out, "  worktrail search --type decision \"oauth\"")
 	fmt.Fprintln(out, "  worktrail search --topic auth-session \"resume\"")
