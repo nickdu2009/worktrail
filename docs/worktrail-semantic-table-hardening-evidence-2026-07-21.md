@@ -145,6 +145,11 @@ reasons; both are intentional contract/corpus updates, not gate-script bugs.
 2. **Lexical score drift from table fixture**:
    `architecture/table-hardening-matrix.md` is intentionally merged into the
    production-e2e project corpus via `install_fixtures`, which changes BM25
-   IDF. Golden score refreshed `21.829…` → `22.762…` for the same single-hit
+   IDF. Golden score refreshed `21.829…` → `22.995…` for the same single-hit
    needle `e2e-prod-gate-needle-zx9` (still one `[]index.Result`, no
    `chunk_matches` / v2 schema).
+3. **Legacy handoff fixture blocked `worktrail context`**: Handoff V2 rejects
+   root `handoffs/*.md` until migration. The production-e2e handoff-themed
+   retrieval fixture moved to `workflows/latest-release-gate.md` (same
+   `entry_id`, tags, body) so offline context smoke and labeled retrieval stay
+   green without a runtime handoff migration step.
