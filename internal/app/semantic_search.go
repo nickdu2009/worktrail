@@ -39,9 +39,16 @@ type SemanticSearchResponse struct {
 }
 
 type SemanticSearchLane struct {
-	Name     string               `json:"name"`
-	Degraded bool                 `json:"degraded,omitempty"`
-	Reason   contracts.ReasonCode `json:"reason,omitempty"`
+	Scope            string               `json:"scope,omitempty"`
+	Name             string               `json:"name"`
+	Degraded         bool                 `json:"degraded,omitempty"`
+	Reason           contracts.ReasonCode `json:"reason,omitempty"`
+	RawHits          int                  `json:"raw_hits,omitempty"`
+	FilterRejections int                  `json:"filter_rejections,omitempty"`
+	EligibleEntries  int                  `json:"eligible_entries,omitempty"`
+	RefillRounds     int                  `json:"refill_rounds,omitempty"`
+	HardCap          int                  `json:"hard_cap,omitempty"`
+	WindowSaturated  bool                 `json:"window_saturated,omitempty"`
 }
 
 type SemanticSearchError struct {
@@ -183,13 +190,17 @@ func printSemanticSearchDiagnostics(ioctx IO, mode contracts.Mode, response Sema
 	if !semanticSearchDegraded(response) && !explain {
 		return
 	}
-	if semanticSearchDegraded(response) {
+	if semanticSearchDegraded(response) && len(response.Results) == 0 {
 		fmt.Fprintf(ioctx.Err, "semantic search fallback (%s)\n", mode)
 		for _, reason := range response.DegradedReasons {
 			fmt.Fprintf(ioctx.Err, "reason: %s\n", reason)
 		}
 		for _, nextStep := range response.NextSteps {
 			fmt.Fprintf(ioctx.Err, "next: %s\n", nextStep)
+		}
+	} else if semanticSearchDegraded(response) {
+		for _, reason := range response.DegradedReasons {
+			fmt.Fprintf(ioctx.Err, "reason: %s\n", reason)
 		}
 	}
 	if !explain {

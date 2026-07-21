@@ -202,16 +202,16 @@ func TestGenerationAdaptersMapHitsAndKeepActiveOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FTS adapter SearchChunks() error = %v", err)
 	}
-	if want := (LaneHit{ChunkID: "chunk-1", EntryID: "entry-1", Rank: 1}); len(ftsHits) != 1 || ftsHits[0] != want {
-		t.Fatalf("FTS adapter hits = %#v, want %#v", ftsHits, want)
+	if len(ftsHits) != 1 || ftsHits[0].ChunkID != "chunk-1" || ftsHits[0].EntryID != "entry-1" || ftsHits[0].Rank != 1 || ftsHits[0].DocumentType != "rule" {
+		t.Fatalf("FTS adapter hits = %#v", ftsHits)
 	}
 
 	vectorHits, err := (GenerationVectorKNN{Active: active}).SearchChunks(context.Background(), []float32{1, 0}, 1)
 	if err != nil {
 		t.Fatalf("vector adapter SearchChunks() error = %v", err)
 	}
-	if want := (LaneHit{ChunkID: "chunk-1", EntryID: "entry-1", Rank: 1}); len(vectorHits) != 1 || vectorHits[0] != want {
-		t.Fatalf("vector adapter hits = %#v, want %#v", vectorHits, want)
+	if len(vectorHits) != 1 || vectorHits[0].ChunkID != "chunk-1" || vectorHits[0].EntryID != "entry-1" || vectorHits[0].Rank != 1 || vectorHits[0].DocumentType != "rule" {
+		t.Fatalf("vector adapter hits = %#v", vectorHits)
 	}
 
 	if _, err := active.ChunkFTS("needle", 1); err != nil {

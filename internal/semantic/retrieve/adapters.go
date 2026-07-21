@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/nickdu2009/worktrail/internal/index"
+	"github.com/nickdu2009/worktrail/internal/semantic/contracts"
 	"github.com/nickdu2009/worktrail/internal/semantic/daemon"
 	"github.com/nickdu2009/worktrail/internal/semantic/generation"
 )
@@ -107,6 +108,9 @@ func (a IndexEntryHydrator) Hydrate(ctx context.Context, candidates []Candidate)
 		candidate.Active = pair.entry.Active
 		candidate.Lifecycle = pair.entry.Lifecycle
 		candidate.Superseded = len(pair.entry.SupersededBy) > 0
+		if candidate.Scope == "" {
+			candidate.Scope = pair.entry.Scope
+		}
 		hydrated = append(hydrated, candidate)
 	}
 	return hydrated, nil
@@ -202,47 +206,73 @@ func matchesIndexFilters(entry index.Entry, query index.Query) bool {
 type GenerationChunkFTS struct {
 	Active    *generation.Active
 	Tokenizer index.Tokenizer
+	Filters   ExactFilters
+	Scope     string
 }
 
-// SearchChunks queries the sealed generation's exact FTS lane.
-func (a GenerationChunkFTS) SearchChunks(_ context.Context, query string, limit int) ([]LaneHit, error) {
+// SearchChunks queries the sealed generation's exact FTS lane once at the
+// requested hard-cap limit. Exact type/topic/tag filters are pushed into SQL.
+func (a GenerationChunkFTS) SearchChunks(_ context.Context, query string, limit int) ([]RawChunkHit, error) {
 	tokenizer := a.Tokenizer
 	if tokenizer == nil {
 		tokenizer = index.NewTokenizer()
 	}
 	terms := tokenizer.TokenizeQuery(query).Terms
-	hits, err := a.Active.ChunkFTSTerms(terms, limit)
+	hits, err := a.Active.ChunkFTSTermsFiltered(terms, generation.ChunkFilters{
+		Type:  a.Filters.Type,
+		Topic: a.Filters.Topic,
+		Tag:   a.Filters.Tag,
+	}, limit)
 	if err != nil {
-		return nil, fmt.Errorf("search active generation chunk FTS: %w", err)
+		return nil, wrapGenerationQueryError(err, true)
 	}
-	return mapGenerationHits(hits), nil
+	return mapGenerationHits(a.Scope, a.Active, hits)
 }
 
 // GenerationVectorKNN adapts one caller-owned active generation to VectorKNN.
 // It never closes Active: the caller that opened the generation owns its lease.
 type GenerationVectorKNN struct {
 	Active *generation.Active
+	Scope  string
 }
 
-// SearchChunks queries the sealed generation's exact vector KNN lane.
-func (a GenerationVectorKNN) SearchChunks(_ context.Context, embedding []float32, limit int) ([]LaneHit, error) {
+// SearchChunks queries the sealed generation's exact vector KNN lane once at
+// the requested hard-cap limit. Exact filters are applied later by refill.
+func (a GenerationVectorKNN) SearchChunks(_ context.Context, embedding []float32, limit int) ([]RawChunkHit, error) {
 	hits, err := a.Active.VectorKNN(embedding, limit)
 	if err != nil {
-		return nil, fmt.Errorf("search active generation vector KNN: %w", err)
+		return nil, wrapGenerationQueryError(err, false)
 	}
-	return mapGenerationHits(hits), nil
+	return mapGenerationHits(a.Scope, a.Active, hits)
 }
 
-func mapGenerationHits(hits []generation.ChunkHit) []LaneHit {
-	out := make([]LaneHit, len(hits))
+func mapGenerationHits(scope string, active *generation.Active, hits []generation.ChunkHit) ([]RawChunkHit, error) {
+	entryIDs := make([]string, len(hits))
 	for i, hit := range hits {
-		out[i] = LaneHit{
-			ChunkID: hit.ChunkID,
-			EntryID: hit.EntryID,
-			Rank:    hit.Rank,
-		}
+		entryIDs[i] = hit.EntryID
 	}
-	return out
+	tagSets := map[string][]string{}
+	if active != nil && len(entryIDs) > 0 {
+		loaded, err := active.EntryTagSets(entryIDs)
+		if err != nil {
+			return nil, wrapGenerationQueryError(err, false)
+		}
+		tagSets = loaded
+	}
+
+	out := make([]RawChunkHit, len(hits))
+	for i, hit := range hits {
+		out[i] = RawChunkHit{
+			ChunkID:       hit.ChunkID,
+			EntryID:       hit.EntryID,
+			Rank:          hit.Rank,
+			DocumentType:  hit.DocumentType,
+			DocumentTopic: hit.DocumentTopic,
+			Tags:          append([]string{}, tagSets[hit.EntryID]...),
+		}
+		_ = scope
+	}
+	return out, nil
 }
 
 // LegacyLexicalAdapter adapts the existing entry-level lexical policy for use
@@ -277,6 +307,7 @@ func (a LegacyLexicalAdapter) Recall(_ context.Context, queryText string, limit 
 	candidates := make([]Candidate, len(hits))
 	for i, hit := range hits {
 		candidates[i] = Candidate{
+			Scope:         hit.Entry.Scope,
 			ChunkID:       hit.Entry.ID,
 			EntryID:       hit.Entry.ID,
 			DocumentID:    hit.Entry.ID,
@@ -288,4 +319,26 @@ func (a LegacyLexicalAdapter) Recall(_ context.Context, queryText string, limit 
 		}
 	}
 	return candidates, nil
+}
+
+func wrapGenerationQueryError(err error, lexical bool) error {
+	if err == nil {
+		return nil
+	}
+	var queryErr *generation.QueryError
+	if errors.As(err, &queryErr) {
+		switch queryErr.Kind {
+		case generation.QueryErrorQuery:
+			if lexical {
+				return &Error{Code: contracts.ReasonFTSQueryFailed, Message: queryErr.Error(), Err: err}
+			}
+			return &Error{Code: contracts.ReasonSQLiteVecUnavailable, Message: queryErr.Error(), Err: err}
+		case generation.QueryErrorMetadata:
+			return &Error{Code: contracts.ReasonGenerationMissing, Message: queryErr.Error(), Err: err}
+		}
+	}
+	if lexical {
+		return &Error{Code: contracts.ReasonFTSQueryFailed, Message: err.Error(), Err: err}
+	}
+	return err
 }

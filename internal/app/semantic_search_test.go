@@ -131,7 +131,7 @@ func TestRunSearchJSONV2EnvelopeForSuccessAndDegradedFallback(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		searcher := &semanticSearchStub{response: SemanticSearchResponse{
 			Results: []index.Result{{Entry: index.Entry{Scope: "project", Type: "rule", Title: "Semantic hit"}, Score: 3}},
-			Policy:  "semantic-retrieve-v1",
+			Policy:  "semantic-retrieve-v2",
 			Profile: "bge-m3",
 			Lanes:   []SemanticSearchLane{{Name: "chunk_fts"}, {Name: "vector_knn"}},
 		}}
@@ -143,7 +143,7 @@ func TestRunSearchJSONV2EnvelopeForSuccessAndDegradedFallback(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 			t.Fatalf("unmarshal JSON v2: %v stdout=%s", err, out.String())
 		}
-		if report.Schema != semanticSearchResultSchema || report.Policy != "semantic-retrieve-v1" || report.Profile != "bge-m3" || len(report.Results) != 1 || report.Results[0].Entry.Title != "Semantic hit" || len(report.Lanes) != 2 {
+		if report.Schema != semanticSearchResultSchema || report.Policy != "semantic-retrieve-v2" || report.Profile != "bge-m3" || len(report.Results) != 1 || report.Results[0].Entry.Title != "Semantic hit" || len(report.Lanes) != 2 {
 			t.Fatalf("JSON v2 report = %#v", report)
 		}
 		if errw.Len() != 0 {
@@ -154,7 +154,7 @@ func TestRunSearchJSONV2EnvelopeForSuccessAndDegradedFallback(t *testing.T) {
 	t.Run("degraded fallback", func(t *testing.T) {
 		env := semanticSearchTestEnv(t)
 		searcher := &semanticSearchStub{response: SemanticSearchResponse{
-			Policy:          "semantic-retrieve-v1",
+			Policy:          "semantic-retrieve-v2",
 			Degraded:        true,
 			DegradedReasons: []contracts.ReasonCode{contracts.ReasonProfileStale},
 			NextSteps:       []string{"worktrail semantic rebuild --scope project"},
@@ -231,7 +231,7 @@ func TestCLIErrorCodesFallbackForEmptySemanticSearchCode(t *testing.T) {
 func TestRunSearchExplainUsesOnlyStderr(t *testing.T) {
 	searcher := &semanticSearchStub{response: SemanticSearchResponse{
 		Results: []index.Result{{Entry: index.Entry{Title: "Semantic hit"}, Score: 1}},
-		Policy:  "semantic-retrieve-v1",
+		Policy:  "semantic-retrieve-v2",
 		Profile: "bge-m3",
 		Lanes:   []SemanticSearchLane{{Name: "chunk_fts"}, {Name: "vector_knn"}},
 	}}
@@ -246,7 +246,7 @@ func TestRunSearchExplainUsesOnlyStderr(t *testing.T) {
 	if len(results) != 1 || results[0].Entry.Title != "Semantic hit" {
 		t.Fatalf("JSON v1 explain results = %#v", results)
 	}
-	for _, want := range []string{"policy: semantic-retrieve-v1", "profile: bge-m3", "lane: chunk_fts", "lane: vector_knn"} {
+	for _, want := range []string{"policy: semantic-retrieve-v2", "profile: bge-m3", "lane: chunk_fts", "lane: vector_knn"} {
 		if !strings.Contains(errw.String(), want) {
 			t.Fatalf("explain stderr missing %q:\n%s", want, errw.String())
 		}

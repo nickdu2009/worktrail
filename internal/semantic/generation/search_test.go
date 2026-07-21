@@ -52,6 +52,31 @@ func TestActiveChunkFTSAndVectorKNNAreReadOnlyAndStable(t *testing.T) {
 	assertDatabaseState(t, path, before, beforeInfo)
 }
 
+func TestActiveChunkFTSFilteredPushesTypeTopicAndTag(t *testing.T) {
+	directory := t.TempDir()
+	pointer := testPointer("query-filtered-fts", "")
+	metadata := metadataForPointer(pointer)
+	metadata.Dimension = 2
+	createQueryableGeneration(t, directory, pointer, metadata, []queryChunk{
+		{id: "chunk-keep", entryID: "entry-keep", path: "docs/keep.md", docType: "rule", topic: "recall", tags: []string{"alpha"}, body: "needle keep", input: "input keep", vector: []float32{1, 0}},
+		{id: "chunk-drop", entryID: "entry-drop", path: "docs/drop.md", docType: "note", topic: "other", tags: []string{"beta"}, body: "needle drop", input: "input drop", vector: []float32{0, 1}},
+	})
+	active, err := OpenActive(context.Background(), directory, metadata)
+	if err != nil {
+		t.Fatalf("OpenActive() error = %v", err)
+	}
+	t.Cleanup(func() { _ = active.Close() })
+
+	hits, err := active.ChunkFTSFiltered("needle", ChunkFilters{Type: "rule", Tag: "alpha"}, 10)
+	if err != nil {
+		t.Fatalf("ChunkFTSFiltered() error = %v", err)
+	}
+	assertHitIDs(t, hits, "chunk-keep")
+	if hits[0].DocumentType != "rule" || hits[0].DocumentTopic != "recall" {
+		t.Fatalf("filtered hit metadata = %#v", hits[0])
+	}
+}
+
 func TestActiveChunkFTSRejectsInvalidInput(t *testing.T) {
 	directory := t.TempDir()
 	pointer := testPointer("query-invalid-fts", "")
@@ -222,6 +247,9 @@ type queryChunk struct {
 	id      string
 	entryID string
 	path    string
+	docType string
+	topic   string
+	tags    []string
 	body    string
 	input   string
 	vector  []float32
@@ -248,12 +276,18 @@ func createQueryableGeneration(t *testing.T, directory string, pointer Pointer, 
 		if end == 0 {
 			end = 1
 		}
+		docType := source.docType
+		if docType == "" {
+			docType = "rule"
+		}
 		inputs = append(inputs, chunk.Chunk{
 			ChunkID:           source.id,
 			Scope:             "project",
 			DocumentID:        source.entryID,
 			Path:              source.path,
-			Type:              "rule",
+			Type:              docType,
+			Topic:             source.topic,
+			Tags:              append([]string{}, source.tags...),
 			Kind:              chunk.KindText,
 			StructuralGroupID: "group-" + source.id,
 			Body:              body,

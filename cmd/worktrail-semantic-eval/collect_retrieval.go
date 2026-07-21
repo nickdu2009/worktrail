@@ -48,9 +48,6 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 	if err != nil {
 		return semanticeval.RetrievalRankings{}, err
 	}
-	if _, err := composed.Controller.Start(ctx); err != nil {
-		return semanticeval.RetrievalRankings{}, err
-	}
 
 	scopes, err := collectScopes(scope)
 	if err != nil {
@@ -72,6 +69,27 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 	if err != nil {
 		return semanticeval.RetrievalRankings{}, err
 	}
+
+	// Open and validate every generation/profile before starting the daemon.
+	var profiles []string
+	for _, scopeName := range scopes {
+		semanticDir, err := env.SemanticIndexRoot(scopeName)
+		if err != nil {
+			return semanticeval.RetrievalRankings{}, err
+		}
+		pointer, err := generation.ReadActive(semanticDir)
+		if err != nil {
+			return semanticeval.RetrievalRankings{}, fmt.Errorf("read active pointer for %s: %w", scopeName, err)
+		}
+		profiles = append(profiles, pointer.RecallProfileID)
+	}
+	if len(profiles) > 1 {
+		for i := 1; i < len(profiles); i++ {
+			if profiles[i] != profiles[0] {
+				return semanticeval.RetrievalRankings{}, fmt.Errorf("semantic profile mismatch across scopes")
+			}
+		}
+	}
 	for _, scopeName := range scopes {
 		root, err := env.ScopeRoot(scopeName)
 		if err != nil {
@@ -92,6 +110,10 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 		})
 	}
 
+	if _, err := composed.Controller.Start(ctx); err != nil {
+		return semanticeval.RetrievalRankings{}, err
+	}
+
 	policy := retrieve.DefaultPolicy()
 	embedder := retrieve.DaemonQueryEmbedder{
 		Embedder:    composed.Client,
@@ -101,32 +123,56 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 		Schema: semanticeval.RetrievalRankingsSchema,
 	}
 	for _, query := range labels.Queries {
-		entryIDs, err := collectEntryFTS(env, scopes, query.Text, policy.LaneTopK)
+		entryIDs, err := collectEntryFTS(env, scopes, query.Text, policy.HardCap)
 		if err != nil {
 			return semanticeval.RetrievalRankings{}, fmt.Errorf("entry fts for %q: %w", query.ID, err)
 		}
-		var chunkHits, denseHits []retrieve.LaneHit
+
+		var chunkLanes, denseLanes [][]retrieve.LaneHit
 		for _, runtime := range runtimes {
-			fts, err := (retrieve.GenerationChunkFTS{Active: runtime.active}).SearchChunks(ctx, query.Text, policy.LaneTopK)
+			ftsAdapter := retrieve.GenerationChunkFTS{
+				Active:    runtime.active,
+				Tokenizer: index.NewTokenizer(),
+				Scope:     runtime.scope,
+			}
+			chunkHits, _, err := retrieve.CollectEntryLane(
+				func(limit int) ([]retrieve.RawChunkHit, error) {
+					return ftsAdapter.SearchChunks(ctx, query.Text, limit)
+				},
+				policy,
+				runtime.scope,
+				retrieve.ExactFilters{},
+				false,
+			)
 			if err != nil {
 				return semanticeval.RetrievalRankings{}, fmt.Errorf("chunk fts for %q: %w", query.ID, err)
 			}
-			chunkHits = append(chunkHits, fts...)
+			chunkLanes = append(chunkLanes, chunkHits)
 		}
+
 		embedding, err := embedder.EmbedQuery(ctx, query.Text)
 		if err != nil {
 			return semanticeval.RetrievalRankings{}, fmt.Errorf("embed query %q: %w", query.ID, err)
 		}
 		for _, runtime := range runtimes {
-			knn, err := (retrieve.GenerationVectorKNN{Active: runtime.active}).SearchChunks(ctx, embedding, policy.LaneTopK)
+			knnAdapter := retrieve.GenerationVectorKNN{Active: runtime.active, Scope: runtime.scope}
+			denseHits, _, err := retrieve.CollectEntryLane(
+				func(limit int) ([]retrieve.RawChunkHit, error) {
+					return knnAdapter.SearchChunks(ctx, embedding, limit)
+				},
+				policy,
+				runtime.scope,
+				retrieve.ExactFilters{},
+				true,
+			)
 			if err != nil {
 				return semanticeval.RetrievalRankings{}, fmt.Errorf("dense knn for %q: %w", query.ID, err)
 			}
-			denseHits = append(denseHits, knn...)
+			denseLanes = append(denseLanes, denseHits)
 		}
-		chunkHits = renumberHits(chunkHits)
-		denseHits = renumberHits(denseHits)
-		fused := retrieve.FuseRanks(policy.RRFK, chunkHits, denseHits)
+
+		allLanes := append(append([][]retrieve.LaneHit{}, chunkLanes...), denseLanes...)
+		fused := retrieve.FuseRanks(policy.RRFK, allLanes...)
 		hydrated, err := hydrateAcrossRoots(ctx, runtimes, fused)
 		if err != nil {
 			return semanticeval.RetrievalRankings{}, fmt.Errorf("hydrate for %q: %w", query.ID, err)
@@ -135,12 +181,12 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 
 		out.Queries = append(out.Queries, semanticeval.RetrievalQueryRankings{
 			QueryID: query.ID,
-			Lanes: map[string][]string{
+			Lanes: map[string][]semanticeval.ScopedEntryID{
 				semanticeval.LaneEntryFTS: entryIDs,
-				semanticeval.LaneChunkFTS: entryIDsFromHits(chunkHits),
-				semanticeval.LaneDense:    entryIDsFromHits(denseHits),
-				semanticeval.LaneRRF:      entryIDsFromCandidates(fused),
-				semanticeval.LaneGoverned: entryIDsFromCandidates(governed),
+				semanticeval.LaneChunkFTS: scopedIDsFromHits(flattenHits(chunkLanes)),
+				semanticeval.LaneDense:    scopedIDsFromHits(flattenHits(denseLanes)),
+				semanticeval.LaneRRF:      scopedIDsFromCandidates(fused),
+				semanticeval.LaneGoverned: scopedIDsFromCandidates(governed),
 			},
 		})
 	}
@@ -158,8 +204,8 @@ func collectScopes(scope string) ([]string, error) {
 	}
 }
 
-func collectEntryFTS(env paths.Env, scopes []string, query string, limit int) ([]string, error) {
-	var ids []string
+func collectEntryFTS(env paths.Env, scopes []string, query string, limit int) ([]semanticeval.ScopedEntryID, error) {
+	var ids []semanticeval.ScopedEntryID
 	for _, scope := range scopes {
 		root, err := env.ScopeRoot(scope)
 		if err != nil {
@@ -174,40 +220,34 @@ func collectEntryFTS(env paths.Env, scopes []string, query string, limit int) ([
 			return nil, err
 		}
 		for _, hit := range hits {
-			ids = append(ids, hit.Entry.ID)
+			ids = append(ids, semanticeval.ScopedEntryID{Scope: scope, EntryID: hit.Entry.ID})
 		}
 	}
-	return semanticeval.RankedEntryIDs(ids), nil
+	return semanticeval.RankedScopedEntryIDs(ids), nil
 }
 
-func renumberHits(hits []retrieve.LaneHit) []retrieve.LaneHit {
-	out := make([]retrieve.LaneHit, 0, len(hits))
-	seenChunk := map[string]bool{}
-	for _, hit := range hits {
-		if hit.ChunkID == "" || hit.EntryID == "" || seenChunk[hit.ChunkID] {
-			continue
-		}
-		seenChunk[hit.ChunkID] = true
-		hit.Rank = len(out) + 1
-		out = append(out, hit)
+func flattenHits(lanes [][]retrieve.LaneHit) []retrieve.LaneHit {
+	var out []retrieve.LaneHit
+	for _, lane := range lanes {
+		out = append(out, lane...)
 	}
 	return out
 }
 
-func entryIDsFromHits(hits []retrieve.LaneHit) []string {
-	ids := make([]string, len(hits))
+func scopedIDsFromHits(hits []retrieve.LaneHit) []semanticeval.ScopedEntryID {
+	ids := make([]semanticeval.ScopedEntryID, len(hits))
 	for i, hit := range hits {
-		ids[i] = hit.EntryID
+		ids[i] = semanticeval.ScopedEntryID{Scope: hit.Scope, EntryID: hit.EntryID}
 	}
-	return semanticeval.RankedEntryIDs(ids)
+	return semanticeval.RankedScopedEntryIDs(ids)
 }
 
-func entryIDsFromCandidates(candidates []retrieve.Candidate) []string {
-	ids := make([]string, len(candidates))
+func scopedIDsFromCandidates(candidates []retrieve.Candidate) []semanticeval.ScopedEntryID {
+	ids := make([]semanticeval.ScopedEntryID, len(candidates))
 	for i, candidate := range candidates {
-		ids[i] = candidate.EntryID
+		ids[i] = semanticeval.ScopedEntryID{Scope: candidate.Scope, EntryID: candidate.EntryID}
 	}
-	return semanticeval.RankedEntryIDs(ids)
+	return semanticeval.RankedScopedEntryIDs(ids)
 }
 
 func hydrateAcrossRoots(ctx context.Context, runtimes []scopeRuntime, candidates []retrieve.Candidate) ([]retrieve.Candidate, error) {
@@ -217,32 +257,27 @@ func hydrateAcrossRoots(ctx context.Context, runtimes []scopeRuntime, candidates
 	if len(candidates) == 0 {
 		return nil, nil
 	}
-	ids := make([]string, len(candidates))
-	for i, candidate := range candidates {
-		ids[i] = candidate.EntryID
-	}
-	entriesByID := map[string]index.Entry{}
+	hydrators := make(map[string]retrieve.IndexEntryHydrator, len(runtimes))
 	for _, runtime := range runtimes {
-		entries, err := index.EntriesByID(runtime.root, ids)
-		if err != nil {
-			return nil, err
-		}
-		for _, entry := range entries {
-			entriesByID[entry.ID] = entry
+		hydrators[runtime.scope] = retrieve.IndexEntryHydrator{
+			Root:  runtime.root,
+			Query: index.Query{Scope: runtime.scope},
 		}
 	}
 	hydrated := make([]retrieve.Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		entry, ok := entriesByID[candidate.EntryID]
+		hydrator, ok := hydrators[candidate.Scope]
 		if !ok {
-			return nil, fmt.Errorf("semantic recall entry %q is missing", candidate.EntryID)
+			return nil, fmt.Errorf("semantic recall scope %q is missing", candidate.Scope)
 		}
-		candidate.DocumentID = entry.ID
-		candidate.SourceOfTruth = entry.SourceOfTruth
-		candidate.Active = entry.Active
-		candidate.Lifecycle = entry.Lifecycle
-		candidate.Superseded = len(entry.SupersededBy) > 0
-		hydrated = append(hydrated, candidate)
+		mapped, err := hydrator.Hydrate(ctx, []retrieve.Candidate{candidate})
+		if err != nil {
+			return nil, err
+		}
+		if len(mapped) == 0 {
+			continue
+		}
+		hydrated = append(hydrated, mapped[0])
 	}
 	return hydrated, nil
 }

@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	RetrievalLabelsSchema   = "worktrail.semantic.eval.retrieval-labels.v1"
-	RetrievalRankingsSchema = "worktrail.semantic.eval.retrieval-rankings.v1"
+	RetrievalLabelsSchema   = "worktrail.semantic.eval.retrieval-labels.v2"
+	RetrievalRankingsSchema = "worktrail.semantic.eval.retrieval-rankings.v2"
 	RetrievalReportSchema   = "worktrail.semantic.eval.retrieval-report.v1"
 
 	LaneEntryFTS = "entry_fts"
@@ -20,21 +20,35 @@ const (
 	LaneGoverned = "governed"
 )
 
+// ScopedEntryID is a scope-qualified knowledge identity used by retrieval eval v2.
+type ScopedEntryID struct {
+	Scope   string `json:"scope"`
+	EntryID string `json:"entry_id"`
+}
+
+func (s ScopedEntryID) Key() string {
+	return s.Scope + "\x00" + s.EntryID
+}
+
+func (s ScopedEntryID) valid() bool {
+	return s.Scope != "" && s.EntryID != ""
+}
+
 // RetrievalLabels is the release-engineering labeled query set.
 type RetrievalLabels struct {
 	Schema  string           `json:"schema"`
 	Queries []RetrievalQuery `json:"queries"`
 }
 
-// RetrievalQuery names one labeled query and its relevant entry IDs.
+// RetrievalQuery names one labeled query and its relevant scoped entry IDs.
 type RetrievalQuery struct {
-	ID          string   `json:"id"`
-	Text        string   `json:"text"`
-	Category    string   `json:"category,omitempty"`
-	RelevantIDs []string `json:"relevant_ids"`
+	ID          string          `json:"id"`
+	Text        string          `json:"text"`
+	Category    string          `json:"category,omitempty"`
+	RelevantIDs []ScopedEntryID `json:"relevant_ids"`
 }
 
-// RetrievalRankings carries explicit per-lane entry ID rankings.
+// RetrievalRankings carries explicit per-lane scoped entry ID rankings.
 // Rankings must be collected from lane APIs; they must not be inferred from
 // public search JSON envelopes.
 type RetrievalRankings struct {
@@ -42,10 +56,10 @@ type RetrievalRankings struct {
 	Queries []RetrievalQueryRankings `json:"queries"`
 }
 
-// RetrievalQueryRankings holds one query's lane rankings as ordered entry IDs.
+// RetrievalQueryRankings holds one query's lane rankings as ordered scoped IDs.
 type RetrievalQueryRankings struct {
-	QueryID string              `json:"query_id"`
-	Lanes   map[string][]string `json:"lanes"`
+	QueryID string                     `json:"query_id"`
+	Lanes   map[string][]ScopedEntryID `json:"lanes"`
 }
 
 // RetrievalThresholds configures lane-specific metric gates for the retrieval report.
@@ -170,19 +184,20 @@ func ReportRetrieval(labels RetrievalLabels, rankings RetrievalRankings, thresho
 		item := byQuery[query.ID]
 		relevant := make(map[string]bool, len(query.RelevantIDs))
 		for _, id := range query.RelevantIDs {
-			relevant[id] = true
+			relevant[id.Key()] = true
 		}
 		for _, name := range laneNames {
 			ranked := item.Lanes[name]
 			if ranked == nil {
 				return RetrievalReport{}, fmt.Errorf("query %q missing lane %q", query.ID, name)
 			}
-			limit := min(thresholds.K, len(ranked))
-			cutoff := ranked[:limit]
+			keys := scopedKeys(ranked)
+			limit := min(thresholds.K, len(keys))
+			cutoff := keys[:limit]
 			a := accum[name]
 			a.queries++
 			a.recall += recallAtK(cutoff, relevant)
-			a.mrr += reciprocalRank(ranked, relevant)
+			a.mrr += reciprocalRank(keys, relevant)
 			a.ndcg += ndcgAtK(cutoff, relevant)
 		}
 	}
@@ -197,7 +212,6 @@ func ReportRetrieval(labels RetrievalLabels, rankings RetrievalRankings, thresho
 		metrics := metricsFromAccum(name, accum[name])
 		switch name {
 		case LaneRRF:
-			// Fusion must beat or match lexical entry FTS on every ranking metric.
 			if thresholds.RRF.RequireVsEntryFTS {
 				metrics.VsEntryFTS = compareAgainstBaseline(metrics, entry)
 				if metrics.VsEntryFTS != "ge" {
@@ -214,9 +228,6 @@ func ReportRetrieval(labels RetrievalLabels, rankings RetrievalRankings, thresho
 				report.FailureReasons = append(report.FailureReasons, name+"_ndcg_at_k")
 			}
 		case LaneGoverned:
-			// Governance may intentionally prefer active/source-of-truth docs and
-			// reorder MRR/nDCG; still require relevant docs remain in the top-K
-			// at least as often as entry FTS.
 			if thresholds.Governed.RequireRecallVsEntryFTS {
 				if metrics.RecallAtK+1e-12 >= entry.RecallAtK {
 					metrics.VsEntryFTS = "ge"
@@ -279,8 +290,8 @@ func validateRetrievalLabels(labels RetrievalLabels) error {
 		}
 		seen[query.ID] = true
 		for _, id := range query.RelevantIDs {
-			if id == "" {
-				return fmt.Errorf("query %q has an empty relevant id", query.ID)
+			if !id.valid() {
+				return fmt.Errorf("query %q has an invalid relevant id", query.ID)
 			}
 		}
 	}
@@ -305,8 +316,14 @@ func validateRetrievalRankings(rankings RetrievalRankings) error {
 			return fmt.Errorf("query %q has no lanes", item.QueryID)
 		}
 		for _, name := range required {
-			if _, ok := item.Lanes[name]; !ok {
+			ids, ok := item.Lanes[name]
+			if !ok {
 				return fmt.Errorf("query %q missing lane %q", item.QueryID, name)
+			}
+			for _, id := range ids {
+				if !id.valid() {
+					return fmt.Errorf("query %q lane %q has an invalid scoped id", item.QueryID, name)
+				}
 			}
 		}
 	}
@@ -340,7 +357,21 @@ func EncodeJSON(w io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
-// RankedEntryIDs collapses chunk-level hits to first-seen entry IDs.
+// RankedScopedEntryIDs collapses hits to first-seen scope-qualified entry IDs.
+func RankedScopedEntryIDs(ids []ScopedEntryID) []ScopedEntryID {
+	seen := map[string]bool{}
+	out := make([]ScopedEntryID, 0, len(ids))
+	for _, id := range ids {
+		if !id.valid() || seen[id.Key()] {
+			continue
+		}
+		seen[id.Key()] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// RankedEntryIDs collapses unscoped entry IDs for compatibility helpers.
 func RankedEntryIDs(entryIDs []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(entryIDs))
@@ -355,11 +386,19 @@ func RankedEntryIDs(entryIDs []string) []string {
 }
 
 // SortedLaneNames returns a stable lane name order for reports.
-func SortedLaneNames(lanes map[string][]string) []string {
+func SortedLaneNames(lanes map[string][]ScopedEntryID) []string {
 	names := make([]string, 0, len(lanes))
 	for name := range lanes {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
+}
+
+func scopedKeys(ids []ScopedEntryID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.Key()
+	}
+	return out
 }

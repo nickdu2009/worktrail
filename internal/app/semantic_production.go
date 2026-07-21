@@ -24,10 +24,10 @@ type productionSemanticSearcher struct {
 type semanticProductionDependencies struct {
 	discoverRoots func() (paths.SemanticRoots, error)
 	build         func(composition.Input) (composition.Result, error)
-	prepareScope  func(context.Context, composition.Result, paths.Env, string, SemanticSearchRequest) (semanticScopeRecall, error)
+	prepare       func(context.Context, composition.Result, paths.Env, SemanticSearchRequest) (productionSemanticRuntime, error)
 }
 
-type semanticScopeRecall interface {
+type productionSemanticRuntime interface {
 	Recall(context.Context, SemanticSearchRequest) (SemanticSearchResponse, error)
 	Close() error
 }
@@ -43,7 +43,7 @@ func productionSemanticProductionDependencies() semanticProductionDependencies {
 	return semanticProductionDependencies{
 		discoverRoots: paths.DiscoverSemanticRoots,
 		build:         composition.Build,
-		prepareScope:  prepareProductionSemanticScope,
+		prepare:       prepareProductionSemanticRuntime,
 	}
 }
 
@@ -60,44 +60,16 @@ func (s productionSemanticSearcher) Search(ctx context.Context, request Semantic
 		return s.unavailable(request, semanticProductionReason(err))
 	}
 
-	scopes, err := semanticRequestScopes(request.Scope)
+	runtime, err := s.deps.prepare(ctx, composed, s.env, request)
 	if err != nil {
-		return s.unavailable(request, contracts.ReasonRuntimeUnavailable)
-	}
-	runtimes := make([]semanticScopeRecall, 0, len(scopes))
-	for _, scope := range scopes {
-		runtime, err := s.deps.prepareScope(ctx, composed, s.env, scope, request)
-		if err != nil {
-			closeSemanticScopeRuntimes(runtimes)
-			return s.unavailable(request, semanticProductionReason(err))
-		}
-		runtimes = append(runtimes, runtime)
-	}
-	defer closeSemanticScopeRuntimes(runtimes)
-
-	// Starting after all active generations have been opened prevents an all
-	// scope request from returning a partial semantic result.
-	if _, err := composed.Controller.Start(ctx); err != nil {
 		return s.unavailable(request, semanticProductionReason(err))
 	}
+	defer func() { _ = runtime.Close() }()
 
-	response := SemanticSearchResponse{Profile: composed.Identity.RecallProfileID}
-	for _, runtime := range runtimes {
-		scopeResponse, err := runtime.Recall(ctx, request)
-		if err != nil {
-			return s.unavailable(request, semanticProductionReason(err))
-		}
-		if semanticSearchDegraded(scopeResponse) {
-			reason := firstSemanticReason(scopeResponse)
-			return s.unavailable(request, reason)
-		}
-		if response.Policy == "" {
-			response.Policy = scopeResponse.Policy
-		}
-		response.Lanes = append(response.Lanes, scopeResponse.Lanes...)
-		response.Results = append(response.Results, scopeResponse.Results...)
+	response, err := runtime.Recall(ctx, request)
+	if err != nil {
+		return s.unavailable(request, semanticProductionReason(err))
 	}
-	response.Results = index.RankSearchResults(response.Results, request.Limit)
 	return response, nil
 }
 
@@ -123,12 +95,6 @@ func semanticRequestScopes(scope string) ([]string, error) {
 		return []string{"user", "project"}, nil
 	default:
 		return nil, fmt.Errorf("invalid semantic search scope")
-	}
-}
-
-func closeSemanticScopeRuntimes(runtimes []semanticScopeRecall) {
-	for i := len(runtimes) - 1; i >= 0; i-- {
-		_ = runtimes[i].Close()
 	}
 }
 
@@ -167,21 +133,17 @@ func semanticProductionReason(err error) contracts.ReasonCode {
 	return contracts.ReasonRuntimeUnavailable
 }
 
-func prepareProductionSemanticScope(
+func prepareProductionSemanticRuntime(
 	ctx context.Context,
 	composed composition.Result,
 	env paths.Env,
-	scope string,
 	request SemanticSearchRequest,
-) (semanticScopeRecall, error) {
-	root, err := env.ScopeRoot(scope)
+) (productionSemanticRuntime, error) {
+	scopes, err := semanticRequestScopes(request.Scope)
 	if err != nil {
 		return nil, err
 	}
-	semanticDir, err := env.SemanticIndexRoot(scope)
-	if err != nil {
-		return nil, err
-	}
+
 	metadata, err := generation.NewRebuildMetadata(
 		composed.Identity.RecallProfileID,
 		composed.Identity.ModelSpaceID,
@@ -191,40 +153,122 @@ func prepareProductionSemanticScope(
 	if err != nil {
 		return nil, err
 	}
-	active, err := generation.OpenActive(ctx, semanticDir, metadata)
-	if err != nil {
+
+	// Verify every participating scope before daemon startup so scope=all never
+	// returns a partial semantic result after a later open/profile failure.
+	opened := make([]productionOpenedScope, 0, len(scopes))
+	closeOpened := func() {
+		for i := len(opened) - 1; i >= 0; i-- {
+			_ = opened[i].active.Close()
+		}
+	}
+
+	var profiles []string
+	for _, scope := range scopes {
+		semanticDir, err := env.SemanticIndexRoot(scope)
+		if err != nil {
+			closeOpened()
+			return nil, err
+		}
+		pointer, err := generation.ReadActive(semanticDir)
+		if err != nil {
+			closeOpened()
+			return nil, err
+		}
+		profiles = append(profiles, pointer.RecallProfileID)
+	}
+	if len(profiles) > 1 {
+		for i := 1; i < len(profiles); i++ {
+			if profiles[i] != profiles[0] {
+				closeOpened()
+				return nil, &retrieve.Error{
+					Code:    contracts.ReasonProfileMismatchAcrossScopes,
+					Message: "semantic recall profiles differ across scopes",
+				}
+			}
+		}
+	}
+
+	for _, scope := range scopes {
+		root, err := env.ScopeRoot(scope)
+		if err != nil {
+			closeOpened()
+			return nil, err
+		}
+		semanticDir, err := env.SemanticIndexRoot(scope)
+		if err != nil {
+			closeOpened()
+			return nil, err
+		}
+		active, err := generation.OpenActive(ctx, semanticDir, metadata)
+		if err != nil {
+			closeOpened()
+			return nil, err
+		}
+		query := index.Query{
+			Scope: scope,
+			Type:  request.Type,
+			Topic: request.Topic,
+			Tag:   request.Tag,
+		}
+		opened = append(opened, productionOpenedScope{
+			scope:    scope,
+			root:     root,
+			active:   active,
+			hydrator: retrieve.IndexEntryHydrator{Root: root, Query: query},
+			query:    query,
+		})
+	}
+
+	// Starting after all active generations have been opened prevents an all
+	// scope request from returning a partial semantic result.
+	if _, err := composed.Controller.Start(ctx); err != nil {
+		closeOpened()
 		return nil, err
 	}
 
-	query := index.Query{
-		Scope: scope,
+	filters := retrieve.ExactFilters{
 		Type:  request.Type,
 		Topic: request.Topic,
 		Tag:   request.Tag,
 	}
-	hydrator := retrieve.IndexEntryHydrator{Root: root, Query: query}
+	backends := make([]retrieve.ScopeBackend, 0, len(opened))
+	legacyAdapters := make([]retrieve.LegacyLexicalAdapter, 0, len(opened))
+	for _, item := range opened {
+		backends = append(backends, retrieve.ScopeBackend{
+			Scope: item.scope,
+			ChunkFTS: retrieve.GenerationChunkFTS{
+				Active:    item.active,
+				Tokenizer: index.NewTokenizer(),
+				Filters:   filters,
+				Scope:     item.scope,
+			},
+			VectorKNN: retrieve.GenerationVectorKNN{
+				Active: item.active,
+				Scope:  item.scope,
+			},
+			Hydrator:      item.hydrator,
+			FiltersPushed: true,
+		})
+		legacyAdapters = append(legacyAdapters, retrieve.LegacyLexicalAdapter{
+			Root:  item.root,
+			Query: item.query,
+		})
+	}
+
 	facade := retrieve.Facade{
-		Policy:    retrieve.DefaultPolicy(),
-		ChunkFTS: retrieve.GenerationChunkFTS{
-			Active:    active,
-			Tokenizer: index.NewTokenizer(),
-		},
-		VectorKNN: retrieve.GenerationVectorKNN{Active: active},
+		Policy:   retrieve.DefaultPolicy(),
+		Backends: backends,
 		Embedder: retrieve.DaemonQueryEmbedder{
 			Embedder:    composed.Client,
 			Credentials: composed.Store,
 		},
-		Hydrator: hydrator,
-		Gate:     activeGenerationGate{},
-		LegacyLexicalFallback: retrieve.LegacyLexicalAdapter{
-			Root:  root,
-			Query: query,
-		}.Recall,
+		Gate:                  activeGenerationGate{},
+		LegacyLexicalFallback: multiScopeLegacyLexicalFallback(legacyAdapters).Recall,
 	}
-	return productionSemanticScopeRecall{
-		active:    active,
+	return &productionSemanticMultiRecall{
+		opened:    opened,
 		facade:    facade,
-		hydrator:  hydrator,
 		profileID: composed.Identity.RecallProfileID,
 	}, nil
 }
@@ -235,32 +279,56 @@ func (activeGenerationGate) Check(context.Context) (contracts.ReasonCode, error)
 	return "", nil
 }
 
-type productionSemanticScopeRecall struct {
-	active    *generation.Active
+type productionOpenedScope struct {
+	scope    string
+	root     string
+	active   *generation.Active
+	hydrator retrieve.IndexEntryHydrator
+	query    index.Query
+}
+
+type productionSemanticMultiRecall struct {
+	opened    []productionOpenedScope
 	facade    retrieve.Facade
-	hydrator  retrieve.IndexEntryHydrator
 	profileID string
 }
 
-func (s productionSemanticScopeRecall) Recall(ctx context.Context, request SemanticSearchRequest) (SemanticSearchResponse, error) {
+func (s *productionSemanticMultiRecall) Recall(ctx context.Context, request SemanticSearchRequest) (SemanticSearchResponse, error) {
 	response, err := s.facade.Recall(ctx, retrieve.Request{
 		Query: request.Query,
 		Mode:  request.Mode,
 		Scope: request.Scope,
+		Filters: retrieve.ExactFilters{
+			Type:  request.Type,
+			Topic: request.Topic,
+			Tag:   request.Tag,
+		},
 	})
 	if err != nil {
 		return SemanticSearchResponse{}, err
 	}
-	results, err := s.hydrator.MapCandidates(ctx, response.Candidates)
+
+	results, err := mapProductionCandidates(ctx, s.opened, response.Candidates)
 	if err != nil {
 		return SemanticSearchResponse{}, err
 	}
+	if request.Limit > 0 && len(results) > request.Limit {
+		results = results[:request.Limit]
+	}
+
 	lanes := make([]SemanticSearchLane, len(response.Lanes))
 	for i, lane := range response.Lanes {
 		lanes[i] = SemanticSearchLane{
-			Name:     lane.Name,
-			Degraded: lane.Degraded,
-			Reason:   lane.Reason,
+			Scope:            lane.Scope,
+			Name:             lane.Name,
+			Degraded:         lane.Degraded,
+			Reason:           lane.Reason,
+			RawHits:          lane.RawHits,
+			FilterRejections: lane.FilterRejections,
+			EligibleEntries:  lane.EligibleEntries,
+			RefillRounds:     lane.RefillRounds,
+			HardCap:          lane.HardCap,
+			WindowSaturated:  lane.WindowSaturated,
 		}
 	}
 	searchResponse := SemanticSearchResponse{
@@ -278,10 +346,68 @@ func (s productionSemanticScopeRecall) Recall(ctx context.Context, request Seman
 	}
 	if response.Reason != "" {
 		searchResponse.DegradedReasons = []contracts.ReasonCode{response.Reason}
+	} else {
+		for _, lane := range lanes {
+			if lane.Degraded && lane.Reason != "" {
+				searchResponse.DegradedReasons = append(searchResponse.DegradedReasons, lane.Reason)
+			}
+		}
 	}
 	return searchResponse, nil
 }
 
-func (s productionSemanticScopeRecall) Close() error {
-	return s.active.Close()
+func (s *productionSemanticMultiRecall) Close() error {
+	var first error
+	for i := len(s.opened) - 1; i >= 0; i-- {
+		if err := s.opened[i].active.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+func mapProductionCandidates(ctx context.Context, opened []productionOpenedScope, candidates []retrieve.Candidate) ([]index.Result, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	byScope := make(map[string]retrieve.IndexEntryHydrator, len(opened))
+	for _, item := range opened {
+		byScope[item.scope] = item.hydrator
+	}
+	results := make([]index.Result, 0, len(candidates))
+	for _, candidate := range candidates {
+		hydrator, ok := byScope[candidate.Scope]
+		if !ok {
+			return nil, fmt.Errorf("semantic recall scope %q is not prepared", candidate.Scope)
+		}
+		mapped, err := hydrator.MapCandidates(ctx, []retrieve.Candidate{candidate})
+		if err != nil {
+			return nil, err
+		}
+		if len(mapped) == 0 {
+			continue
+		}
+		results = append(results, mapped[0])
+	}
+	return results, nil
+}
+
+type multiScopeLegacyLexicalFallback []retrieve.LegacyLexicalAdapter
+
+func (adapters multiScopeLegacyLexicalFallback) Recall(ctx context.Context, query string, limit int) ([]retrieve.Candidate, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("legacy lexical fallback limit must be greater than zero")
+	}
+	var merged []retrieve.Candidate
+	for _, adapter := range adapters {
+		candidates, err := adapter.Recall(ctx, query, limit)
+		if err != nil {
+			return nil, err
+		}
+		merged = append(merged, candidates...)
+	}
+	if len(merged) > limit {
+		merged = merged[:limit]
+	}
+	return merged, nil
 }

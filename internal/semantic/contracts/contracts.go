@@ -30,11 +30,18 @@ func ParseMode(value string) (Mode, error) {
 type ReasonCode string
 
 const (
-	ReasonPlatformUnsupported ReasonCode = "semantic_platform_unsupported"
-	ReasonBundleMissing       ReasonCode = "semantic_bundle_missing"
-	ReasonRuntimeUnavailable  ReasonCode = "semantic_runtime_unavailable"
-	ReasonGenerationMissing   ReasonCode = "semantic_generation_missing"
-	ReasonProfileStale        ReasonCode = "semantic_profile_stale"
+	ReasonPlatformUnsupported         ReasonCode = "semantic_platform_unsupported"
+	ReasonBundleMissing               ReasonCode = "semantic_bundle_missing"
+	ReasonRuntimeUnavailable          ReasonCode = "semantic_runtime_unavailable"
+	ReasonRuntimeIdentityMismatch     ReasonCode = "semantic_runtime_identity_mismatch"
+	ReasonRuntimeCapacityExceeded     ReasonCode = "semantic_runtime_capacity_exceeded"
+	ReasonGenerationMissing           ReasonCode = "semantic_generation_missing"
+	ReasonProfileStale                ReasonCode = "semantic_profile_stale"
+	ReasonProfileMismatchAcrossScopes ReasonCode = "semantic_profile_mismatch_across_scopes"
+	ReasonGenerationIncompatible      ReasonCode = "semantic_generation_incompatible"
+	ReasonSQLiteVecUnavailable        ReasonCode = "sqlite_vec_unavailable"
+	ReasonFTSQueryFailed              ReasonCode = "fts_query_failed"
+	ReasonDisabled                    ReasonCode = "semantic_disabled"
 )
 
 // TokenCounter is implemented by the daemon client in a later step. Chunking

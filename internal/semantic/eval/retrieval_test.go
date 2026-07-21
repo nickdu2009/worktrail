@@ -48,8 +48,8 @@ func TestReportRetrievalRejectsMissingLane(t *testing.T) {
 
 func TestReportRetrievalFlagsBelowBaseline(t *testing.T) {
 	labels, rankings := loadRetrievalFixtureSet(t)
-	rankings.Queries[0].Lanes[LaneGoverned] = []string{"unrelated-entry"}
-	rankings.Queries[1].Lanes[LaneGoverned] = []string{"unrelated-entry"}
+	rankings.Queries[0].Lanes[LaneGoverned] = []ScopedEntryID{{Scope: "project", EntryID: "unrelated-entry"}}
+	rankings.Queries[1].Lanes[LaneGoverned] = []ScopedEntryID{{Scope: "project", EntryID: "unrelated-entry"}}
 	report, err := ReportRetrieval(labels, rankings, DefaultRetrievalThresholds())
 	if err != nil {
 		t.Fatal(err)
@@ -65,8 +65,11 @@ func TestReportRetrievalFlagsBelowBaseline(t *testing.T) {
 
 func TestReportRetrievalDoesNotGateGovernedMRROrNDCG(t *testing.T) {
 	labels, rankings := loadRetrievalFixtureSet(t)
-	for _, item := range rankings.Queries {
-		item.Lanes[LaneGoverned] = append([]string{"unrelated-entry"}, item.Lanes[LaneGoverned]...)
+	for i := range rankings.Queries {
+		rankings.Queries[i].Lanes[LaneGoverned] = append(
+			[]ScopedEntryID{{Scope: "project", EntryID: "unrelated-entry"}},
+			rankings.Queries[i].Lanes[LaneGoverned]...,
+		)
 	}
 
 	report, err := ReportRetrieval(labels, rankings, DefaultRetrievalThresholds())
@@ -81,10 +84,15 @@ func TestReportRetrievalDoesNotGateGovernedMRROrNDCG(t *testing.T) {
 	}
 }
 
-func TestRankedEntryIDsDedupes(t *testing.T) {
-	got := RankedEntryIDs([]string{"a", "b", "a", "", "c", "b"})
-	if strings.Join(got, ",") != "a,b,c" {
-		t.Fatalf("RankedEntryIDs() = %v", got)
+func TestRankedScopedEntryIDsDedupes(t *testing.T) {
+	got := RankedScopedEntryIDs([]ScopedEntryID{
+		{Scope: "project", EntryID: "a"},
+		{Scope: "user", EntryID: "a"},
+		{Scope: "project", EntryID: "a"},
+		{Scope: "project", EntryID: "b"},
+	})
+	if len(got) != 3 || got[0].Scope != "project" || got[0].EntryID != "a" || got[1].Scope != "user" || got[2].EntryID != "b" {
+		t.Fatalf("RankedScopedEntryIDs() = %#v", got)
 	}
 }
 
