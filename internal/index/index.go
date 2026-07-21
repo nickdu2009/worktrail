@@ -30,8 +30,8 @@ type Entry struct {
 	SupersededBy   []string  `json:"superseded_by,omitempty"`
 	Tags           []string  `json:"tags,omitempty"`
 	Content        string    `json:"content"`
-	ExpiresAt      time.Time `json:"expires_at,omitempty"`
-	CreatedAt      time.Time `json:"created_at,omitempty"`
+	ExpiresAt      time.Time `json:"expires_at,omitempty,omitzero"`
+	CreatedAt      time.Time `json:"created_at,omitempty,omitzero"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Active         bool      `json:"active,omitempty"`
 	SourceSessions []string  `json:"source_sessions,omitempty"`

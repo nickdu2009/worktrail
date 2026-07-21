@@ -1,10 +1,71 @@
 package index
 
 import (
+	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestEntryResultMarshalOmitsZeroTimestamps(t *testing.T) {
+	zeroEntry := Entry{
+		Schema:    "worktrail.index.entry.v1",
+		ID:        "e1",
+		Scope:     "project",
+		Type:      "rule",
+		Path:      "rules/e1.md",
+		Title:     "E1",
+		Content:   "",
+		UpdatedAt: time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC),
+	}
+	for _, name := range []string{"entry", "result"} {
+		t.Run(name+"_zero", func(t *testing.T) {
+			var raw []byte
+			var err error
+			if name == "entry" {
+				raw, err = json.Marshal(zeroEntry)
+			} else {
+				raw, err = json.Marshal(Result{Entry: zeroEntry, Score: 1.0})
+			}
+			if err != nil {
+				t.Fatalf("json.Marshal: %v", err)
+			}
+			s := string(raw)
+			if strings.Contains(s, `"created_at"`) {
+				t.Fatalf("zero CreatedAt must omit created_at: %s", s)
+			}
+			if strings.Contains(s, `"expires_at"`) {
+				t.Fatalf("zero ExpiresAt must omit expires_at: %s", s)
+			}
+		})
+	}
+
+	nonZero := zeroEntry
+	nonZero.CreatedAt = time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	nonZero.ExpiresAt = time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	for _, name := range []string{"entry", "result"} {
+		t.Run(name+"_nonzero", func(t *testing.T) {
+			var raw []byte
+			var err error
+			if name == "entry" {
+				raw, err = json.Marshal(nonZero)
+			} else {
+				raw, err = json.Marshal(Result{Entry: nonZero, Score: 1.0})
+			}
+			if err != nil {
+				t.Fatalf("json.Marshal: %v", err)
+			}
+			s := string(raw)
+			if !strings.Contains(s, `"created_at":"2026-07-01T12:00:00Z"`) {
+				t.Fatalf("non-zero CreatedAt must be present: %s", s)
+			}
+			if !strings.Contains(s, `"expires_at":"2026-08-01T12:00:00Z"`) {
+				t.Fatalf("non-zero ExpiresAt must be present: %s", s)
+			}
+		})
+	}
+}
 
 func TestSearchIncludeContentContract(t *testing.T) {
 	entries := []Entry{

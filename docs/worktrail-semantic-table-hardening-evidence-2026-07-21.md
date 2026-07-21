@@ -129,3 +129,22 @@ Additional privacy-safe checks:
 
 - Full refill capacity matrix at 10k / 50k / 100k (do not forge PASS)
 - Clean-checkout `bash scripts/semantic/run-production-e2e-gate.sh all`
+
+## JSON v1 baseline refresh (Go 1.26 + table fixture)
+
+Step-7 offline gate failed on `search-json-v1.golden` for two independent
+reasons; both are intentional contract/corpus updates, not gate-script bugs.
+
+1. **Go 1.26 `omitempty` + zero `time.Time`**: encoding/json no longer omits
+   zero-value `time.Time` under `omitempty` alone, so search JSON emitted
+   `created_at` / `expires_at` as `0001-01-01T00:00:00Z`. Fix: tag
+   `Entry.CreatedAt` / `Entry.ExpiresAt` with `omitempty,omitzero` so the v1
+   shape stays `{}`-compatible (keys absent when zero). Same omission applied
+   to JSON v2 table goldens under `internal/app/testdata/` and
+   `scripts/semantic/fixtures/production-e2e/`.
+2. **Lexical score drift from table fixture**:
+   `architecture/table-hardening-matrix.md` is intentionally merged into the
+   production-e2e project corpus via `install_fixtures`, which changes BM25
+   IDF. Golden score refreshed `21.829…` → `22.762…` for the same single-hit
+   needle `e2e-prod-gate-needle-zx9` (still one `[]index.Result`, no
+   `chunk_matches` / v2 schema).
