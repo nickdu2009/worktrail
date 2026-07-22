@@ -49,9 +49,50 @@ worktrail init
 <div class="title-en">Optional Local Semantic Recall Installation</div>
 
 核心初始化默认不访问网络，也不会自动下载语义模型或 runtime。只有显式请求
-`worktrail init --semantic` 才会安装本地语义 bundle；`worktrail init
---no-semantic` 会明确禁用语义安装。安装成功后仍需显式执行
+`worktrail init --semantic` 才会安装本地语义 bundle，并在 macOS 当前
+`gui/<uid>` 域注册用户级 Semantic Host；`worktrail init --no-semantic`
+会明确禁用语义安装。安装成功后仍需显式执行
 `worktrail semantic rebuild --scope all` 才会创建索引。
+
+Semantic Host 通过私有 Unix Domain Socket 为同一用户的 CLI、Codex 和 Cursor
+共享一个 worker。它由 `launchd` 按需启动，不是通用常驻 daemon，也不会因为
+`worktrail semantic status` 被唤醒。最后一个 tokenize/embed 请求完成后，默认
+空闲 10 分钟；超时后 Host 停止 worker、删除临时 credential 和 socket，然后
+退出。
+
+服务配置位于用户配置根的 `worktrail/semantic/service.json`：
+
+```json
+{
+  "schema": "worktrail.semantic.service-config.v1",
+  "idle_timeout": "10m"
+}
+```
+
+`idle_timeout` 允许 `1m` 至 `60m`。文件缺失时使用 `10m`，
+`init --semantic` 只在缺失时创建；schema、duration 或范围非法时会明确失败，
+不会截断或覆盖原文件。
+
+常用生命周期命令：
+
+```bash
+worktrail semantic status --format json
+worktrail semantic start
+worktrail semantic stop
+worktrail semantic restart
+worktrail semantic service uninstall --confirm
+```
+
+`status` 继续输出 `worktrail.semantic.status.v1`，并按可用性追加 service、Host、
+worker、bundle、PID/start-time、active requests、idle deadline 和 last failure
+字段。正常冷状态是 `registered/stopped`，不是 runtime failure。升级后再次运行
+`worktrail init --semantic` 会校验 bundle 并原子更新自有 LaunchAgent；更新失败
+会恢复旧注册。卸载只移除 LaunchAgent、metadata 和 UDS，保留 bundle、generation
+以及 `service.json`。
+
+首期只支持有 macOS 图形登录会话的用户级 `launchd` 域。SSH/headless 环境没有
+`gui/<uid>` 时会返回可见的 `semantic_platform_unsupported`，不会退回启动裸
+daemon；此时 lexical 搜索仍可用。
 
 M1 是唯一的 `verified` runtime 变体。M2–M5 是 opt-in `experimental`
 变体：仅使用当前芯片自己的 pinned official artifact，并在安装时通过本地

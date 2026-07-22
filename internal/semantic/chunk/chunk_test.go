@@ -17,6 +17,15 @@ func (wordCounter) CountTokens(_ context.Context, value string) (int, error) {
 	return len(strings.Fields(value)), nil
 }
 
+type countingWordCounter struct {
+	calls int
+}
+
+func (c *countingWordCounter) CountTokens(ctx context.Context, value string) (int, error) {
+	c.calls++
+	return wordCounter{}.CountTokens(ctx, value)
+}
+
 type failingCounter struct{}
 
 func (failingCounter) CountTokens(context.Context, string) (int, error) {
@@ -114,6 +123,46 @@ func TestChunkDocumentForcedSplitUsesOverlapAndHardMaximum(t *testing.T) {
 	}
 	if !strings.HasPrefix(chunks[1].Body, "seven eight ") {
 		t.Errorf("second forced chunk = %q, want two-token overlap", chunks[1].Body)
+	}
+}
+
+func TestForcedSplitUsesLogarithmicTokenProbes(t *testing.T) {
+	counter := &countingWordCounter{}
+	value := strings.Repeat("word ", 4096)
+	c := chunker{
+		source:  []byte(value),
+		counter: counter,
+		budget:  Budget{Target: 80, HardMax: 100, Overlap: 8},
+	}
+
+	end, tokens, err := c.forcedEnd(context.Background(), 0, len(c.source), nil, "")
+	if err != nil {
+		t.Fatalf("forcedEnd() error = %v", err)
+	}
+	if tokens > c.budget.HardMax {
+		t.Fatalf("forcedEnd() tokens = %d, hard maximum = %d", tokens, c.budget.HardMax)
+	}
+	if counter.calls > 18 {
+		t.Fatalf("forcedEnd() token calls = %d, want at most 18", counter.calls)
+	}
+
+	counter.calls = 0
+	start, err := c.overlapStart(context.Background(), 0, end)
+	if err != nil {
+		t.Fatalf("overlapStart() error = %v", err)
+	}
+	if start <= 0 || start >= end {
+		t.Fatalf("overlapStart() = %d for end %d", start, end)
+	}
+	if counter.calls > 10 {
+		t.Fatalf("overlapStart() token calls = %d, want at most 10", counter.calls)
+	}
+	overlapTokens, err := wordCounter{}.CountTokens(context.Background(), string(c.source[start:end]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overlapTokens > c.budget.Overlap {
+		t.Fatalf("overlap tokens = %d, budget = %d", overlapTokens, c.budget.Overlap)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -32,10 +33,18 @@ func (darwinFactory) Open(identity Identity) (Process, error) {
 	}
 	actual, err := darwinIdentity(identity.PID)
 	if err != nil {
-		return nil, err
+		// kern.proc.pid reports EIO for a reaped PID on current Darwin. Treat
+		// the identity as absent only when a separate signal-0 probe also
+		// proves the PID does not exist; every uncertain result remains a
+		// fail-closed identity mismatch.
+		probeErr := unix.Kill(identity.PID, 0)
+		if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.ENOENT) || errors.Is(probeErr, unix.ESRCH) {
+			return nil, fmt.Errorf("%w: %v", ErrProcessNotFound, err)
+		}
+		return nil, fmt.Errorf("%w: %v", ErrProcessIdentityMismatch, err)
 	}
 	if !actual.StartedAt.Equal(identity.StartedAt) {
-		return nil, errors.New("semantic process PID has a different start time")
+		return nil, ErrProcessIdentityMismatch
 	}
 	process, err := os.FindProcess(identity.PID)
 	if err != nil {
@@ -48,6 +57,7 @@ type darwinProcess struct {
 	command  Command
 	process  *os.Process
 	identity Identity
+	done     <-chan struct{}
 	mu       sync.Mutex
 }
 
@@ -65,9 +75,9 @@ func (p *darwinProcess) Start(ctx context.Context) error {
 		return errors.New("semantic process has already started")
 	}
 
-	// WithoutCancel keeps the detached daemon alive after the command that
-	// started it returns. CommandContext is still used to retain its standard
-	// exec setup while the caller context is checked above.
+	// The launchd-owned Host, not an individual request, owns the worker. Keep
+	// the child in the Host process group while preventing request cancellation
+	// from killing it.
 	command := exec.CommandContext(context.WithoutCancel(ctx), p.command.Path, p.command.Args...)
 	command.Dir = p.command.Dir
 	if p.command.Env != nil {
@@ -80,11 +90,69 @@ func (p *darwinProcess) Start(ctx context.Context) error {
 	identity, err := darwinIdentity(command.Process.Pid)
 	if err != nil {
 		_ = command.Process.Kill()
-		_ = command.Process.Release()
+		_ = command.Wait()
 		p.process = nil
 		return err
 	}
 	p.identity = identity
+	if err := startWorkerWatch(identity, p.command.Dir); err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		p.process = nil
+		return err
+	}
+	done := make(chan struct{})
+	p.done = done
+	go func() {
+		_ = command.Wait()
+		close(done)
+	}()
+	return nil
+}
+
+func startWorkerWatch(worker Identity, directory string) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve semantic worker watchdog executable: %w", err)
+	}
+	host, err := darwinIdentity(os.Getpid())
+	if err != nil {
+		return err
+	}
+	readyReader, readyWriter, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	defer readyReader.Close()
+	watch := exec.Command(executable, "semantic", "worker-watch", "--launchd")
+	watch.Dir = directory
+	watch.Env = workerWatchEnvironment(os.Environ(), host, worker)
+	watch.ExtraFiles = []*os.File{readyWriter}
+	// Keep the watchdog outside the launchd Host process group so a targeted
+	// Host SIGKILL cannot remove the only process able to clean the llama
+	// worker. The llama worker itself remains in the Host process group.
+	watch.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := watch.Start(); err != nil {
+		readyWriter.Close()
+		return fmt.Errorf("start semantic worker watchdog: %w", err)
+	}
+	_ = readyWriter.Close()
+	_ = readyReader.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buffer := []byte{0}
+	if _, err := readyReader.Read(buffer); err != nil || buffer[0] != 1 {
+		_ = watch.Process.Kill()
+		_ = watch.Wait()
+		return errors.New("semantic worker watchdog did not become ready")
+	}
+	go func() {
+		_ = watch.Wait()
+		// A watchdog that exits while both original identities are still
+		// present would leave the worker unprotected. Fail closed by stopping
+		// that exact worker; the next request may recover it once.
+		if processIdentityMatches(host) && processIdentityMatches(worker) {
+			_ = stopWatchedWorker(worker)
+		}
+	}()
 	return nil
 }
 
@@ -110,9 +178,18 @@ func (p *darwinProcess) Signal(signal os.Signal) error {
 func (p *darwinProcess) WaitExited(ctx context.Context) error {
 	p.mu.Lock()
 	identity := p.identity
+	done := p.done
 	p.mu.Unlock()
 	if identity.PID <= 0 || identity.StartedAt.IsZero() {
 		return errors.New("semantic process has not started")
+	}
+	if done != nil {
+		select {
+		case <-done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -140,9 +217,14 @@ func (p *darwinProcess) WaitExited(ctx context.Context) error {
 func (p *darwinProcess) Release() error {
 	p.mu.Lock()
 	process := p.process
+	owned := p.done != nil
 	p.process = nil
 	p.mu.Unlock()
 	if process == nil {
+		return nil
+	}
+	if owned {
+		// command.Wait owns process reaping for children created by this Host.
 		return nil
 	}
 	return process.Release()

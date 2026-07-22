@@ -170,6 +170,76 @@ func TestRunSemanticLifecycleInjectsProductionController(t *testing.T) {
 	}
 }
 
+func TestRunSemanticStatusUsesLightweightServiceClientWithoutBundleComposition(t *testing.T) {
+	roots := paths.SemanticRoots{Cache: "cache-root", Runtime: "runtime-root", Logs: "logs-root"}
+	controller := &semanticController{statusReport: semanticReport("status", daemon.StateStopped)}
+	deps := semanticDependencies{lifecycle: semanticLifecycleDependencies{
+		discoverRoots: func() (paths.SemanticRoots, error) { return roots, nil },
+		build: func(composition.Input) (composition.Result, error) {
+			t.Fatal("status composed the trusted bundle")
+			return composition.Result{}, nil
+		},
+		serviceClient: func(got paths.SemanticRoots) (daemon.Controller, error) {
+			if got != roots {
+				t.Fatalf("service roots = %#v, want %#v", got, roots)
+			}
+			return controller, nil
+		},
+	}}
+	if err := runSemanticWithDependencies(context.Background(), IO{Out: &bytes.Buffer{}}, []string{"status"}, deps); err != nil {
+		t.Fatalf("status error = %v", err)
+	}
+	if controller.statusCalls != 1 || controller.startCalls != 0 {
+		t.Fatalf("service controller calls = %#v", controller)
+	}
+}
+
+func TestRunSemanticRoutesInternalHostAndConfirmedUninstall(t *testing.T) {
+	roots := paths.SemanticRoots{Cache: "cache-root", Runtime: "runtime-root", Logs: "logs-root"}
+	hostCalls := 0
+	watchCalls := 0
+	uninstallCalls := 0
+	deps := semanticDependencies{
+		lifecycle: semanticLifecycleDependencies{discoverRoots: func() (paths.SemanticRoots, error) { return roots, nil }},
+		host: func(_ context.Context, got paths.SemanticRoots) error {
+			hostCalls++
+			if got != roots {
+				t.Fatalf("Host roots = %#v", got)
+			}
+			return nil
+		},
+		watch: func(context.Context) error {
+			watchCalls++
+			return nil
+		},
+		uninstall: func(_ context.Context, got paths.SemanticRoots) error {
+			uninstallCalls++
+			if got != roots {
+				t.Fatalf("uninstall roots = %#v", got)
+			}
+			return nil
+		},
+	}
+	if err := runSemanticWithDependencies(context.Background(), IO{Out: &bytes.Buffer{}}, []string{"host", "--launchd"}, deps); err != nil {
+		t.Fatalf("Host route error = %v", err)
+	}
+	if err := runSemanticWithDependencies(context.Background(), IO{Out: &bytes.Buffer{}}, []string{"worker-watch", "--launchd"}, deps); err != nil {
+		t.Fatalf("worker watchdog route error = %v", err)
+	}
+	if err := runSemanticWithDependencies(context.Background(), IO{Out: &bytes.Buffer{}}, []string{"service", "uninstall", "--confirm"}, deps); err != nil {
+		t.Fatalf("uninstall route error = %v", err)
+	}
+	if hostCalls != 1 || watchCalls != 1 || uninstallCalls != 1 {
+		t.Fatalf("route calls = host:%d watch:%d uninstall:%d", hostCalls, watchCalls, uninstallCalls)
+	}
+	if err := runSemanticWithDependencies(context.Background(), IO{Out: &bytes.Buffer{}}, []string{"service", "uninstall"}, deps); err == nil {
+		t.Fatal("unconfirmed uninstall error = nil")
+	}
+	if uninstallCalls != 1 {
+		t.Fatal("unconfirmed uninstall mutated service")
+	}
+}
+
 func TestRunSemanticLifecycleStatusCompositionFailureReturnsUnavailableReport(t *testing.T) {
 	rebuild, _ := semanticRebuildDeps(t)
 	deps := semanticDependencies{

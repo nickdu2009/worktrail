@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -170,6 +171,69 @@ func TestSupervisorStartMarksHealthyExistingDaemonAsNotCreated(t *testing.T) {
 	}
 	if factory.newCalls != 0 {
 		t.Fatal("Start() created a process despite an authenticated healthy daemon")
+	}
+}
+
+func TestSupervisorStartRecoversOnceWhenRecordedWorkerNoLongerExists(t *testing.T) {
+	store := testStore(t)
+	oldIdentity := testIdentity(302)
+	newIdentity := testIdentity(303)
+	oldEndpoint := "http://127.0.0.1:41302"
+	newEndpoint := "http://127.0.0.1:41303"
+	saveDescriptor(t, store, oldIdentity, oldEndpoint)
+	client := &scriptedClient{responses: map[string][]readinessResult{
+		oldEndpoint: {
+			{err: &TransportError{Err: errors.New("worker crashed")}},
+			{err: &TransportError{Err: errors.New("worker crashed")}},
+		},
+		newEndpoint: {{identity: runtimeIdentity()}},
+	}}
+	factory := &fakeFactory{openErr: ErrProcessNotFound, next: []Identity{newIdentity}}
+	supervisor := testSupervisor(t, store, client, &fakeRuntimeVerifier{}, &fakeLocker{}, factory, &fakeAllocator{addresses: []string{"127.0.0.1:41303"}})
+
+	report, err := supervisor.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if !report.Started || factory.openCalls != 1 || factory.newCalls != 1 {
+		t.Fatalf("recovery = report:%#v open:%d new:%d", report, factory.openCalls, factory.newCalls)
+	}
+	descriptor, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descriptor.PID != newIdentity.PID || descriptor.Endpoint != newEndpoint {
+		t.Fatalf("recovered descriptor = %#v", descriptor)
+	}
+}
+
+func TestSupervisorStartQuarantinesUncertainProcessIdentityWithoutSignal(t *testing.T) {
+	store := testStore(t)
+	identity := testIdentity(304)
+	endpoint := "http://127.0.0.1:41304"
+	saveDescriptor(t, store, identity, endpoint)
+	factory := &fakeFactory{openErr: ErrProcessIdentityMismatch}
+	supervisor := testSupervisor(t, store, &scriptedClient{responses: map[string][]readinessResult{
+		endpoint: {
+			{err: &TransportError{Err: errors.New("worker unavailable")}},
+			{err: &TransportError{Err: errors.New("worker unavailable")}},
+		},
+	}}, &fakeRuntimeVerifier{}, &fakeLocker{}, factory, &fakeAllocator{})
+
+	_, err := supervisor.Start(context.Background())
+	var daemonErr *Error
+	if !errors.As(err, &daemonErr) || daemonErr.Code != contracts.ReasonRuntimeIdentityMismatch {
+		t.Fatalf("Start() error = %#v, want identity mismatch", err)
+	}
+	if factory.newCalls != 0 || len(factory.processes) != 0 {
+		t.Fatalf("identity mismatch started a worker: %#v", factory)
+	}
+	if _, err := store.Load(); !errors.Is(err, ErrDescriptorNotFound) {
+		t.Fatalf("active descriptor was not quarantined: %v", err)
+	}
+	entries, err := filepath.Glob(filepath.Join(store.runtime, "quarantine", "identity-*", stateFileName))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("quarantined descriptors = %#v, err=%v", entries, err)
 	}
 }
 
@@ -388,7 +452,7 @@ func TestSupervisorStopTreatsPIDReuseAsExit(t *testing.T) {
 	}
 }
 
-func TestSupervisorStopRetainsDescriptorWhenProcessNeverExits(t *testing.T) {
+func TestSupervisorStopEscalatesToKillAfterVerifiedProcessIgnoresTerminate(t *testing.T) {
 	store := testStore(t)
 	identity := testIdentity(74)
 	saveDescriptor(t, store, identity, "http://127.0.0.1:41274")
@@ -399,15 +463,17 @@ func TestSupervisorStopRetainsDescriptorWhenProcessNeverExits(t *testing.T) {
 	}}, &fakeRuntimeVerifier{}, &fakeLocker{}, factory, &fakeAllocator{})
 	supervisor.config.StopWait = 30 * time.Millisecond
 
-	_, err := supervisor.Stop(context.Background())
-	if err == nil {
-		t.Fatal("Stop() error = nil, want wait timeout")
+	if _, err := supervisor.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
 	}
-	if _, loadErr := store.Load(); loadErr != nil {
-		t.Fatalf("Stop() removed descriptor despite wait failure: %v", loadErr)
+	if !reflect.DeepEqual(process.signals, []os.Signal{terminateSignal, killSignal}) {
+		t.Fatalf("Stop() signals = %#v, want TERM then KILL", process.signals)
 	}
-	if _, keyErr := os.Stat(store.APIKeyPath()); keyErr != nil {
-		t.Fatalf("Stop() removed API key despite wait failure: %v", keyErr)
+	if factory.openCalls != 2 {
+		t.Fatalf("Factory.Open calls = %d, want identity verification before each signal", factory.openCalls)
+	}
+	if _, loadErr := store.Load(); !errors.Is(loadErr, ErrDescriptorNotFound) {
+		t.Fatalf("Stop() retained descriptor after kill: %v", loadErr)
 	}
 }
 
@@ -687,6 +753,9 @@ func (f *fakeProcess) Identity() (Identity, error) {
 func (f *fakeProcess) Signal(signal os.Signal) error {
 	f.signals = append(f.signals, signal)
 	f.signaledAt = time.Now()
+	if signal == killSignal {
+		f.neverExit = false
+	}
 	if f.reuseAfterSignal {
 		f.identity.StartedAt = f.identity.StartedAt.Add(time.Second)
 	}

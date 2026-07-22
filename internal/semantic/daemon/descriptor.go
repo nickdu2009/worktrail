@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/nickdu2009/worktrail/internal/paths"
@@ -226,6 +227,43 @@ func (s Store) Remove() error {
 		}
 		if restoreErr := restore(s.statePath, state.data, state.mode); restoreErr != nil {
 			return fmt.Errorf("remove semantic daemon API key: %w; restore descriptor: %v", err, restoreErr)
+		}
+		return err
+	}
+	return nil
+}
+
+// Quarantine moves untrusted legacy state out of the active runtime location.
+// It never opens or signals the recorded PID.
+func (s Store) Quarantine() error {
+	if _, err := os.Lstat(s.statePath); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	root := filepath.Join(s.runtime, "quarantine")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
+		return err
+	}
+	destination, err := os.MkdirTemp(root, "identity-")
+	if err != nil {
+		return err
+	}
+	quarantinedKey := filepath.Join(destination, filepath.Base(s.keyPath))
+	keyMoved := false
+	if err := os.Rename(s.keyPath, quarantinedKey); err == nil {
+		keyMoved = true
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(s.statePath, filepath.Join(destination, filepath.Base(s.statePath))); err != nil {
+		if keyMoved {
+			if restoreErr := os.Rename(quarantinedKey, s.keyPath); restoreErr != nil {
+				return fmt.Errorf("quarantine semantic daemon descriptor: %w; restore API key: %v", err, restoreErr)
+			}
 		}
 		return err
 	}

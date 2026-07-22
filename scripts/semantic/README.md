@@ -48,10 +48,21 @@ release record.
 ```bash
 bash scripts/semantic/run-production-e2e-gate.sh harness   # offline harness only
 bash scripts/semantic/run-production-e2e-gate.sh all       # full M1 gate
+bash scripts/semantic/run-launchd-host-gate.sh             # real launchd Host gate
+bash scripts/semantic/test-launchd-host-gate-cleanup.sh    # label/cleanup safety
 bash scripts/semantic/test-production-e2e-gate-signals.sh  # EXIT/INT/TERM cleanup
 bash scripts/semantic/test-archive-safety-scan.sh          # archive privacy checks
 bash scripts/semantic/test-production-e2e-archive-retry.sh # staging/reuse/no-clobber
 ```
+
+`run-launchd-host-gate.sh` 是独立的真实 macOS `launchd` 验收门槛。它默认创建
+唯一 test label 和 `/tmp` 下的临时 HOME/cache/runtime/log roots，不操作正式
+label；cleanup 只 bootout 本次 test label 并删除本次临时目录。它复用一份已验证
+的 M1 bundle（默认读取当前用户 cache，也可显式设置
+`WORKTRAIL_LAUNCHD_GATE_BUNDLE_SOURCE`），验证 20 个并发客户端只产生一个
+Host/worker、跨 CLI 复用、1 分钟 idle 退出与冷恢复、worker/Host crash 恢复、
+blocked outbound 下的 tokenize、以及 install/remove 幂等。真实 gate 会加载模型
+并等待 idle timeout；普通本地校验只运行 cleanup 静态测试和 build-tag 编译检查。
 
 The `all` phase prechecks the commit-named release archive under
 `${XDG_DATA_HOME:-~/.local/share}/worktrail/release-archive/<commit>/` before

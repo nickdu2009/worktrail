@@ -31,6 +31,9 @@ type ReasonCode string
 
 const (
 	ReasonPlatformUnsupported         ReasonCode = "semantic_platform_unsupported"
+	ReasonServiceNotInstalled         ReasonCode = "semantic_service_not_installed"
+	ReasonServiceUnavailable          ReasonCode = "semantic_service_unavailable"
+	ReasonServiceIncompatible         ReasonCode = "semantic_service_incompatible"
 	ReasonBundleMissing               ReasonCode = "semantic_bundle_missing"
 	ReasonRuntimeUnavailable          ReasonCode = "semantic_runtime_unavailable"
 	ReasonRuntimeIdentityMismatch     ReasonCode = "semantic_runtime_identity_mismatch"

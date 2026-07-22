@@ -91,6 +91,7 @@ func TestProductionSemanticInstallerWiresTrustedInputs(t *testing.T) {
 			}
 			return bundle.InstallResult{}, nil
 		},
+		installService: testSemanticServiceInstall,
 	}}
 
 	info, err := installer.Install(context.Background(), paths.Env{})
@@ -131,6 +132,7 @@ func TestProductionSemanticInstallerSelfChecksExperimentalRuntime(t *testing.T) 
 					}
 					return result, nil
 				},
+				installService: testSemanticServiceInstall,
 				selfCheck: func(context.Context, paths.SemanticRoots) error {
 					selfCheckCalls++
 					return nil
@@ -173,13 +175,63 @@ func TestProductionSemanticInstallerRunsExperimentalSelfCheckInsideBundleTransac
 			}
 			return bundle.InstallResult{}, nil
 		},
-		selfCheck: func(context.Context, paths.SemanticRoots) error { return errors.New("self-check failed") },
+		installService: testSemanticServiceInstall,
+		selfCheck:      func(context.Context, paths.SemanticRoots) error { return errors.New("self-check failed") },
 	}}
 
 	_, err := installer.Install(context.Background(), paths.Env{})
 	assertSemanticInstallerReason(t, err, ErrSemanticInstallerFailed, contracts.ReasonRuntimeUnavailable)
 	if checkCalls != 1 {
 		t.Fatalf("locked self-check calls = %d, want 1", checkCalls)
+	}
+}
+
+func TestExperimentalServiceFailureRetainsBundleAndSelfCheckFailureRollsBackService(t *testing.T) {
+	manifest := bundle.Manifest{CanonicalManifest: bundle.CanonicalManifest{Runtime: bundle.Runtime{Variants: []bundle.RuntimeVariant{{Chip: "m3", SupportLevel: "experimental"}}}}}
+	tests := []struct {
+		name          string
+		installErr    error
+		selfCheckErr  error
+		rollbackErr   error
+		wantRetained  bool
+		wantRollbacks int
+	}{
+		{name: "service install", installErr: errors.New("service install failed"), wantRetained: true},
+		{name: "self check", selfCheckErr: errors.New("self-check failed"), wantRollbacks: 1},
+		{name: "rollback", selfCheckErr: errors.New("self-check failed"), rollbackErr: errors.New("rollback failed"), wantRetained: true, wantRollbacks: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rollbacks := 0
+			installer := productionSemanticInstaller{deps: semanticInstallerProductionDependencies{
+				discoverRoots:  func() (paths.SemanticRoots, error) { return paths.SemanticRoots{}, nil },
+				parseManifest:  func([]byte) (bundle.Manifest, error) { return manifest, nil },
+				detectChip:     func() (string, error) { return "m3", nil },
+				buildInstaller: func(paths.SemanticRoots) (bundle.Installer, error) { return bundle.Installer{}, nil },
+				installAndCheck: func(ctx context.Context, _ bundle.Installer, _ bundle.Manifest, _ string, check bundle.InstallCheck) (bundle.InstallResult, error) {
+					err := check(ctx, bundle.InstallResult{})
+					var retained *bundle.RetainBundleError
+					if errors.As(err, &retained) != test.wantRetained {
+						t.Fatalf("retained error = %T %v, want %t", err, err, test.wantRetained)
+					}
+					return bundle.InstallResult{}, err
+				},
+				installService: func(context.Context, paths.SemanticRoots) (func(context.Context) error, error) {
+					if test.installErr != nil {
+						return nil, test.installErr
+					}
+					return func(context.Context) error {
+						rollbacks++
+						return test.rollbackErr
+					}, nil
+				},
+				selfCheck: func(context.Context, paths.SemanticRoots) error { return test.selfCheckErr },
+			}}
+			_, _ = installer.Install(context.Background(), paths.Env{})
+			if rollbacks != test.wantRollbacks {
+				t.Fatalf("rollback calls = %d, want %d", rollbacks, test.wantRollbacks)
+			}
+		})
 	}
 }
 
@@ -200,7 +252,8 @@ func TestRunInitExperimentalSelfCheckFailurePreservesCoreInitialization(t *testi
 		installAndCheck: func(ctx context.Context, _ bundle.Installer, _ bundle.Manifest, _ string, check bundle.InstallCheck) (bundle.InstallResult, error) {
 			return bundle.InstallResult{}, check(ctx, bundle.InstallResult{})
 		},
-		selfCheck: func(context.Context, paths.SemanticRoots) error { return errors.New("self-check failed") },
+		installService: testSemanticServiceInstall,
+		selfCheck:      func(context.Context, paths.SemanticRoots) error { return errors.New("self-check failed") },
 	}}
 
 	err := runInitWithInstaller(context.Background(), env, IO{Out: &bytes.Buffer{}}, []string{"--semantic"}, installer)
@@ -210,40 +263,30 @@ func TestRunInitExperimentalSelfCheckFailurePreservesCoreInitialization(t *testi
 
 func TestExperimentalSelfCheckCleanupPreservesHealthyDaemonAndCleansFailedManagedDaemon(t *testing.T) {
 	controller := &installerControllerStub{}
-	removals := 0
 
 	// A fully successful check against an existing daemon retains its state.
-	if err := cleanupExperimentalSelfCheck(context.Background(), false, controller, func() error {
-		removals++
-		return nil
-	}); err != nil {
+	if err := cleanupExperimentalSelfCheck(context.Background(), false, controller); err != nil {
 		t.Fatalf("healthy daemon cleanup error = %v", err)
 	}
-	if controller.stopCalls != 0 || removals != 0 {
-		t.Fatalf("existing daemon cleanup = stops:%d removals:%d, want 0/0", controller.stopCalls, removals)
+	if controller.stopCalls != 0 {
+		t.Fatalf("existing daemon cleanup stops = %d, want 0", controller.stopCalls)
 	}
 
 	// A failed token/embedding check happens only after Start authenticated and
 	// verified the existing daemon, so it is safe and necessary to clean it.
-	if err := cleanupExperimentalSelfCheck(context.Background(), true, controller, func() error {
-		removals++
-		return nil
-	}); err != nil {
+	if err := cleanupExperimentalSelfCheck(context.Background(), true, controller); err != nil {
 		t.Fatalf("managed daemon cleanup error = %v", err)
 	}
-	if controller.stopCalls != 1 || removals != 1 {
-		t.Fatalf("failed managed daemon cleanup = stops:%d removals:%d, want 1/1", controller.stopCalls, removals)
+	if controller.stopCalls != 1 {
+		t.Fatalf("failed managed daemon cleanup stops = %d, want 1", controller.stopCalls)
 	}
 
 	controller.stopErr = errors.New("stop failed")
-	if err := cleanupExperimentalSelfCheck(context.Background(), true, controller, func() error {
-		removals++
-		return nil
-	}); err == nil {
+	if err := cleanupExperimentalSelfCheck(context.Background(), true, controller); err == nil {
 		t.Fatal("Stop failure cleanup error = nil")
 	}
-	if controller.stopCalls != 2 || removals != 1 {
-		t.Fatalf("Stop failure cleanup = stops:%d removals:%d, want 2/1", controller.stopCalls, removals)
+	if controller.stopCalls != 2 {
+		t.Fatalf("Stop failure cleanup stops = %d, want 2", controller.stopCalls)
 	}
 }
 
@@ -343,6 +386,7 @@ func TestProductionSemanticInstallerSanitizesFailures(t *testing.T) {
 				install: func(context.Context, bundle.Installer, bundle.Manifest, string) (bundle.InstallResult, error) {
 					return bundle.InstallResult{}, nil
 				},
+				installService: testSemanticServiceInstall,
 			}
 			test.mutate(&deps)
 
@@ -353,6 +397,10 @@ func TestProductionSemanticInstallerSanitizesFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func testSemanticServiceInstall(context.Context, paths.SemanticRoots) (func(context.Context) error, error) {
+	return func(context.Context) error { return nil }, nil
 }
 
 func assertSemanticInstallerReason(t *testing.T, err, cause error, code contracts.ReasonCode) {

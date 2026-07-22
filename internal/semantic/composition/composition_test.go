@@ -16,21 +16,22 @@ import (
 	"github.com/nickdu2009/worktrail/internal/semantic/daemon"
 	"github.com/nickdu2009/worktrail/internal/semantic/policy"
 	"github.com/nickdu2009/worktrail/internal/semantic/profile"
+	"github.com/nickdu2009/worktrail/internal/semantic/service"
 )
 
-func TestBuildMapsVerifiedDependenciesWithoutLifecycleSideEffects(t *testing.T) {
+func TestBuildHostMapsVerifiedDependenciesWithoutLifecycleSideEffects(t *testing.T) {
 	input, deps, capture := testComposition(t)
 
-	result, err := build(input, deps)
+	result, err := buildHost(input, deps)
 	if err != nil {
-		t.Fatalf("build() error = %v", err)
+		t.Fatalf("buildHost() error = %v", err)
 	}
 	if result.Bundle.BundleRoot != capture.installed.BundleRoot ||
 		result.Bundle.Manifest.BundleID != capture.installed.Manifest.BundleID ||
 		result.Runtime != capture.runtime || result.Identity != capture.identity {
 		t.Fatalf("build() identity mapping = %#v", result)
 	}
-	if result.Store.StatePath() != capture.store.StatePath() || result.Client != capture.client || result.Controller != capture.controller {
+	if result.Host.Store.StatePath() != capture.store.StatePath() || result.Host.WorkerClient != capture.client || result.Host.Controller != capture.controller {
 		t.Fatalf("build() dependency mapping = %#v", result)
 	}
 	if capture.loadedRoots != input.Roots || capture.loadedBundleID != capture.runtime.BundleID ||
@@ -64,14 +65,6 @@ func TestBuildMapsVerifiedDependenciesWithoutLifecycleSideEffects(t *testing.T) 
 		t.Fatalf("supervisor dependency mapping = %#v", capture.supervisor)
 	}
 
-	counter, ok := result.TokenCounter.(daemon.DaemonTokenCounter)
-	if !ok || counter.Counter != capture.client || counter.Credentials != capture.store {
-		t.Fatalf("token counter = %#v", result.TokenCounter)
-	}
-	embedder, ok := result.Embedder.(daemon.DaemonGenerationEmbedder)
-	if !ok || embedder.Embedder != capture.client || embedder.Credentials != capture.store {
-		t.Fatalf("embedder = %#v", result.Embedder)
-	}
 	if capture.verifier.calls != 0 || capture.locker.calls != 0 || capture.allocator.calls != 0 ||
 		capture.factory.newCalls != 0 || capture.factory.openCalls != 0 {
 		t.Fatalf("build() invoked lifecycle dependency: verifier=%d locker=%d allocator=%d factory=%d/%d",
@@ -79,6 +72,22 @@ func TestBuildMapsVerifiedDependenciesWithoutLifecycleSideEffects(t *testing.T) 
 	}
 	if _, err := os.Stat(input.Roots.Runtime); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("build() created runtime directory: stat error = %v", err)
+	}
+}
+
+func TestBuildReturnsServiceClientThroughExistingContracts(t *testing.T) {
+	input, deps, capture := testComposition(t)
+
+	result, err := buildClient(input, deps)
+	if err != nil {
+		t.Fatalf("buildClient() error = %v", err)
+	}
+	if result.Controller != capture.serviceClient || result.TokenCounter != capture.serviceClient ||
+		result.Embedder != capture.serviceClient || result.QueryEmbedder != capture.serviceClient {
+		t.Fatalf("client contracts = %#v", result)
+	}
+	if capture.supervisor.Runtime.BundleID != "" || capture.storeBundleID != "" || capture.clientAlias != "" {
+		t.Fatalf("client build constructed worker dependencies: %#v", capture)
 	}
 }
 
@@ -182,7 +191,7 @@ func TestBuildSanitizesMajorConstructionFailures(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			input, deps, capture := testComposition(t)
 
-			_, err := build(input, test.setup(deps, capture))
+			_, err := buildHost(input, test.setup(deps, capture))
 			var constructionErr *Error
 			if !errors.As(err, &constructionErr) {
 				t.Fatalf("build() error = %T %[1]v, want *Error", err)
@@ -277,17 +286,18 @@ func TestDefaultSubsystemVersionsDerivesReproducibleProfile(t *testing.T) {
 }
 
 type compositionCapture struct {
-	installed  bundle.InstalledBundle
-	runtime    bundle.ResolvedRuntime
-	identity   profile.Identity
-	store      daemon.Store
-	client     *daemon.HTTPClient
-	verifier   *compositionVerifier
-	locker     *compositionLocker
-	allocator  *compositionAllocator
-	factory    *compositionFactory
-	controller daemon.Controller
-	supervisor daemon.SupervisorConfig
+	installed     bundle.InstalledBundle
+	runtime       bundle.ResolvedRuntime
+	identity      profile.Identity
+	store         daemon.Store
+	client        *daemon.HTTPClient
+	verifier      *compositionVerifier
+	locker        *compositionLocker
+	allocator     *compositionAllocator
+	factory       *compositionFactory
+	controller    daemon.Controller
+	serviceClient *service.Client
+	supervisor    daemon.SupervisorConfig
 
 	loadedRoots     paths.SemanticRoots
 	loadedBundleID  string
@@ -329,6 +339,10 @@ func testComposition(t *testing.T) (Input, dependencies, *compositionCapture) {
 	if err != nil {
 		t.Fatalf("NewHTTPClient() error = %v", err)
 	}
+	serviceClient, err := service.NewClient(input.Roots, bundleID, "runtime-fingerprint", "verified", "m1")
+	if err != nil {
+		t.Fatalf("service.NewClient() error = %v", err)
+	}
 	capture := &compositionCapture{
 		installed: bundle.InstalledBundle{
 			Manifest:   bundle.Manifest{BundleID: bundleID},
@@ -344,14 +358,15 @@ func testComposition(t *testing.T) (Input, dependencies, *compositionCapture) {
 			Chip:           "m1",
 			SupportLevel:   "verified",
 		},
-		identity:   profile.Identity{ModelSpaceID: "model-space", RecallProfileID: "recall-profile"},
-		store:      store,
-		client:     client,
-		verifier:   &compositionVerifier{},
-		locker:     &compositionLocker{},
-		allocator:  &compositionAllocator{},
-		factory:    &compositionFactory{},
-		controller: daemon.UnavailableController{},
+		identity:      profile.Identity{ModelSpaceID: "model-space", RecallProfileID: "recall-profile"},
+		store:         store,
+		client:        client,
+		verifier:      &compositionVerifier{},
+		locker:        &compositionLocker{},
+		allocator:     &compositionAllocator{},
+		factory:       &compositionFactory{},
+		controller:    daemon.UnavailableController{},
+		serviceClient: serviceClient,
 	}
 	deps := dependencies{
 		trustedBundleID: func() (string, error) { return bundleID, nil },
@@ -394,6 +409,9 @@ func testComposition(t *testing.T) (Input, dependencies, *compositionCapture) {
 		newSupervisor: func(config daemon.SupervisorConfig) (daemon.Controller, error) {
 			capture.supervisor = config
 			return capture.controller, nil
+		},
+		newServiceClient: func(paths.SemanticRoots, string, string, string, string) (*service.Client, error) {
+			return capture.serviceClient, nil
 		},
 	}
 	return input, deps, capture
@@ -441,6 +459,6 @@ func (compositionProcess) Start(context.Context) error { return nil }
 func (compositionProcess) Identity() (daemon.Identity, error) {
 	return daemon.Identity{PID: 1, StartedAt: time.Now()}, nil
 }
-func (compositionProcess) Signal(os.Signal) error      { return nil }
+func (compositionProcess) Signal(os.Signal) error           { return nil }
 func (compositionProcess) WaitExited(context.Context) error { return nil }
-func (compositionProcess) Release() error              { return nil }
+func (compositionProcess) Release() error                   { return nil }

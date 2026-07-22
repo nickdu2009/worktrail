@@ -462,25 +462,14 @@ func (c *chunker) appendCellFragments(ctx context.Context, table parsedTable, ro
 }
 
 func (c *chunker) forcedEndOnBytes(ctx context.Context, source []byte, start, limit int, breadcrumb []string, contextTerms, columnName string) (int, int, error) {
-	lastSafe, lastPreferred, lastTokens := -1, -1, 0
-	for end := nextRuneEnd(source, start); end <= limit; end = nextRuneEnd(source, end) {
+	end, tokens, err := forcedEndWithinBudget(source, start, limit, c.budget.HardMax, func(end int) (int, error) {
 		body := formatColumnValue(columnName, string(source[start:end]))
-		tokens, err := c.countInput(ctx, breadcrumb, contextTerms, body)
-		if err != nil {
-			return 0, 0, err
-		}
-		if tokens > c.budget.HardMax {
-			break
-		}
-		lastSafe, lastTokens = end, tokens
-		if isSplitBoundary(source, end) {
-			lastPreferred = end
-		}
-		if end == limit {
-			break
-		}
+		return c.countInput(ctx, breadcrumb, contextTerms, body)
+	})
+	if err != nil {
+		return 0, 0, err
 	}
-	if lastSafe < 0 {
+	if end < 0 {
 		body := formatColumnValue(columnName, "")
 		tokens, err := c.countInput(ctx, breadcrumb, contextTerms, body)
 		if err != nil {
@@ -488,36 +477,20 @@ func (c *chunker) forcedEndOnBytes(ctx context.Context, source []byte, start, li
 		}
 		return 0, tokens, fmt.Errorf("chunk: cell fragment prefix exceeds hard maximum %d", c.budget.HardMax)
 	}
-	if lastPreferred > start {
-		body := formatColumnValue(columnName, string(source[start:lastPreferred]))
-		tokens, err := c.countInput(ctx, breadcrumb, contextTerms, body)
-		if err != nil {
-			return 0, 0, err
-		}
-		return lastPreferred, tokens, nil
-	}
-	return lastSafe, lastTokens, nil
+	return end, tokens, nil
 }
 
 func (c *chunker) overlapStartOnBytes(ctx context.Context, source []byte, start, end int) (int, error) {
 	if c.budget.Overlap == 0 {
 		return end, nil
 	}
-	best := end
-	for candidate := end; candidate > start; candidate = previousRuneStart(source, candidate) {
-		if candidate != end && !isStartBoundary(source, candidate) {
-			continue
-		}
+	return overlapStartWithinBudget(source, start, end, c.budget.Overlap, func(candidate int) (int, error) {
 		tokens, err := c.counter.CountTokens(ctx, string(source[candidate:end]))
 		if err != nil {
 			return 0, fmt.Errorf("chunk: count overlap tokens: %w", err)
 		}
-		if tokens > c.budget.Overlap {
-			break
-		}
-		best = candidate
-	}
-	return best, nil
+		return tokens, nil
+	})
 }
 
 func (c *chunker) ensurePayloadRoom(ctx context.Context, table parsedTable, contextTerms string, reason IrreducibleReason, localStart, localEnd int) error {

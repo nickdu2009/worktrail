@@ -71,7 +71,7 @@ cleanup() {
   set +e
   if [[ -n "${worktrail_bin:-}" && -x "${worktrail_bin:-}" && -n "${HOME:-}" && -n "${WORKTRAIL_HOME:-}" ]]; then
     env HOME="$HOME" WORKTRAIL_HOME="$WORKTRAIL_HOME" WORKTRAIL_PROJECT_ROOT="$WORKTRAIL_PROJECT_ROOT" \
-      "$worktrail_bin" semantic stop --format json >/dev/null 2>&1 || true
+      "$worktrail_bin" semantic service uninstall --confirm >/dev/null 2>&1 || true
   fi
   if [[ -n "${daemon_pid:-}" ]]; then
     kill "$daemon_pid" 2>/dev/null || true
@@ -680,6 +680,8 @@ phase_install() {
   fi
   [[ "$install_ok" == "1" ]] || fail "init --semantic failed after retries and seed; see init-semantic.err"
   verify_bundle
+	WORKTRAIL_LAUNCHD_GATE_BUNDLE_SOURCE="$HOME/Library/Caches/worktrail/semantic/bundles/$BUNDLE_ID" \
+		bash "$repo_root/scripts/semantic/run-launchd-host-gate.sh" >"$evidence_dir/launchd-host-gate.txt"
   # Bundle must remain under the temporary cache only.
   case "$HOME/Library/Caches/worktrail/semantic/bundles/$BUNDLE_ID" in
     "$tmp_root"/*) ;;
@@ -702,19 +704,18 @@ descriptor_path() {
 }
 
 count_matching_daemons() {
-  local state
-  state="$(descriptor_path)"
-  [[ -f "$state" ]] || { printf '0\n'; return; }
-  python3 - "$state" <<'PY'
-import json,sys,os,subprocess
-d=json.load(open(sys.argv[1]))
-pid=d.get("pid")
-if not pid:
-  print(0); raise SystemExit
+  local status
+  status="$(wt semantic status --format json 2>/dev/null || true)"
+  python3 - "$status" <<'PY'
+import json,sys,os
 try:
+  report=json.loads(sys.argv[1])
+  pid=int(report.get("worker_pid") or 0)
+  if pid <= 0:
+    print(0); raise SystemExit
   os.kill(pid,0)
   print(1)
-except OSError:
+except Exception:
   print(0)
 PY
 }

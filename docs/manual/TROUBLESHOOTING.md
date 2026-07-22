@@ -131,6 +131,34 @@ worktrail index rebuild --scope project
 
 `context` 和 `search` 会在读取前做 bounded refresh；当 refresh 失败或差异过大时，仍应优先使用 `worktrail index rebuild` 恢复。
 
+## 语义服务不可用
+<div class="title-en">Semantic Service Unavailable</div>
+
+先运行只读状态检查；该命令不会启动 Host：
+
+```bash
+worktrail semantic status --format json
+```
+
+- `semantic_service_not_installed`：运行 `worktrail init --semantic`。
+- `semantic_service_incompatible`：不要手工删除未知 socket 或终止未知 PID；重新运行
+  `worktrail init --semantic`，让安装器只更新 Worktrail 自有注册。
+- `semantic_service_unavailable`：运行 `worktrail semantic restart`；若 Host 协议无法
+  响应，命令只会在 plist 与 metadata 均验证为 Worktrail 自有后才让 `launchd`
+  replacement。
+- `semantic_platform_unsupported`：当前没有 macOS `gui/<uid>` 图形登录域，首期不支持
+  SSH/headless Semantic Host。继续使用 lexical 模式，或在图形登录会话中重试。
+
+正常冷状态会显示 service 已注册、Host/worker 已停止；这是默认空闲退出行为，不是
+故障。需要移除服务注册时运行：
+
+```bash
+worktrail semantic service uninstall --confirm
+```
+
+该命令保留 bundle、generation 和 `service.json`，以后可再次运行
+`worktrail init --semantic` 恢复服务。
+
 ## Agent 没有自动使用 Worktrail
 <div class="title-en">Agent Does Not Use Worktrail Automatically</div>
 

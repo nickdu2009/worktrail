@@ -591,55 +591,99 @@ func (c *chunker) appendForced(ctx context.Context, block atom) error {
 }
 
 func (c *chunker) forcedEnd(ctx context.Context, start, limit int, breadcrumb []string, contextTerms string) (int, int, error) {
-	lastSafe, lastPreferred, lastTokens := -1, -1, 0
-	for end := nextRuneEnd(c.source, start); end <= limit; end = nextRuneEnd(c.source, end) {
-		tokens, err := c.tokenCount(ctx, start, end, breadcrumb, contextTerms, string(c.source[start:end]))
-		if err != nil {
-			return 0, 0, err
-		}
-		if tokens > c.budget.HardMax {
-			break
-		}
-		lastSafe, lastTokens = end, tokens
-		if isSplitBoundary(c.source, end) {
-			lastPreferred = end
-		}
-		if end == limit {
-			break
-		}
+	end, tokens, err := forcedEndWithinBudget(c.source, start, limit, c.budget.HardMax, func(end int) (int, error) {
+		return c.tokenCount(ctx, start, end, breadcrumb, contextTerms, string(c.source[start:end]))
+	})
+	if err != nil {
+		return 0, 0, err
 	}
-	if lastSafe < 0 {
+	if end < 0 {
 		return 0, 0, fmt.Errorf("chunk: metadata prefix alone exceeds hard maximum %d", c.budget.HardMax)
 	}
-	if lastPreferred > start {
-		tokens, err := c.tokenCount(ctx, start, lastPreferred, breadcrumb, contextTerms, string(c.source[start:lastPreferred]))
-		if err != nil {
-			return 0, 0, err
-		}
-		return lastPreferred, tokens, nil
-	}
-	return lastSafe, lastTokens, nil
+	return end, tokens, nil
 }
 
 func (c *chunker) overlapStart(ctx context.Context, start, end int) (int, error) {
 	if c.budget.Overlap == 0 {
 		return end, nil
 	}
-	best := end
-	for candidate := end; candidate > start; candidate = previousRuneStart(c.source, candidate) {
-		if candidate != end && !isStartBoundary(c.source, candidate) {
-			continue
-		}
+	return overlapStartWithinBudget(c.source, start, end, c.budget.Overlap, func(candidate int) (int, error) {
 		tokens, err := c.counter.CountTokens(ctx, string(c.source[candidate:end]))
 		if err != nil {
 			return 0, fmt.Errorf("chunk: count overlap tokens: %w", err)
 		}
-		if tokens > c.budget.Overlap {
+		return tokens, nil
+	})
+}
+
+func forcedEndWithinBudget(source []byte, start, limit, hardMax int, count func(int) (int, error)) (int, int, error) {
+	// The former linear scan stopped at the first over-budget prefix, so binary
+	// search preserves the same monotonic-prefix assumption with fewer probes.
+	ends := make([]int, 0)
+	for end := nextRuneEnd(source, start); end <= limit; end = nextRuneEnd(source, end) {
+		ends = append(ends, end)
+		if end == limit {
 			break
 		}
-		best = candidate
 	}
-	return best, nil
+
+	low, high := 0, len(ends)
+	lastSafe, lastTokens := -1, 0
+	for low < high {
+		middle := low + (high-low)/2
+		tokens, err := count(ends[middle])
+		if err != nil {
+			return 0, 0, err
+		}
+		if tokens <= hardMax {
+			lastSafe, lastTokens = middle, tokens
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	if lastSafe < 0 {
+		return -1, 0, nil
+	}
+
+	end := ends[lastSafe]
+	preferred := end
+	for preferred > start && !isSplitBoundary(source, preferred) {
+		preferred = previousRuneStart(source, preferred)
+	}
+	if preferred <= start || preferred == end {
+		return end, lastTokens, nil
+	}
+	tokens, err := count(preferred)
+	return preferred, tokens, err
+}
+
+func overlapStartWithinBudget(source []byte, start, end, overlap int, count func(int) (int, error)) (int, error) {
+	candidates := []int{end}
+	for candidate := previousRuneStart(source, end); candidate > start; candidate = previousRuneStart(source, candidate) {
+		if isStartBoundary(source, candidate) {
+			candidates = append(candidates, candidate)
+		}
+	}
+
+	if _, err := count(end); err != nil {
+		return 0, err
+	}
+	low, high, best := 1, len(candidates), 0
+	for low < high {
+		middle := low + (high-low)/2
+		tokens, err := count(candidates[middle])
+		if err != nil {
+			return 0, err
+		}
+		if tokens <= overlap {
+			best = middle
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	return candidates[best], nil
 }
 
 func (c *chunker) tokenCount(ctx context.Context, start, end int, breadcrumb []string, contextTerms, body string) (int, error) {

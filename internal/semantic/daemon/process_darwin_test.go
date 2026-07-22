@@ -4,8 +4,10 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -31,6 +33,75 @@ func TestDarwinFactoryOpenRequiresKernelStartTimeMatch(t *testing.T) {
 	mismatched.StartedAt = mismatched.StartedAt.Add(-time.Microsecond)
 	if process, err := NewFactory().Open(mismatched); err == nil || process != nil {
 		t.Fatalf("Open(PID-reused identity) = %v, %v; want rejected identity and nil process", process, err)
+	}
+}
+
+func TestDarwinFactoryOpenClassifiesReapedProcessAsNotFound(t *testing.T) {
+	command := exec.Command("/bin/sleep", "30")
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := darwinIdentity(command.Process.Pid)
+	if err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		t.Fatal(err)
+	}
+	if err := command.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Wait(); err == nil {
+		t.Fatal("killed process unexpectedly exited successfully")
+	}
+	process, err := NewFactory().Open(identity)
+	if process != nil || !errors.Is(err, ErrProcessNotFound) {
+		t.Fatalf("Open(reaped identity) = %v, %v; want ErrProcessNotFound", process, err)
+	}
+}
+
+func TestDarwinWorkerWatchStopsExactWorkerAfterHostExit(t *testing.T) {
+	host := exec.Command("/bin/sleep", "30")
+	if err := host.Start(); err != nil {
+		t.Fatal(err)
+	}
+	hostIdentity, err := darwinIdentity(host.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := exec.Command("/bin/sleep", "30")
+	if err := worker.Start(); err != nil {
+		_ = host.Process.Kill()
+		_ = host.Wait()
+		t.Fatal(err)
+	}
+	workerIdentity, err := darwinIdentity(worker.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerDone := make(chan error, 1)
+	go func() { workerDone <- worker.Wait() }()
+	watchDone := make(chan error, 1)
+	go func() { watchDone <- watchWorker(context.Background(), hostIdentity, workerIdentity) }()
+
+	if err := host.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := host.Wait(); err == nil {
+		t.Fatal("killed host unexpectedly exited successfully")
+	}
+	select {
+	case err := <-watchDone:
+		if err != nil {
+			t.Fatalf("watchWorker() error = %v", err)
+		}
+	case <-time.After(7 * time.Second):
+		t.Fatal("watchWorker() did not stop after Host exit")
+	}
+	select {
+	case <-workerDone:
+	case <-time.After(time.Second):
+		_ = worker.Process.Kill()
+		t.Fatal("worker remained after watchdog completed")
 	}
 }
 

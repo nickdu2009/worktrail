@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 
@@ -52,3 +53,11 @@ var ErrProcessUnsupported = &Error{
 	Code:    contracts.ReasonPlatformUnsupported,
 	Message: "semantic process supervision is unsupported on this platform",
 }
+
+var (
+	// ErrProcessNotFound proves the expected PID no longer exists.
+	ErrProcessNotFound = errors.New("semantic process not found")
+	// ErrProcessIdentityMismatch means the PID exists but cannot be proven to
+	// be the recorded process. Callers must not signal it.
+	ErrProcessIdentityMismatch = errors.New("semantic process identity mismatch")
+)

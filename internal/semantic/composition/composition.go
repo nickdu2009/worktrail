@@ -2,6 +2,8 @@
 package composition
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 
 	"github.com/nickdu2009/worktrail/internal/paths"
@@ -12,6 +14,8 @@ import (
 	"github.com/nickdu2009/worktrail/internal/semantic/generation"
 	"github.com/nickdu2009/worktrail/internal/semantic/policy"
 	"github.com/nickdu2009/worktrail/internal/semantic/profile"
+	"github.com/nickdu2009/worktrail/internal/semantic/retrieve"
+	"github.com/nickdu2009/worktrail/internal/semantic/service"
 )
 
 const embeddingDimension = 1024
@@ -39,14 +43,23 @@ type Input struct {
 // only validates static inputs and creates dependency values; it does not start
 // a daemon, create state, generate credentials, or open a generation database.
 type Result struct {
-	Bundle       bundle.InstalledBundle
-	Runtime      bundle.ResolvedRuntime
-	Identity     profile.Identity
-	Store        daemon.Store
-	Client       *daemon.HTTPClient
-	Controller   daemon.Controller
-	TokenCounter contracts.TokenCounter
-	Embedder     generation.Embedder
+	Bundle        bundle.InstalledBundle
+	Runtime       bundle.ResolvedRuntime
+	Identity      profile.Identity
+	Controller    daemon.Controller
+	TokenCounter  contracts.TokenCounter
+	Embedder      generation.Embedder
+	QueryEmbedder retrieve.QueryEmbedder
+}
+
+// HostResult contains worker-only dependencies. It is used exclusively by the
+// launchd Host entrypoint; ordinary callers receive Result and cannot access
+// worker credentials or the authenticated loopback client.
+type HostResult struct {
+	Bundle   bundle.InstalledBundle
+	Runtime  bundle.ResolvedRuntime
+	Identity profile.Identity
+	Host     *service.Host
 }
 
 // Error is a sanitized construction failure. Its message deliberately omits
@@ -82,12 +95,19 @@ type dependencies struct {
 	newEndpointAllocator func() daemon.EndpointAllocator
 	newFactory           func() daemon.Factory
 	newSupervisor        func(daemon.SupervisorConfig) (daemon.Controller, error)
+	newServiceClient     func(paths.SemanticRoots, string, string, string, string) (*service.Client, error)
 }
 
 // Build constructs the production semantic-runtime dependency graph from the
 // installed bundle selected by the embedded immutable trusted manifest.
 func Build(input Input) (Result, error) {
-	return build(input, productionDependencies())
+	return buildClient(input, productionDependencies())
+}
+
+// BuildHost constructs the launchd-owned worker graph. It does not start the
+// Host or worker.
+func BuildHost(input Input) (HostResult, error) {
+	return buildHost(input, productionDependencies())
 }
 
 func productionDependencies() dependencies {
@@ -114,92 +134,134 @@ func productionDependencies() dependencies {
 		newSupervisor: func(config daemon.SupervisorConfig) (daemon.Controller, error) {
 			return daemon.NewSupervisor(config)
 		},
+		newServiceClient: service.NewClient,
 	}
 }
 
-func build(input Input, deps dependencies) (Result, error) {
-	bundleID, err := deps.trustedBundleID()
+type resolved struct {
+	bundle      bundle.InstalledBundle
+	runtime     bundle.ResolvedRuntime
+	identity    profile.Identity
+	fingerprint string
+}
+
+func buildClient(input Input, deps dependencies) (Result, error) {
+	resolved, err := resolve(input, deps)
 	if err != nil {
-		return Result{}, constructionFailure(contracts.ReasonBundleMissing)
+		return Result{}, err
 	}
-	chip, err := deps.detectChip()
-	if err != nil {
-		if errors.Is(err, bundle.ErrUnsupportedPlatform) || errors.Is(err, bundle.ErrUnsupportedChip) {
-			return Result{}, constructionFailure(contracts.ReasonPlatformUnsupported)
-		}
-		return Result{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
-	}
-	installed, err := deps.loadInstalled(input.Roots, bundleID, chip)
-	if err != nil {
-		return Result{}, constructionFailure(contracts.ReasonBundleMissing)
-	}
-	runtime, err := deps.resolveRuntime(installed, chip)
-	if err != nil {
-		if errors.Is(err, bundle.ErrUnsupportedPlatform) || errors.Is(err, bundle.ErrUnsupportedChip) || errors.Is(err, bundle.ErrRuntimeVariantUnavailable) {
-			return Result{}, constructionFailure(contracts.ReasonPlatformUnsupported)
-		}
-		return Result{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
-	}
-	identity, err := deps.deriveIdentity(installed.Manifest, runtime, input.Versions)
+	client, err := deps.newServiceClient(
+		input.Roots,
+		resolved.runtime.BundleID,
+		resolved.fingerprint,
+		resolved.runtime.SupportLevel,
+		resolved.runtime.Chip,
+	)
 	if err != nil {
 		return Result{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
 	}
-	store, err := deps.newStore(input.Roots, runtime.BundleID)
+	return Result{
+		Bundle:        resolved.bundle,
+		Runtime:       resolved.runtime,
+		Identity:      resolved.identity,
+		Controller:    client,
+		TokenCounter:  client,
+		Embedder:      client,
+		QueryEmbedder: client,
+	}, nil
+}
+
+func buildHost(input Input, deps dependencies) (HostResult, error) {
+	resolved, err := resolve(input, deps)
 	if err != nil {
-		return Result{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
+		return HostResult{}, err
 	}
-	client, err := deps.newHTTPClient(runtime.BundleID)
+	store, err := deps.newStore(input.Roots, resolved.runtime.BundleID)
 	if err != nil {
-		return Result{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
+		return HostResult{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
+	}
+	workerClient, err := deps.newHTTPClient(resolved.runtime.BundleID)
+	if err != nil {
+		return HostResult{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
 	}
 	locker, err := deps.newStartLocker(input.Roots.Runtime)
 	if err != nil {
-		return Result{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
+		return HostResult{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
 	}
-
 	runtimeSpec := daemon.RuntimeSpec{
-		BundleID:        runtime.BundleID,
-		RuntimePath:     runtime.RuntimePath,
-		ModelPath:       runtime.ModelPath,
-		WorkingDir:      installed.BundleRoot,
-		Alias:           runtime.BundleID,
+		BundleID:        resolved.runtime.BundleID,
+		RuntimePath:     resolved.runtime.RuntimePath,
+		ModelPath:       resolved.runtime.ModelPath,
+		WorkingDir:      resolved.bundle.BundleRoot,
+		Alias:           resolved.runtime.BundleID,
 		Dimension:       embeddingDimension,
-		LlamaAppVersion: runtime.RuntimeVersion,
-		RuntimeSHA256:   runtime.RuntimeSHA256,
-		ChipVariant:     runtime.Chip,
-		ModelSHA256:     runtime.ModelSHA256,
-		SupportLevel:    runtime.SupportLevel,
+		LlamaAppVersion: resolved.runtime.RuntimeVersion,
+		RuntimeSHA256:   resolved.runtime.RuntimeSHA256,
+		ChipVariant:     resolved.runtime.Chip,
+		ModelSHA256:     resolved.runtime.ModelSHA256,
+		SupportLevel:    resolved.runtime.SupportLevel,
 	}
-	verifier := deps.newRuntimeVerifier(input.Roots)
 	controller, err := deps.newSupervisor(daemon.SupervisorConfig{
 		Store:     store,
 		Runtime:   runtimeSpec,
-		Verifier:  verifier,
-		Client:    client,
+		Verifier:  deps.newRuntimeVerifier(input.Roots),
+		Client:    workerClient,
 		Allocator: deps.newEndpointAllocator(),
 		Locker:    locker,
 		Factory:   deps.newFactory(),
 	})
 	if err != nil {
-		return Result{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
+		return HostResult{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
 	}
+	_, idleTimeout, err := service.LoadConfig(input.Roots)
+	if err != nil {
+		return HostResult{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
+	}
+	host := &service.Host{
+		Roots:              input.Roots,
+		BundleID:           resolved.runtime.BundleID,
+		RuntimeFingerprint: resolved.fingerprint,
+		Controller:         controller,
+		Store:              store,
+		WorkerClient:       workerClient,
+		IdleTimeout:        idleTimeout,
+	}
+	return HostResult{Bundle: resolved.bundle, Runtime: resolved.runtime, Identity: resolved.identity, Host: host}, nil
+}
 
-	return Result{
-		Bundle:     installed,
-		Runtime:    runtime,
-		Identity:   identity,
-		Store:      store,
-		Client:     client,
-		Controller: controller,
-		TokenCounter: daemon.DaemonTokenCounter{
-			Counter:     client,
-			Credentials: store,
-		},
-		Embedder: daemon.DaemonGenerationEmbedder{
-			Embedder:    client,
-			Credentials: store,
-		},
-	}, nil
+func resolve(input Input, deps dependencies) (resolved, error) {
+	bundleID, err := deps.trustedBundleID()
+	if err != nil {
+		return resolved{}, constructionFailure(contracts.ReasonBundleMissing)
+	}
+	chip, err := deps.detectChip()
+	if err != nil {
+		if errors.Is(err, bundle.ErrUnsupportedPlatform) || errors.Is(err, bundle.ErrUnsupportedChip) {
+			return resolved{}, constructionFailure(contracts.ReasonPlatformUnsupported)
+		}
+		return resolved{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
+	}
+	installed, err := deps.loadInstalled(input.Roots, bundleID, chip)
+	if err != nil {
+		return resolved{}, constructionFailure(contracts.ReasonBundleMissing)
+	}
+	runtime, err := deps.resolveRuntime(installed, chip)
+	if err != nil {
+		if errors.Is(err, bundle.ErrUnsupportedPlatform) || errors.Is(err, bundle.ErrUnsupportedChip) || errors.Is(err, bundle.ErrRuntimeVariantUnavailable) {
+			return resolved{}, constructionFailure(contracts.ReasonPlatformUnsupported)
+		}
+		return resolved{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
+	}
+	identity, err := deps.deriveIdentity(installed.Manifest, runtime, input.Versions)
+	if err != nil {
+		return resolved{}, constructionFailure(contracts.ReasonRuntimeUnavailable)
+	}
+	return resolved{bundle: installed, runtime: runtime, identity: identity, fingerprint: runtimeFingerprint(runtime)}, nil
+}
+
+func runtimeFingerprint(runtime bundle.ResolvedRuntime) string {
+	digest := sha256.Sum256([]byte(runtime.BundleID + "\x00" + runtime.RuntimeVersion + "\x00" + runtime.RuntimeSHA256 + "\x00" + runtime.ModelSHA256 + "\x00" + runtime.Chip))
+	return hex.EncodeToString(digest[:])
 }
 
 func constructionFailure(code contracts.ReasonCode) error {

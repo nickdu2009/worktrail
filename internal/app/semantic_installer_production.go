@@ -3,12 +3,15 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 
 	"github.com/nickdu2009/worktrail/internal/paths"
 	"github.com/nickdu2009/worktrail/internal/semantic/bundle"
 	"github.com/nickdu2009/worktrail/internal/semantic/composition"
 	"github.com/nickdu2009/worktrail/internal/semantic/contracts"
 	"github.com/nickdu2009/worktrail/internal/semantic/daemon"
+	"github.com/nickdu2009/worktrail/internal/semantic/service"
 )
 
 // Immutable Hugging Face artifact URLs currently redirect to a delivery host.
@@ -34,6 +37,7 @@ type semanticInstallerProductionDependencies struct {
 	buildInstaller  func(paths.SemanticRoots) (bundle.Installer, error)
 	install         func(context.Context, bundle.Installer, bundle.Manifest, string) (bundle.InstallResult, error)
 	installAndCheck func(context.Context, bundle.Installer, bundle.Manifest, string, bundle.InstallCheck) (bundle.InstallResult, error)
+	installService  func(context.Context, paths.SemanticRoots) (func(context.Context) error, error)
 	selfCheck       func(context.Context, paths.SemanticRoots) error
 }
 
@@ -64,7 +68,8 @@ func productionSemanticInstallerDeps() semanticInstallerProductionDependencies {
 		installAndCheck: func(ctx context.Context, installer bundle.Installer, manifest bundle.Manifest, chip string, check bundle.InstallCheck) (bundle.InstallResult, error) {
 			return installer.InstallAndCheck(ctx, manifest, chip, check)
 		},
-		selfCheck: experimentalSemanticSelfCheck,
+		installService: installSemanticService,
+		selfCheck:      experimentalSemanticSelfCheck,
 	}
 }
 
@@ -94,7 +99,20 @@ func (i productionSemanticInstaller) Install(ctx context.Context, _ paths.Env) (
 			return SemanticInstallInfo{}, semanticInstallerError(contracts.ReasonRuntimeUnavailable, ErrSemanticInstallerFailed)
 		}
 		if _, err := i.deps.installAndCheck(ctx, installer, manifest, chip, func(checkCtx context.Context, _ bundle.InstallResult) error {
-			return i.deps.selfCheck(checkCtx, roots)
+			if i.deps.installService == nil {
+				return bundle.RetainBundle(errors.New("semantic service installer is unavailable"))
+			}
+			rollback, err := i.deps.installService(checkCtx, roots)
+			if err != nil {
+				return bundle.RetainBundle(err)
+			}
+			if err := i.deps.selfCheck(checkCtx, roots); err != nil {
+				if rollbackErr := rollback(context.WithoutCancel(checkCtx)); rollbackErr != nil {
+					return bundle.RetainBundle(rollbackErr)
+				}
+				return err
+			}
+			return nil
 		}); err != nil {
 			return SemanticInstallInfo{}, semanticInstallerError(contracts.ReasonRuntimeUnavailable, ErrSemanticInstallerFailed)
 		}
@@ -103,7 +121,44 @@ func (i productionSemanticInstaller) Install(ctx context.Context, _ paths.Env) (
 	if _, err := i.deps.install(ctx, installer, manifest, chip); err != nil {
 		return SemanticInstallInfo{}, semanticInstallerError(contracts.ReasonRuntimeUnavailable, ErrSemanticInstallerFailed)
 	}
+	if i.deps.installService == nil {
+		return SemanticInstallInfo{}, semanticInstallerError(contracts.ReasonServiceUnavailable, ErrSemanticInstallerFailed)
+	}
+	if _, err := i.deps.installService(ctx, roots); err != nil {
+		return SemanticInstallInfo{}, semanticInstallerError(contracts.ReasonServiceUnavailable, ErrSemanticInstallerFailed)
+	}
 	return semanticInstallInfo(chip, supportLevel), nil
+}
+
+func installSemanticService(ctx context.Context, roots paths.SemanticRoots) (func(context.Context) error, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return nil, err
+	}
+	manager, err := service.NewManager(roots)
+	if err != nil {
+		return nil, err
+	}
+	rollback, err := manager.InstallReversible(ctx, executable)
+	if err != nil {
+		return nil, err
+	}
+	client, err := service.NewClient(roots, "", "", "", "")
+	if err != nil {
+		_ = rollback(context.WithoutCancel(ctx))
+		return nil, err
+	}
+	if err := client.Activate(ctx); err != nil {
+		if rollbackErr := rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
+			return nil, bundle.RetainBundle(rollbackErr)
+		}
+		return nil, err
+	}
+	return rollback, nil
 }
 
 func semanticInstallerError(code contracts.ReasonCode, cause error) error {
@@ -127,10 +182,8 @@ func semanticInstallInfo(chip, supportLevel string) SemanticInstallInfo {
 	}
 }
 
-// experimentalSemanticSelfCheck starts the just-installed experimental runtime and
-// exercises the production authenticated loopback protocol. A fully passing
-// check preserves an existing healthy daemon; a failed check cleans a daemon
-// only after Start has authenticated and verified it.
+// experimentalSemanticSelfCheck exercises the Host protocol and worker through
+// the same client contracts used by search and rebuild.
 func experimentalSemanticSelfCheck(ctx context.Context, roots paths.SemanticRoots) (err error) {
 	composed, err := composition.Build(composition.Input{
 		Roots:    roots,
@@ -140,42 +193,22 @@ func experimentalSemanticSelfCheck(ctx context.Context, roots paths.SemanticRoot
 		return err
 	}
 
-	created := false
-	managed := false
 	passed := false
 	defer func() {
-		if cleanupErr := cleanupExperimentalSelfCheck(context.WithoutCancel(ctx), created || (managed && !passed), composed.Controller, composed.Store.Remove); cleanupErr != nil {
+		if cleanupErr := cleanupExperimentalSelfCheck(context.WithoutCancel(ctx), !passed, composed.Controller); cleanupErr != nil {
 			err = bundle.RetainBundle(cleanupErr)
 		}
 	}()
 
-	report, err := composed.Controller.Start(ctx)
-	if err != nil {
+	if _, err := composed.Controller.Start(ctx); err != nil {
 		return err
 	}
-	created = report.Started
-	managed = true
-	descriptor, err := composed.Store.Load()
-	if err != nil {
-		return err
-	}
-	key, err := composed.Store.APIKey()
-	if err != nil {
-		return err
-	}
-	identity, err := composed.Client.Readiness(ctx, descriptor.Endpoint, key)
-	if err != nil {
-		return err
-	}
-	if identity.Alias != composed.Runtime.BundleID || identity.Dimension != bundle.BGEM3EmbeddingDimension {
-		return errors.New("semantic runtime self-check identity mismatch")
-	}
-	tokens, err := composed.Client.CountTokens(ctx, descriptor.Endpoint, key, "worktrail experimental runtime self-check")
+	tokens, err := composed.TokenCounter.CountTokens(ctx, "worktrail experimental runtime self-check")
 	if err != nil || tokens < 1 {
 		return errors.New("semantic runtime self-check tokenization failed")
 	}
-	embeddings, err := composed.Client.Embed(ctx, descriptor.Endpoint, key, composed.Runtime.BundleID, []string{"worktrail experimental runtime self-check"})
-	if err != nil || len(embeddings) != 1 {
+	embedding, err := composed.Embedder.Embed(ctx, "worktrail experimental runtime self-check")
+	if err != nil || len(embedding) != bundle.BGEM3EmbeddingDimension {
 		return errors.New("semantic runtime self-check embedding failed")
 	}
 	passed = true
@@ -186,13 +219,10 @@ func cleanupExperimentalSelfCheck(
 	ctx context.Context,
 	cleanup bool,
 	controller daemon.Controller,
-	remove func() error,
 ) error {
 	if !cleanup {
 		return nil
 	}
-	if _, err := controller.Stop(ctx); err != nil {
-		return err
-	}
-	return remove()
+	_, err := controller.Stop(ctx)
+	return err
 }

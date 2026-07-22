@@ -28,14 +28,31 @@ type Controller interface {
 
 // Report is the machine-readable result of a semantic runtime operation.
 type Report struct {
-	Schema       string               `json:"schema"`
-	Operation    string               `json:"operation"`
-	State        string               `json:"state"`
-	Reason       contracts.ReasonCode `json:"reason"`
-	NextStep     string               `json:"next_step"`
-	SupportLevel string               `json:"support_level,omitempty"`
-	Chip         string               `json:"chip,omitempty"`
-	Warning      string               `json:"warning,omitempty"`
+	Schema                   string               `json:"schema"`
+	Operation                string               `json:"operation"`
+	State                    string               `json:"state"`
+	Reason                   contracts.ReasonCode `json:"reason"`
+	NextStep                 string               `json:"next_step"`
+	SupportLevel             string               `json:"support_level,omitempty"`
+	Chip                     string               `json:"chip,omitempty"`
+	Warning                  string               `json:"warning,omitempty"`
+	ServiceRegistrationState string               `json:"service_registration_state,omitempty"`
+	ServiceDomain            string               `json:"service_domain,omitempty"`
+	HostProtocolVersion      int                  `json:"host_protocol_version,omitempty"`
+	HostBuildID              string               `json:"host_build_id,omitempty"`
+	HostState                string               `json:"host_state,omitempty"`
+	HostPID                  int                  `json:"host_pid,omitempty"`
+	HostStartTime            string               `json:"host_start_time,omitempty"`
+	WorkerState              string               `json:"worker_state,omitempty"`
+	ActiveBundleID           string               `json:"active_bundle_id,omitempty"`
+	WorkerPID                int                  `json:"worker_pid,omitempty"`
+	WorkerStartTime          string               `json:"worker_start_time,omitempty"`
+	ActiveRequests           int                  `json:"active_requests,omitempty"`
+	LastRequestCompletedAt   string               `json:"last_request_completed_at,omitempty"`
+	IdleTimeout              string               `json:"idle_timeout,omitempty"`
+	IdleDeadline             string               `json:"idle_deadline,omitempty"`
+	ColdStartLatency         string               `json:"cold_start_latency,omitempty"`
+	LastFailureCode          string               `json:"last_failure_code,omitempty"`
 	// Started reports whether this Start request created the daemon. It is an
 	// in-process lifecycle signal, not part of the public status contract.
 	Started bool `json:"-"`

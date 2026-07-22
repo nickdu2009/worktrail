@@ -185,6 +185,38 @@ func TestStoreRemoveRestoresDescriptorWhenSecondDeleteFails(t *testing.T) {
 	}
 }
 
+func TestStoreQuarantineMovesDescriptorAndKeyOutOfActiveRuntime(t *testing.T) {
+	store := testStore(t)
+	if err := store.Save(Descriptor{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GenerateAPIKey(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Quarantine(); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{store.StatePath(), store.APIKeyPath()} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("active runtime file %s still exists: %v", path, err)
+		}
+	}
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(store.StatePath()), "quarantine", "identity-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("quarantine directories = %v, want one", matches)
+	}
+	assertMode(t, matches[0], 0o700)
+	for _, name := range []string{stateFileName, apiKeyFileName} {
+		if _, err := os.Stat(filepath.Join(matches[0], name)); err != nil {
+			t.Errorf("quarantined file %s: %v", name, err)
+		}
+	}
+}
+
 func testStore(t *testing.T) Store {
 	t.Helper()
 	root := t.TempDir()

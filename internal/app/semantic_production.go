@@ -258,12 +258,9 @@ func prepareProductionSemanticRuntime(
 	}
 
 	facade := retrieve.Facade{
-		Policy:   retrieve.DefaultPolicy(),
-		Backends: backends,
-		Embedder: retrieve.DaemonQueryEmbedder{
-			Embedder:    composed.Client,
-			Credentials: composed.Store,
-		},
+		Policy:                retrieve.DefaultPolicy(),
+		Backends:              backends,
+		Embedder:              composed.QueryEmbedder,
 		Gate:                  activeGenerationGate{},
 		LegacyLexicalFallback: multiScopeLegacyLexicalFallback(legacyAdapters).Recall,
 	}

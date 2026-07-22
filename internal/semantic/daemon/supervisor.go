@@ -198,6 +198,9 @@ func (s *Supervisor) Start(ctx context.Context) (Report, error) {
 	if err := s.verifyRuntime(ctx); err != nil {
 		return operationFailure("start", err)
 	}
+	if err := s.validateRecordedState(); err != nil {
+		return operationFailure("start", err)
+	}
 
 	identity, descriptor, err := s.readiness(ctx)
 	if err == nil {
@@ -226,6 +229,9 @@ func (s *Supervisor) Start(ctx context.Context) (Report, error) {
 	if !isRecoverableTransport(err) {
 		return operationFailure("start", err)
 	}
+	if err := s.recoverCrashedWorker(); err != nil {
+		return operationFailure("start", err)
+	}
 
 	if _, err := s.start(ctx); err != nil {
 		return operationFailure("start", err)
@@ -233,6 +239,42 @@ func (s *Supervisor) Start(ctx context.Context) (Report, error) {
 	report := readyReport("start")
 	report.Started = true
 	return report, nil
+}
+
+func (s *Supervisor) validateRecordedState() error {
+	if _, err := s.config.Store.Load(); errors.Is(err, ErrDescriptorNotFound) {
+		return nil
+	} else if err != nil {
+		_ = s.config.Store.Quarantine()
+		return &Error{Code: contracts.ReasonRuntimeIdentityMismatch, Message: "semantic runtime state identity mismatch"}
+	}
+	if _, err := s.config.Store.APIKey(); err != nil {
+		_ = s.config.Store.Quarantine()
+		return &Error{Code: contracts.ReasonRuntimeIdentityMismatch, Message: "semantic runtime state identity mismatch"}
+	}
+	return nil
+}
+
+func (s *Supervisor) recoverCrashedWorker() error {
+	descriptor, err := s.config.Store.Load()
+	if errors.Is(err, ErrDescriptorNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	process, err := s.config.Factory.Open(Identity{PID: descriptor.PID, StartedAt: descriptor.StartTime})
+	if err == nil {
+		_ = process.Release()
+		return errors.New("semantic worker is alive but unavailable")
+	}
+	if errors.Is(err, ErrProcessNotFound) {
+		return s.config.Store.Remove()
+	}
+	if quarantineErr := s.config.Store.Quarantine(); quarantineErr != nil {
+		return quarantineErr
+	}
+	return &Error{Code: contracts.ReasonRuntimeIdentityMismatch, Message: "semantic runtime process identity mismatch"}
 }
 
 func (s *Supervisor) Stop(ctx context.Context) (Report, error) {
@@ -274,9 +316,29 @@ func (s *Supervisor) Stop(ctx context.Context) (Report, error) {
 		return operationFailure("stop", err)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, s.config.StopWait)
-	defer cancel()
+
 	if err := process.WaitExited(waitCtx); err != nil {
-		return operationFailure("stop", fmt.Errorf("wait for semantic process exit: %w", err))
+		cancel()
+		if ctx.Err() != nil {
+			return operationFailure("stop", fmt.Errorf("wait for semantic process exit: %w", err))
+		}
+		// Re-open the exact PID/start-time identity before escalating. Factory.Open
+		// fails closed if the PID has been reused or cannot be proven.
+		killProcess, openErr := s.config.Factory.Open(Identity{PID: descriptor.PID, StartedAt: descriptor.StartTime})
+		if openErr != nil {
+			return operationFailure("stop", openErr)
+		}
+		defer killProcess.Release()
+		if killErr := killProcess.Signal(killSignal); killErr != nil {
+			return operationFailure("stop", killErr)
+		}
+		killCtx, killCancel := context.WithTimeout(context.Background(), s.config.StopWait)
+		defer killCancel()
+		if killErr := killProcess.WaitExited(killCtx); killErr != nil {
+			return operationFailure("stop", fmt.Errorf("wait for killed semantic process exit: %w", killErr))
+		}
+	} else {
+		cancel()
 	}
 	if err := s.config.Store.Remove(); err != nil {
 		return operationFailure("stop", err)

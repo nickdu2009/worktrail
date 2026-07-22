@@ -56,6 +56,26 @@ func (r SemanticRoots) Log(bundleID string) (string, error) {
 	return SafeJoin(r.Logs, bundleID+".log")
 }
 
+func (r SemanticRoots) ServiceRuntime() string {
+	return filepath.Join(r.Cache, "runtime")
+}
+
+func (r SemanticRoots) ServiceSocket() string {
+	return filepath.Join(r.ServiceRuntime(), "semantic-host.sock")
+}
+
+func (r SemanticRoots) ServiceActivationLock() string {
+	return filepath.Join(r.ServiceRuntime(), "activation.lock")
+}
+
+func (r SemanticRoots) ServiceConfig() string {
+	return filepath.Join(r.Runtime, "service.json")
+}
+
+func (r SemanticRoots) ServiceMetadata() string {
+	return filepath.Join(r.Runtime, "service-metadata.json")
+}
+
 func validateBundleID(bundleID string) error {
 	if bundleID == "" || strings.TrimSpace(bundleID) != bundleID ||
 		filepath.Base(bundleID) != bundleID || bundleID == "." || bundleID == ".." {

@@ -1,6 +1,6 @@
 ---worktrail
 {
-  "created_at": "2026-07-17T02:52:11.191485Z",
+  "created_at": "2026-07-22T02:55:25.879962Z",
   "id": "ADR-20260715-local-semantic-runtime-bundle",
   "lifecycle": "current",
   "schema": "worktrail.knowledge.v1",
@@ -9,7 +9,7 @@
   "status": "accepted",
   "title": "Use a Worktrail-Managed llama.app BGE-M3 Q8 Bundle",
   "type": "decision",
-  "updated_at": "2026-07-21T02:43:50.4689Z"
+  "updated_at": "2026-07-22T02:55:25.879962Z"
 }
 ---
 
@@ -34,7 +34,7 @@ Experimental variants make no compatible or verified performance, privacy, minim
 
 Core init remains network-free and semantic installation may be triggered only by the explicit `worktrail init --semantic` flag. `worktrail init --no-semantic` explicitly disables semantic installation. Worktrail downloads only immutable manifest URLs, verifies compressed and final sizes and SHA-256 values, decompresses llama-app.zst in process with the pinned pure-Go zstd package, stages the complete bundle, and atomically renames the verified directory. It never executes a remote installer, compiles llama.cpp, or changes PATH.
 
-Semantic operations may start llama serve as a detached current-user process. It binds only to authenticated loopback, uses the bundle ID as alias, loads only the verified local GGUF, disables unwanted UI, request-content logging, metrics, and network behavior, and uses API-first recovery. Worktrail verifies runtime/model files before launch and verifies API alias, dimension, and response contracts without assuming the API exposes file SHA-256. Unknown processes are never killed.
+Semantic operations use the user-level Semantic Host lifecycle defined by ADR-20260722-launchd-managed-semantic-host. The Host binds each verified llama worker only to authenticated loopback, uses the bundle ID as alias, loads only the verified local GGUF, disables unwanted UI, request-content logging, metrics, and network behavior, and uses API-first recovery. Worktrail verifies runtime/model files before launch and verifies API alias, dimension, and response contracts without assuming the API exposes file SHA-256. Unknown processes are never killed. A short-lived CLI must not directly own a detached semantic worker.
 
 ## Consequences
 
@@ -43,15 +43,18 @@ Semantic operations may start llama serve as a detached current-user process. It
 - M2-M5 users can opt into pinned, locally checked runtime artifacts without a false production-support claim.
 - M1 verification and its safety/performance envelope remain unchanged.
 - Artifact integrity, loopback authentication, and safe lexical degradation remain mandatory on every chip.
+- Runtime lifecycle ownership has one formal source in ADR-20260722.
 
 ### Negative
 
 - M2-M5 users receive an explicit experimental warning and no performance or compatibility guarantee.
 - Runtime support levels, status output, release acceptance, and documentation must distinguish experimental from verified.
 - A manifest-level tier change creates a new bundle ID and requires reinstall/rebuild.
+- Semantic installation also maintains a user-level service registration on supported Darwin sessions.
 
 ## Links
 
+- Related: ADR-20260722-launchd-managed-semantic-host
 - Related: architecture/local-semantic-recall.md
 - Related: requirements/release-acceptance.md
 - Related: validation/release-validation-checklist.md

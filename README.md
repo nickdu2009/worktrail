@@ -16,12 +16,14 @@ Hard boundaries:
 
 Formal knowledge is Markdown with JSON frontmatter. Local indexes are rebuildable acceleration data, not source of truth.
 
-Opt-in local semantic recall is in-tree for v1.0.0 (formal release still gated).
-Its only runtime exception is an explicitly installed, authenticated,
-loopback-only llama.app process. M1 is `verified`; M2–M5 are opt-in
-`experimental`. When semantic recall is unavailable, lexical SQLite + FTS5
-remains the path. Install with `worktrail init --semantic`, then
-`worktrail semantic rebuild --scope all`. See
+本地语义召回是显式启用能力（正式发布仍受 release gate 约束）。
+`worktrail init --semantic` 会安装受信 bundle，并在 macOS 当前图形登录用户的
+`launchd` 域注册一个用户级 Semantic Host。Host 不是通用常驻 daemon：CLI、
+Codex 和 Cursor 通过私有 UDS 复用同一个 Host/worker；Host 按需启动，默认空闲
+10 分钟后停止 worker 并退出。M1 为 `verified`，M2–M5 为 opt-in
+`experimental`。语义能力不可用时，`auto` 公开降级原因并继续使用 SQLite +
+FTS5 lexical 路径。安装后运行 `worktrail semantic rebuild --scope all`。
+详见
 [`docs/manual/INSTALLATION.md`](docs/manual/INSTALLATION.md) and
 [`.worktrail/architecture/local-semantic-recall.md`](.worktrail/architecture/local-semantic-recall.md).
 

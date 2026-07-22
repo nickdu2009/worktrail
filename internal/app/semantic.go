@@ -16,6 +16,7 @@ import (
 	"github.com/nickdu2009/worktrail/internal/semantic/contracts"
 	"github.com/nickdu2009/worktrail/internal/semantic/daemon"
 	"github.com/nickdu2009/worktrail/internal/semantic/generation"
+	"github.com/nickdu2009/worktrail/internal/semantic/service"
 )
 
 func runSemantic(ctx context.Context, ioctx IO, args []string) error {
@@ -25,17 +26,36 @@ func runSemantic(ctx context.Context, ioctx IO, args []string) error {
 type semanticDependencies struct {
 	lifecycle semanticLifecycleDependencies
 	rebuild   semanticRebuildDependencies
+	host      func(context.Context, paths.SemanticRoots) error
+	watch     func(context.Context) error
+	uninstall func(context.Context, paths.SemanticRoots) error
 }
 
 type semanticLifecycleDependencies struct {
 	discoverRoots func() (paths.SemanticRoots, error)
 	build         func(composition.Input) (composition.Result, error)
+	serviceClient func(paths.SemanticRoots) (daemon.Controller, error)
 }
 
 func productionSemanticDependencies() semanticDependencies {
 	return semanticDependencies{
 		lifecycle: productionSemanticLifecycleDependencies(),
 		rebuild:   productionSemanticRebuildDependencies(),
+		host: func(ctx context.Context, roots paths.SemanticRoots) error {
+			composed, err := composition.BuildHost(composition.Input{Roots: roots, Versions: composition.DefaultSubsystemVersions()})
+			if err != nil {
+				return err
+			}
+			return composed.Host.Run(ctx)
+		},
+		watch: daemon.RunWorkerWatch,
+		uninstall: func(ctx context.Context, roots paths.SemanticRoots) error {
+			manager, err := service.NewManager(roots)
+			if err != nil {
+				return err
+			}
+			return manager.Remove(ctx)
+		},
 	}
 }
 
@@ -43,10 +63,33 @@ func productionSemanticLifecycleDependencies() semanticLifecycleDependencies {
 	return semanticLifecycleDependencies{
 		discoverRoots: paths.DiscoverSemanticRoots,
 		build:         composition.Build,
+		serviceClient: func(roots paths.SemanticRoots) (daemon.Controller, error) {
+			return service.NewClient(roots, "", "", "", "")
+		},
 	}
 }
 
 func runSemanticWithDependencies(ctx context.Context, ioctx IO, args []string, deps semanticDependencies) error {
+	if semanticWorkerWatchCommand(args) {
+		if deps.watch == nil {
+			return semanticInstallerError(contracts.ReasonRuntimeUnavailable, nil)
+		}
+		return deps.watch(ctx)
+	}
+	if semanticHostCommand(args) {
+		roots, err := deps.lifecycle.discoverRoots()
+		if err != nil || deps.host == nil {
+			return semanticInstallerError(contracts.ReasonRuntimeUnavailable, err)
+		}
+		return deps.host(ctx, roots)
+	}
+	if semanticUninstallCommand(args) {
+		roots, err := deps.lifecycle.discoverRoots()
+		if err != nil || deps.uninstall == nil {
+			return semanticInstallerError(contracts.ReasonRuntimeUnavailable, err)
+		}
+		return deps.uninstall(ctx, roots)
+	}
 	command, err := parseSemanticCommand(args)
 	if err != nil {
 		// Keep parsing and usage errors independent from the local runtime.
@@ -56,6 +99,10 @@ func runSemanticWithDependencies(ctx context.Context, ioctx IO, args []string, d
 		return runSemanticRebuild(ctx, ioctx, args, deps.rebuild)
 	}
 	return runSemanticWithLifecycle(ctx, ioctx, args, command, deps.lifecycle)
+}
+
+func semanticWorkerWatchCommand(args []string) bool {
+	return len(args) == 2 && args[0] == "worker-watch" && args[1] == "--launchd"
 }
 
 func runSemanticWithLifecycle(
@@ -69,6 +116,13 @@ func runSemanticWithLifecycle(
 	if err != nil {
 		return failSemanticLifecycle(ioctx, command, args, contracts.ReasonRuntimeUnavailable)
 	}
+	if command.name != "start" && deps.serviceClient != nil {
+		controller, err := deps.serviceClient(roots)
+		if err != nil {
+			return failSemanticLifecycle(ioctx, command, args, semanticLifecycleReason(err))
+		}
+		return runSemanticWithController(ctx, ioctx, args, controller)
+	}
 	composed, err := deps.build(composition.Input{
 		Roots:    roots,
 		Versions: composition.DefaultSubsystemVersions(),
@@ -80,6 +134,14 @@ func runSemanticWithLifecycle(
 		return failSemanticLifecycle(ioctx, command, args, contracts.ReasonRuntimeUnavailable)
 	}
 	return runSemanticWithController(ctx, ioctx, args, composed.Controller)
+}
+
+func semanticHostCommand(args []string) bool {
+	return len(args) == 2 && args[0] == "host" && args[1] == "--launchd"
+}
+
+func semanticUninstallCommand(args []string) bool {
+	return len(args) == 3 && args[0] == "service" && args[1] == "uninstall" && args[2] == "--confirm"
 }
 
 func failSemanticLifecycle(ioctx IO, command semanticCommand, args []string, code contracts.ReasonCode) error {
@@ -121,7 +183,7 @@ func semanticLifecycleReason(err error) contracts.ReasonCode {
 
 func semanticLifecycleMessage(code contracts.ReasonCode) string {
 	switch code {
-	case contracts.ReasonBundleMissing:
+	case contracts.ReasonBundleMissing, contracts.ReasonServiceNotInstalled, contracts.ReasonServiceIncompatible:
 		return "worktrail init --semantic"
 	case contracts.ReasonPlatformUnsupported:
 		return "semantic runtime is unsupported on this platform"
@@ -242,7 +304,7 @@ func semanticErrorFormat(args []string) string {
 }
 
 func semanticUsageError(args []string) error {
-	const usage = "usage: worktrail semantic <status|start|stop|restart> [--format text|json]\n       worktrail semantic rebuild --scope project|user|all [--format text|json]"
+	const usage = "usage: worktrail semantic <status|start|stop|restart> [--format text|json]\n       worktrail semantic rebuild --scope project|user|all [--format text|json]\n       worktrail semantic service uninstall --confirm"
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
@@ -276,6 +338,50 @@ func writeSemanticReport(ioctx IO, format string, report daemon.Report) error {
 	}
 	if report.Warning != "" {
 		if _, err := fmt.Fprintf(ioctx.Out, "warning\t%s\n", report.Warning); err != nil {
+			return err
+		}
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"service_registration_state", report.ServiceRegistrationState},
+		{"service_domain", report.ServiceDomain},
+		{"host_build_id", report.HostBuildID},
+		{"host_state", report.HostState},
+		{"host_start_time", report.HostStartTime},
+		{"worker_state", report.WorkerState},
+		{"active_bundle_id", report.ActiveBundleID},
+		{"worker_start_time", report.WorkerStartTime},
+		{"last_request_completed_at", report.LastRequestCompletedAt},
+		{"idle_timeout", report.IdleTimeout},
+		{"idle_deadline", report.IdleDeadline},
+		{"cold_start_latency", report.ColdStartLatency},
+		{"last_failure_code", report.LastFailureCode},
+	} {
+		if field.value != "" {
+			if _, err := fmt.Fprintf(ioctx.Out, "%s\t%s\n", field.name, field.value); err != nil {
+				return err
+			}
+		}
+	}
+	if report.HostProtocolVersion != 0 {
+		if _, err := fmt.Fprintf(ioctx.Out, "host_protocol_version\t%d\n", report.HostProtocolVersion); err != nil {
+			return err
+		}
+	}
+	if report.WorkerPID != 0 {
+		if _, err := fmt.Fprintf(ioctx.Out, "worker_pid\t%d\n", report.WorkerPID); err != nil {
+			return err
+		}
+	}
+	if report.HostPID != 0 {
+		if _, err := fmt.Fprintf(ioctx.Out, "host_pid\t%d\n", report.HostPID); err != nil {
+			return err
+		}
+	}
+	if report.ActiveRequests != 0 {
+		if _, err := fmt.Fprintf(ioctx.Out, "active_requests\t%d\n", report.ActiveRequests); err != nil {
 			return err
 		}
 	}

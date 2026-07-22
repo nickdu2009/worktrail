@@ -115,10 +115,7 @@ func collectRetrievalRankings(ctx context.Context, labelsPath, scope string) (se
 	}
 
 	policy := retrieve.DefaultPolicy()
-	embedder := retrieve.DaemonQueryEmbedder{
-		Embedder:    composed.Client,
-		Credentials: composed.Store,
-	}
+	embedder := composed.QueryEmbedder
 	out := semanticeval.RetrievalRankings{
 		Schema: semanticeval.RetrievalRankingsSchema,
 	}
